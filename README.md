@@ -1,6 +1,54 @@
-# Ulak
+<p align="center">
+  <img src="web/icon-192.png" alt="Ulak icon" width="88">
+</p>
 
-Ulak is a local PWA for viewing and controlling Herdr agent panes. Python with FastAPI and Uvicorn keeps the async Unix-socket client, SSE stream, and JSON API in one small backend; the frontend has no build step.
+<h1 align="center">Ulak</h1>
+
+<p align="center">
+  <strong>Your coding agents, in your pocket.</strong><br>
+  Approve a command, answer a question, send a nudge. Then get back to your coffee.
+</p>
+
+Ulak is a small web app (PWA) that turns your [Herdr](https://herdr.dev) agent panes (Claude Code, Codex, Antigravity and plain terminals) into cards and conversations on your phone. Agents keep running on your computer. Ulak is reachable only through your own [Tailscale](https://tailscale.com) network: no account, no relay server, no app store, no build step.
+
+<p align="center">
+  <img src="docs/screenshots/home.png" alt="Home: sessions grouped by what needs you" width="260">
+  <img src="docs/screenshots/approval.png" alt="A session with an approval waiting" width="260">
+  <img src="docs/screenshots/destructive.png" alt="A destructive command flagged for a second confirmation" width="260">
+  <br>
+  <sub>Demo data from <code>tools/demo_server.py</code>. The interface is currently in Turkish; an English version is planned.</sub>
+</p>
+
+## What it does
+
+- **See what needs you.** Sessions are grouped as Needs you, Working, Just finished and Idle. Pin the ones you care about; pins live on the server, so every device shows the same list.
+- **Approve from the card.** A normal approval takes one tap. The decision is bound to the exact screen you saw: if the prompt changed in the meantime, the server refuses (409) instead of approving something else.
+- **Destructive commands need two steps.** `rm`, `git push`, `ssh`, `kubectl delete`, cloud CLIs and your own patterns show the full command and ask for a confirmation token on a second request. Anything too long to fit on screen can only be denied.
+- **Read it like a chat.** Claude Code transcripts become messages and tool cards; other agents are parsed from the screen.
+- **Answer questions and menus.** Single and multi-select questions, trust dialogs, raw keys when you need them.
+- **Push notifications.** Standard Web Push with your own VAPID keys. Nothing goes through a third-party service, and nothing fires while the app is open on screen.
+- **Start and close sessions** from the phone (closing is two steps).
+
+## Try it in one minute
+
+No Herdr needed, no setup:
+
+```sh
+python3 -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt
+python tools/demo_server.py      # http://127.0.0.1:8766
+```
+
+## How it compares
+
+| | Ulak | [HerdrChat](https://github.com/cobanov/herdrchat) |
+|---|---|---|
+| Form | PWA served from your machine | native iOS / Android app |
+| Connection | Tailscale Serve, identity checked per request | SSH |
+| Install | add to home screen | App Store |
+| Approvals | screen-bound, two-step for destructive commands | approval choices |
+
+They solve the same problem from different sides. HerdrChat is the polished native route; Ulak is the one you can read in an afternoon and run without installing anything on the phone.
 
 ## Architecture
 
