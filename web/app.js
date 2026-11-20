@@ -349,6 +349,15 @@ if (window.visualViewport) {
     document.documentElement.classList.toggle('kb', kb);
     // iOS leaves its ^ v ✓ accessory bar out of visualViewport; reserve room for it
     document.documentElement.style.setProperty('--vvh', (visualViewport.height - (kb && document.documentElement.classList.contains('ios') ? 52 : 0)) + 'px'); window.scrollTo(0, 0); const b = $('#messages'); if (!$('#session').hidden && document.activeElement === ta) b.scrollTop = b.scrollHeight; };
+  if (/[?&]debug=1/.test(location.search)) {  // on-screen metrics for diagnosing keyboard gaps
+    const d = document.createElement('pre');
+    d.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;margin:0;padding:4px 6px;font:11px/1.3 monospace;background:#000c;color:#0f0;pointer-events:none;white-space:pre-wrap';
+    document.body.appendChild(d);
+    const dbg = () => { const c = $('#composer'), r = c && c.getBoundingClientRect(); d.textContent =
+      `vv.h=${visualViewport.height.toFixed(0)} vv.top=${visualViewport.offsetTop.toFixed(0)} inner=${innerHeight} screen=${screen.height} base=${baseH.toFixed(0)}\n` +
+      `composer.bottom=${r ? r.bottom.toFixed(0) : '-'} --vvh=${document.documentElement.style.getPropertyValue('--vvh')} cls=${document.documentElement.className}`; };
+    visualViewport.addEventListener('resize', dbg); visualViewport.addEventListener('scroll', dbg); document.addEventListener('focusin', () => setTimeout(dbg, 300)); setInterval(dbg, 500); dbg();
+  }
   visualViewport.addEventListener('resize', fit); visualViewport.addEventListener('scroll', () => window.scrollTo(0, 0)); fit();
 }
 
