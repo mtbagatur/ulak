@@ -12,11 +12,12 @@
 Ulak is a small web app (PWA) that turns your [Herdr](https://herdr.dev) agent panes (Claude Code, Codex, Antigravity and plain terminals) into cards and conversations on your phone. Agents keep running on your computer. Ulak is reachable only through your own [Tailscale](https://tailscale.com) network: no account, no relay server, no app store, no build step.
 
 <p align="center">
-  <img src="docs/screenshots/home.png" alt="Home: sessions grouped by what needs you" width="260">
-  <img src="docs/screenshots/approval.png" alt="A session with an approval waiting" width="260">
-  <img src="docs/screenshots/destructive.png" alt="A destructive command flagged for a second confirmation" width="260">
+  <img src="docs/screenshots/en/home.png" alt="Home: sessions grouped by what needs you, with usage limits on top" width="195">
+  <img src="docs/screenshots/en/approval.png" alt="A session with an approval waiting" width="195">
+  <img src="docs/screenshots/en/destructive.png" alt="A destructive command flagged for a second confirmation" width="195">
+  <img src="docs/screenshots/en/limits.png" alt="Usage limits sheet" width="195">
   <br>
-  <sub>Demo data from <code>tools/demo_server.py</code>. The interface is currently in Turkish; an English version is planned.</sub>
+  <sub>Demo data from <code>tools/demo_server.py</code>. English and Turkish are built in; the app follows your phone's language and has a TR/EN switch. <a href="docs/screenshots/tr">Turkish screenshots</a>.</sub>
 </p>
 
 ## What it does
@@ -26,7 +27,9 @@ Ulak is a small web app (PWA) that turns your [Herdr](https://herdr.dev) agent p
 - **Destructive commands need two steps.** `rm`, `git push`, `ssh`, `kubectl delete`, cloud CLIs and your own patterns show the full command and ask for a confirmation token on a second request. Anything too long to fit on screen can only be denied.
 - **Read it like a chat.** Claude Code transcripts become messages and tool cards; other agents are parsed from the screen.
 - **Answer questions and menus.** Single and multi-select questions, trust dialogs, raw keys when you need them.
-- **Push notifications.** Standard Web Push with your own VAPID keys. Nothing goes through a third-party service, and nothing fires while the app is open on screen.
+- **Push notifications.** Standard Web Push with your own VAPID keys. Nothing goes through a third-party service, nothing fires while the app is open on screen, and quick turns (under two minutes by default) do not buzz your phone when they finish.
+- **See your limits.** A strip on the home screen shows the tightest usage window per provider (5-hour and 7-day), turns orange and red as it fills, and opens to resets and staleness. Point it at the files your own scripts already write.
+- **English and Turkish.** Follows the phone's language; switch with the TR/EN button. Push text follows the language of each device.
 - **Start and close sessions** from the phone (closing is two steps).
 
 ## Try it in one minute
@@ -66,7 +69,7 @@ They solve the same problem from different sides. HerdrChat is the polished nati
 - `POST /api/sessions/{pane}/approve`: approve/always/deny, bound to the screen fingerprint (409 if it changed; destructive = two steps).
 - `POST /api/sessions/{pane}/choose`: pick a menu option (single/multi, trust dialog). `POST .../keys`: raw keys (Enter/approve keys refused on destructive prompts).
 - `POST /api/sessions/{pane}/close`: two-step close. `GET /api/projects`, `POST /api/sessions`: start a new session.
-- `GET /api/events`: SSE (`session`, `removed`). `GET /api/limits`. `/api/push/*`: public key, subscribe, known.
+- `GET /api/events`: SSE (`session`, `removed`). `GET /api/limits`: `{providers: [{id, label, updated, items: [{label, used, resets_at}]}]}`. `/api/push/*`: public key, subscribe, known, lang.
 
 ## Security
 
@@ -92,13 +95,15 @@ Optional, in `.secrets/config.json` (untracked):
   "rules_file": "~/rules.md",
   "quick_targets": ["main-agent"],
   "quick_label": "Main",
-  "limit_files": {"claude": "~/limit.json"}
+  "limit_files": {"claude": "~/limit.json", "agy": "~/agy-usage.txt"},
+  "min_work_seconds": 120
 }
 ```
 
 - `rules_file`: extra destructive patterns, one per line as ``- desen: `regex` ``.
 - `quick_targets` / `quick_label`: workspace or project names that get the quick-send button.
-- `limit_files`: files exposed by `GET /api/limits`.
+- `limit_files`: usage-limit files shown in the limits strip. Two formats are understood: JSON `{"h5": {"used_percentage": 4, "resets_at": 1795200600}, "d7": {...}, "ts": 1795183857}` (epoch seconds), or tab-separated text `name<TAB>window<TAB>NN%<TAB>ISO-reset` where NN% is what is *remaining*.
+- `min_work_seconds`: a "finished" push is skipped when the turn took less than this (default 120).
 
 State (`.state/`: pins, notification history) lives on the server, so every device sees the same view. Nothing user-specific is stored in the browser except drafts.
 

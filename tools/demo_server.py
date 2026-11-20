@@ -107,7 +107,12 @@ async def notifications():
 
 @app.get("/api/limits")
 async def limits():
-    return {}
+    n = time.time()
+    return {"now": n, "providers": [
+        {"id": "claude", "label": "Claude", "updated": n - 120, "items": [
+            {"label": "5h", "used": 38, "resets_at": n + 2.4 * 3600}, {"label": "7d", "used": 71, "resets_at": n + 3.2 * 86400}]},
+        {"id": "codex", "label": "Codex", "updated": n - 300, "items": [
+            {"label": "5h", "used": 12, "resets_at": n + 4.1 * 3600}, {"label": "7d", "used": 91, "resets_at": n + 1.5 * 86400}]}]}
 
 
 @app.get("/api/push/public")

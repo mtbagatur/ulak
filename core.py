@@ -1,4 +1,5 @@
 import hashlib
+import json
 import re
 from datetime import datetime, time
 
@@ -171,7 +172,7 @@ def parse_prompt(text, agent="claude"):
     """
     text = strip_ansi(text)
     if mention_popup(text):
-        return _finish({"kind": "dismiss", "question": "Dosya seçici açık", "header": "", "details": "", "options": [], "multi": False})
+        return _finish({"kind": "dismiss", "question": "", "header": "", "details": "", "options": [], "multi": False})
     approval = parse_approval(text)
     enter = [] if agent == "claude" else ["Enter"]
     if approval:
@@ -259,7 +260,7 @@ def _trust(lines):
         options.append({"n": i + 1, "label": row.lstrip(CURSORS + " ").strip(), "desc": "", "role": "choice",
                         "keys": ["Down" if steps > 0 else "Up"] * abs(steps) + ["Enter"]})
     folder = next((l for l in rest if l.startswith(("/", "~"))), "")
-    return {"kind": "trust", "question": f"Bu klasöre güvenilsin mi? {folder}".strip(), "header": "Klasör güveni", "details": "", "options": options, "multi": False}
+    return {"kind": "trust", "question": folder, "header": "", "details": "", "options": options, "multi": False}
 
 
 def tidy_details(block):
@@ -285,6 +286,50 @@ def _finish(p):
     return p
 
 
+# --- Usage limits ---
+
+def _iso_epoch(value):
+    try:
+        return datetime.fromisoformat(str(value).strip().replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def parse_limits(key, raw, mtime=None):
+    """Normalise a limits file into {id, label, updated, items: [{label, used, resets_at}]}.
+
+    Two formats: JSON `{"h5": {"used_percentage", "resets_at"}, "d7": {...}, "ts"}`
+    (5-hour and 7-day windows), or tab-separated text `name<TAB>window<TAB>NN%<TAB>ISO-reset`
+    where the percentage is what is *remaining* (a bare `disabled` row is skipped).
+    """
+    items, updated = [], mtime
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        data = None
+    if isinstance(data, dict):
+        updated = data.get("ts") or mtime
+        for k, label in (("h5", "5h"), ("d7", "7d")):
+            w = data.get(k)
+            if isinstance(w, dict) and isinstance(w.get("used_percentage"), (int, float)):
+                items.append({"label": label, "used": round(w["used_percentage"]), "resets_at": w.get("resets_at")})
+    else:
+        for line in str(raw).splitlines():
+            cols = [c.strip() for c in line.split("\t")]
+            if len(cols) < 3 or not cols[2].endswith("%"):
+                continue
+            try:
+                remaining = float(cols[2].rstrip("%"))
+            except ValueError:
+                continue
+            window = "7d" if re.search(r"week", cols[1], re.I) else "5h" if re.search(r"five|5 ?h", cols[1], re.I) else cols[1]
+            label = f"{cols[0]} · {window}" if cols[0] else window
+            items.append({"label": label, "used": round(100 - remaining), "resets_at": _iso_epoch(cols[3]) if len(cols) > 3 else None})
+    if not items:
+        return None
+    return {"id": key, "label": {"claude": "Claude", "agy": "agy", "codex": "Codex"}.get(key, key), "updated": updated, "items": items}
+
+
 # --- Push payload ---
 
 def _oneline(text, limit):
@@ -298,23 +343,35 @@ def project_name(session):
     return base or session.get("workspace_label") or session.get("name") or session.get("pane_id", "Ulak")
 
 
-def build_push(session, prompt=None, destructive=False):
-    """Human push: title = project, body = the command/question or last output, tap opens the pane."""
+PUSH_TEXT = {
+    "en": {"blocked": "needs you", "done": "done", "ask": "Waiting for approval", "choice": "Waiting for a choice", "finished": "Finished"},
+    "tr": {"blocked": "onay bekliyor", "done": "bitti", "ask": "Onay bekliyor", "choice": "Seçim bekliyor", "finished": "İş bitti"},
+}
+
+
+def build_push(session, prompt=None, destructive=False, lang="en", short=False):
+    """Human push: title = project, body = the command/question or last output, tap opens the pane.
+
+    `project` and `raw` are language-neutral (for the history list); `title`/`body` are in `lang`.
+    """
+    text = PUSH_TEXT.get(lang, PUSH_TEXT["en"])
     status = session.get("status")
     pane = session.get("pane_id", "")
-    title = project_name(session)
+    project = project_name(session)
+    raw = ""
     if status == "blocked":
         if prompt and prompt.get("details"):
             first = [l.strip() for l in prompt["details"].splitlines() if l.strip() and not re.search(r"requires approval|^Tip:|^Bash command$", l, re.I)]
-            body = _oneline(first[-1] if first else prompt.get("question", ""), 140)
+            raw = _oneline(first[-1] if first else prompt.get("question", ""), 140)
         elif prompt:
-            body = _oneline(prompt.get("question") or "Seçim bekliyor", 140)
-        else:
-            body = "Onay bekliyor"
+            raw = _oneline(prompt.get("question") or "", 140)
+        body = raw or (text["choice"] if prompt else text["ask"])
         if destructive:
             body = "⚠ " + body
-        title = f"{title} · onay bekliyor"
+        title = f"{project} · {text['blocked']}"
     else:
-        body = _oneline(session.get("preview") or "İş bitti", 140)
-        title = f"{title} · bitti"
-    return {"pane": pane, "status": status, "title": title, "body": body, "tag": f"ulak-{pane}", "url": f"/?pane={pane}"}
+        raw = _oneline(session.get("preview") or "", 140)
+        body = raw or text["finished"]
+        title = f"{project} · {text['done']}"
+    return {"pane": pane, "status": status, "title": title, "body": body, "tag": f"ulak-{pane}", "url": f"/?pane={pane}",
+            "project": project, "raw": raw, "destructive": bool(destructive)}

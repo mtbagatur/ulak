@@ -3,7 +3,7 @@
 // chat messages are appended, the composer and its draft are never touched by updates.
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const STATUS = {blocked: 'Seni bekliyor', working: 'Çalışıyor', done: 'Bitti', idle: 'Boşta', unknown: 'Başlıyor…'};
+const statusText = s => t('st_' + (['blocked', 'working', 'done', 'idle'].includes(s) ? s : 'unknown'));
 const TOOLNAME = {claude: 'Claude', codex: 'Codex', agy: 'agy', terminal: 'Terminal'};
 const store = {get(k){try{return localStorage.getItem(k)}catch{return null}}, set(k,v){try{localStorage.setItem(k,v)}catch{}}};
 
@@ -13,11 +13,11 @@ const state = {sessions: new Map(), current: null, chatHash: '', rendered: 0, pr
 async function api(url, body, method) {
   const opt = body === undefined ? {} : {method: method || 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)};
   let r;
-  try { r = await fetch(url, opt); } catch { throw new Error('Bağlantı yok'); }
+  try { r = await fetch(url, opt); } catch { throw new Error(t('offline')); }
   if (!r.ok) {
     let msg = `${r.status}`;
     try { const j = await r.json(); msg = j.detail || msg; } catch {}
-    throw new Error(msg);
+    throw new Error(errText(msg));
   }
   return r.json();
 }
@@ -40,14 +40,14 @@ async function act(btn, fn, okText) {
 function ago(ts) {
   if (!ts) return '';
   const s = Math.max(0, Date.now() / 1000 - ts);
-  if (s < 45) return 'az önce';
-  if (s < 3600) return `${Math.round(s / 60)} dk`;
-  if (s < 86400) return `${Math.floor(s / 3600)} sa`;
-  return `${Math.floor(s / 86400)} g`;
+  if (s < 45) return t('justNow');
+  if (s < 3600) return `${Math.round(s / 60)} ${t('min')}`;
+  if (s < 86400) return `${Math.floor(s / 3600)} ${t('hour')}`;
+  return `${Math.floor(s / 86400)} ${t('day')}`;
 }
 
 // ---------- home ----------
-const GROUPS = [['blocked', 'Seni bekleyenler'], ['working', 'Çalışıyor'], ['done', 'Yeni bitenler'], ['idle', 'Boşta']];
+const GROUPS = ['blocked', 'working', 'done', 'idle'];
 const rank = s => ({blocked: 0, working: 1, done: 2, idle: 3}[s.bucket] ?? 3);
 function sorted() {
   return [...state.sessions.values()].sort((a, b) => rank(a) - rank(b) || (b.since - a.since));
@@ -67,7 +67,7 @@ async function loadPins() {
   } catch {}
 }
 async function savePins() {
-  try { await api('/api/pins', {pins: [...pins]}, 'PUT'); } catch { toast('Sabitleme kaydedilemedi', 'err'); }
+  try { await api('/api/pins', {pins: [...pins]}, 'PUT'); } catch { toast(t('pinFail'), 'err'); }
 }
 const pinKey = s => `${s.workspace_label}|${s.project}`;
 const isPinned = s => pins.has(pinKey(s));
@@ -75,12 +75,12 @@ function cardHtml(s) {
   const dup = [...state.sessions.values()].some(o => o !== s && o.project === s.project);
   const p = s.pending;
   const inline = p && p.kind === 'approval' && !p.destructive && !p.cut && p.roles.includes('approve');
-  const stateText = s.bucket === 'idle' && s.status === 'done' ? `Bitti · ${ago(s.since)}` : `${STATUS[s.status] || ''}${s.status === 'unknown' ? '' : ' · ' + ago(s.since)}`;
+  const stateText = s.bucket === 'idle' && s.status === 'done' ? t('doneAgo', {t: ago(s.since)}) : `${statusText(s.status)}${s.status === 'unknown' ? '' : ' · ' + ago(s.since)}`;
   const body = p ? `<pre class="c-cmd">${esc((p.destructive ? '⚠ ' : '') + (p.details || p.question))}</pre>` : (s.preview ? `<div class="c-prev">${esc(s.preview)}</div>` : '');
-  return `<div class="c-top"><span class="proj">${esc(s.project)}</span>${dup && s.workspace_label ? `<span class="ws">${esc(s.workspace_label)}</span>` : ''}<span class="chip ${esc(s.agent)}">${esc(TOOLNAME[s.agent] || s.agent)}</span><span class="model">${esc(s.model)}</span><button class="pin ${isPinned(s) ? 'on' : ''}" data-pin aria-label="Sabitle">📌</button></div>
+  return `<div class="c-top"><span class="proj">${esc(s.project)}</span>${dup && s.workspace_label ? `<span class="ws">${esc(s.workspace_label)}</span>` : ''}<span class="chip ${esc(s.agent)}">${esc(TOOLNAME[s.agent] || s.agent)}</span><span class="model">${esc(s.model)}</span><button class="pin ${isPinned(s) ? 'on' : ''}" data-pin aria-label="${esc(t('pin'))}">📌</button></div>
     <div class="state"><span class="d"></span>${esc(stateText)}</div>
     ${s.title ? `<div class="c-title">${esc(s.title)}</div>` : ''}${body}
-    ${inline ? `<div class="c-act"><button class="danger" data-act="deny">Reddet</button><button class="warn" data-act="approve">Onayla</button></div>` : ''}`;
+    ${inline ? `<div class="c-act"><button class="danger" data-act="deny">${esc(t('deny'))}</button><button class="warn" data-act="approve">${esc(t('approve'))}</button></div>` : ''}`;
 }
 function patch(container, items, keyOf, htmlOf, make) {
   const existing = new Map([...container.children].map(el => [el.dataset.key, el]));
@@ -102,14 +102,14 @@ function patch(container, items, keyOf, htmlOf, make) {
 function renderHome() {
   const all = sorted();
   const blocked = all.filter(s => s.bucket === 'blocked').length;
-  $('#summary').innerHTML = !all.length ? '' : blocked ? `<b>${blocked}</b> oturum seni bekliyor` : `${all.filter(s => s.bucket === 'working').length} çalışıyor · hepsi sakin`;
+  $('#summary').innerHTML = !all.length ? '' : blocked ? t('summaryBlocked', {n: blocked}) : t('summaryCalm', {n: all.filter(s => s.bucket === 'working').length});
   if (navigator.setAppBadge) { blocked ? navigator.setAppBadge(blocked).catch(() => {}) : navigator.clearAppBadge?.().catch(() => {}); }
   const groups = $('#groups');
-  if (!all.length) { groups.innerHTML = '<div class="empty">Henüz oturum yok.<br>Aşağıdan yeni bir tane başlat.</div>'; return; }
+  if (!all.length) { groups.innerHTML = `<div class="empty">${t('empty')}</div>`; return; }
   if (groups.querySelector('.empty')) groups.innerHTML = '';
   const pinned = all.filter(isPinned);
-  const defs = [...(pinned.length ? [{id: 'pinned', title: 'Sabitlenenler', items: pinned}] : []), ...GROUPS.map(([id, title]) => ({id, title, items: all.filter(s => !isPinned(s) && (s.bucket === id || (id === 'idle' && !['blocked', 'working', 'done'].includes(s.bucket))))}))].filter(g => g.items.length);
-  patch(groups, defs, g => g.id, g => `<h2 class="${g.id === 'idle' ? 'tap' : ''}" data-toggle="${g.id === 'idle' ? 1 : ''}"><span>${g.title} · ${g.items.length}</span>${g.id === 'idle' ? `<span>${state.idleOpen ? 'Gizle' : 'Göster'}</span>` : ''}</h2><div class="cards"></div>`, g => {
+  const defs = [...(pinned.length ? [{id: 'pinned', title: t('g_pinned'), items: pinned}] : []), ...GROUPS.map(id => ({id, title: t('g_' + id), items: all.filter(s => !isPinned(s) && (s.bucket === id || (id === 'idle' && !['blocked', 'working', 'done'].includes(s.bucket))))}))].filter(g => g.items.length);
+  patch(groups, defs, g => g.id, g => `<h2 class="${g.id === 'idle' ? 'tap' : ''}" data-toggle="${g.id === 'idle' ? 1 : ''}"><span>${g.title} · ${g.items.length}</span>${g.id === 'idle' ? `<span>${state.idleOpen ? t('hide') : t('show')}</span>` : ''}</h2><div class="cards"></div>`, g => {
     const el = document.createElement('div'); el._base = 'group'; return el;
   });
   for (const g of defs) {
@@ -132,7 +132,7 @@ $('#groups').addEventListener('click', e => {
 });
 async function inlineDecide(pane, decision, btn) {
   const s = state.sessions.get(pane); if (!s || !s.pending) return;
-  const r = await act(btn, () => api(`/api/sessions/${encodeURIComponent(pane)}/approve`, {decision, fingerprint: s.pending.fingerprint}), decision === 'approve' ? 'Onaylandı' : 'Reddedildi');
+  const r = await act(btn, () => api(`/api/sessions/${encodeURIComponent(pane)}/approve`, {decision, fingerprint: s.pending.fingerprint}), decision === 'approve' ? t('approved') : t('denied'));
   if (r) setTimeout(loadList, 700);
 }
 
@@ -151,7 +151,7 @@ function setConn(ok, msg) {
   state.live = ok;
   const c = $('#conn');
   if (ok) { c.hidden = true; return; }
-  c.hidden = false; c.className = 'conn' + (msg === 'Bağlantı yok' ? ' bad' : ''); c.textContent = msg === 'Bağlantı yok' ? 'Bağlantı yok' : 'Yeniden bağlanıyor…';
+  c.hidden = false; const bad = msg === t('offline'); c.className = 'conn' + (bad ? ' bad' : ''); c.textContent = bad ? t('offline') : t('reconnecting');
 }
 function connect() {
   if (es) es.close();
@@ -162,7 +162,7 @@ function connect() {
     if (m.type === 'session') { state.sessions.set(m.session.pane_id, m.session); renderHome(); if (m.session.pane_id === state.current) { updateSessionHeader(); loadChat(); } }
     else if (m.type === 'removed') { state.sessions.delete(m.pane); renderHome(); if (m.pane === state.current) closedBanner(); }
   };
-  es.onerror = () => { setConn(false, 'Yeniden bağlanıyor…'); es.close(); setTimeout(connect, Math.min(8000, 1000 * 2 ** retry++) + Math.random() * 400); };
+  es.onerror = () => { setConn(false, t('reconnecting')); es.close(); setTimeout(connect, Math.min(8000, 1000 * 2 ** retry++) + Math.random() * 400); };
 }
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
@@ -189,17 +189,17 @@ function openSession(pane) {
   if (state.current === pane && !$('#session').hidden) return;
   state.current = pane; state.chatHash = ''; state.rendered = 0; state.prompt = null;
   $('#home').hidden = true; $('#session').hidden = false;
-  $('#messages').innerHTML = '<div class="empty">Yükleniyor…</div>'; $('#promptZone').innerHTML = ''; $('#keybar').hidden = true;
+  $('#messages').innerHTML = `<div class="empty">${t('loading')}</div>`; $('#promptZone').innerHTML = ''; $('#keybar').hidden = true;
   $('#message').value = store.get('draft:' + pane) || ''; autosize();
   updateSessionHeader(); loadChat(true);
 }
 function updateSessionHeader() {
   const s = state.sessions.get(state.current); if (!s) return;
   $('#sTitle').textContent = s.project;
-  $('#sSub').textContent = [TOOLNAME[s.agent] || s.agent, s.model, STATUS[s.status], ago(s.since)].filter(Boolean).join(' · ');
+  $('#sSub').textContent = [TOOLNAME[s.agent] || s.agent, s.model, statusText(s.status), ago(s.since)].filter(Boolean).join(' · ');
 }
 function closedBanner() {
-  $('#promptZone').innerHTML = '<div class="prompt"><p class="q">Bu oturum kapandı.</p><button class="primary" id="toList">Listeye dön</button></div>';
+  $('#promptZone').innerHTML = `<div class="prompt"><p class="q">${esc(t('closedSession'))}</p><button class="primary" id="toList">${esc(t('backToList'))}</button></div>`;
   $('#toList').onclick = () => history.state ? history.back() : (location.hash = '', route());
 }
 const md = t => {
@@ -211,14 +211,16 @@ const md = t => {
 function msgNode(m) {
   if (m.role === 'tool') {
     const d = document.createElement('details'); d.className = 'tool';
-    d.innerHTML = `<summary><b>${esc(m.tool || 'araç')}</b><span>${esc(m.text.split('\n')[0])}</span></summary>${m.result || m.text.includes('\n') ? `<pre>${esc(m.result || m.text)}</pre>` : ''}`;
+    d.innerHTML = `<summary><b>${esc(m.tool || t('tool'))}</b><span>${esc(m.text.split('\n')[0])}</span></summary>${m.result || m.text.includes('\n') ? `<pre>${esc(m.result || m.text)}</pre>` : ''}`;
     return d;
   }
   const d = document.createElement('div'); d.className = `msg ${m.role}`; d.innerHTML = md(m.text); return d;
 }
-let loading = false;
+let loading = false, again = false;
 async function loadChat(first) {
-  const pane = state.current; if (!pane || loading) return; loading = true;
+  const pane = state.current; if (!pane) return;
+  if (loading) { again = true; return; }  // an update arrived mid-request: run once more afterwards, never drop it
+  loading = true;
   try {
     const r = await api(`/api/sessions/${encodeURIComponent(pane)}/chat`);
     if (pane !== state.current) return;
@@ -226,8 +228,8 @@ async function loadChat(first) {
     if (key !== state.chatHash) { state.chatHash = key; renderMessages(r, first); }
     renderPrompt(r.prompt, r.status);
     if (r.session) { state.sessions.set(pane, {...state.sessions.get(pane), ...r.session}); updateSessionHeader(); }
-  } catch (e) { if (/404/.test(e.message) || /kapalı/.test(e.message)) closedBanner(); else setConn(false, e.message); }
-  finally { loading = false; }
+  } catch (e) { if (/404/.test(e.message) || e.message === errText('Session is closed or unknown')) closedBanner(); else setConn(false, e.message); }
+  finally { loading = false; if (again) { again = false; loadChat(); } }
 }
 function renderMessages(r, first) {
   const box = $('#messages');
@@ -239,8 +241,8 @@ function renderMessages(r, first) {
   if (!same) { box.innerHTML = ''; state.rendered = 0; }
   for (const m of msgs.slice(state.rendered)) box.appendChild(msgNode(m));
   state.rendered = msgs.length; state.sig = sig(msgs[msgs.length - 1]); state.source = r.source;
-  if (!msgs.length) box.innerHTML = '<div class="empty">Henüz konuşma yok.</div>';
-  if (r.hint) { const h = document.createElement('div'); h.className = 'hint'; h.textContent = r.hint.replace(/\(.*$/, '').trim() || 'Çalışıyor…'; box.appendChild(h); }
+  if (!msgs.length) box.innerHTML = `<div class="empty">${t('noChat')}</div>`;
+  if (r.hint) { const h = document.createElement('div'); h.className = 'hint'; h.textContent = r.hint.replace(/\(.*$/, '').trim() || t('working'); box.appendChild(h); }
   if (first || near) box.scrollTop = box.scrollHeight;
   else if (!same) box.scrollTop = box.scrollHeight - fromBottom;
   $('#jump').hidden = first || near;
@@ -256,47 +258,47 @@ function renderPrompt(p, status) {
   if (zone.dataset.sig === sig && !zone.querySelector('.loading')) return;
   zone.dataset.sig = sig; state.prompt = p;
   if (!p && status !== 'blocked') { zone.innerHTML = ''; return; }
-  if (!p) { zone.innerHTML = '<div class="prompt"><h3>Ekran tanınmadı</h3><p class="q">Aşağıdaki tuş çubuğunu kullan ya da terminalden yanıtla.</p></div>'; $('#keybar').hidden = false; buildKeybar(); return; }
-  const tag = p.destructive ? '<span class="tag">⚠ yıkıcı</span>' : '';
+  if (!p) { zone.innerHTML = `<div class="prompt"><h3>${esc(t('unknownScreen'))}</h3><p class="q">${esc(t('unknownHelp'))}</p></div>`; $('#keybar').hidden = false; buildKeybar(); return; }
+  const tag = p.destructive ? `<span class="tag">${esc(t('destructive'))}</span>` : '';
   if (p.kind === 'approval') {
     const roles = Object.fromEntries(p.options.map(o => [o.role, o]));
     const denyOnly = p.cut;
-    zone.innerHTML = `<div class="prompt"><h3>Onay bekliyor ${tag}</h3><pre>${esc(p.details)}</pre>${denyOnly ? '<p class="q">Komutun tamamı ekrana sığmıyor; güvenlik için yalnız reddedilebilir.</p>' : ''}
-      <div class="acts"><button class="danger" data-d="deny">Reddet</button>${denyOnly ? '' : '<button class="warn" data-d="approve">Onayla</button>'}</div>
-      ${!denyOnly && roles.always && !p.destructive ? '<button class="also" data-d="always">Bu oturum için hep izin ver</button>' : ''}</div>`;
+    zone.innerHTML = `<div class="prompt"><h3>${esc(t('waitingApproval'))} ${tag}</h3><pre>${esc(p.details)}</pre>${denyOnly ? `<p class="q">${esc(t('cutNote'))}</p>` : ''}
+      <div class="acts"><button class="danger" data-d="deny">${esc(t('deny'))}</button>${denyOnly ? '' : `<button class="warn" data-d="approve">${esc(t('approve'))}</button>`}</div>
+      ${!denyOnly && roles.always && !p.destructive ? `<button class="also" data-d="always">${esc(t('alwaysAllow'))}</button>` : ''}</div>`;
     zone.querySelectorAll('[data-d]').forEach(b => b.onclick = () => decide(b.dataset.d, b));
     return;
   }
-  if (p.kind === 'dismiss') { zone.innerHTML = '<div class="prompt"><h3>Dosya seçici açık</h3><div class="acts"><button data-k="esc">Kapat (Esc)</button></div></div>'; zone.querySelector('[data-k]').onclick = e => sendKeys(['esc'], e.currentTarget); return; }
-  zone.innerHTML = `<div class="prompt"><h3>${esc(p.header || (p.kind === 'trust' ? 'Klasör güveni' : 'Soru'))}</h3><p class="q">${esc(p.question)}</p>
+  if (p.kind === 'dismiss') { zone.innerHTML = `<div class="prompt"><h3>${esc(t('filePicker'))}</h3><div class="acts"><button data-k="esc">${esc(t('closeEsc'))}</button></div></div>`; zone.querySelector('[data-k]').onclick = e => sendKeys(['esc'], e.currentTarget); return; }
+  zone.innerHTML = `<div class="prompt"><h3>${esc(p.header || (p.kind === 'trust' ? t('trustTitle') : t('question')))}</h3><p class="q">${esc(p.kind === 'trust' ? t('trustQ', {f: p.question}) : p.question)}</p>
     <div class="opts">${p.options.map(o => `<button class="opt ${o.checked ? 'on' : ''}" data-n="${o.n}"><span class="n">${p.kind === 'trust' ? '•' : o.n}</span><span class="t">${esc(o.label)}${o.desc ? `<small>${esc(o.desc)}</small>` : ''}</span></button>`).join('')}</div>
-    ${p.multi ? '<button class="also" data-k="right">Devam →</button>' : ''}</div>`;
+    ${p.multi ? `<button class="also" data-k="right">${esc(t('cont'))}</button>` : ''}</div>`;
   zone.querySelectorAll('[data-n]').forEach(b => b.onclick = () => choose(+b.dataset.n, b));
   zone.querySelector('[data-k]')?.addEventListener('click', e => sendKeys(['right'], e.currentTarget));
 }
 function afterDecision(r) {
   if (!r) return;
-  if (r.next && r.next !== state.current) { toast('Sıradaki bekleyen oturum', ''); setTimeout(() => go(r.next), 350); }
+  if (r.next && r.next !== state.current) { toast(t('nextBlocked'), ''); setTimeout(() => go(r.next), 350); }
   else if (!r.next && location.hash.startsWith('#/s/')) setTimeout(() => (history.state ? history.back() : (location.hash = '', route())), 450);
 }
 async function decide(decision, btn, token) {
   const p = state.prompt; if (!p) return;
   const url = `/api/sessions/${encodeURIComponent(state.current)}/approve`;
   const body = {decision, fingerprint: p.fingerprint, confirm_token: token};
-  const r = await act(btn, () => api(url, body), token || !p.destructive || decision === 'deny' ? (decision === 'deny' ? 'Reddedildi' : 'Onaylandı') : '');
+  const r = await act(btn, () => api(url, body), token || !p.destructive || decision === 'deny' ? (decision === 'deny' ? t('denied') : t('approved')) : '');
   if (!r) { loadChat(); return; }
   if (r.confirm_required) { confirmSheet(r, () => decide(decision, null, r.confirm_token)); return; }
   hideSheet(); afterDecision(r);
 }
 function confirmSheet(r, onYes) {
-  showSheet(`<h3>⚠ Geri alınamayabilir</h3><p>Bu komut dışarıyı ya da dosyaları etkileyebilir. Tam komut:</p><pre class="c-cmd" style="max-height:30dvh;overflow:auto">${esc(r.command)}</pre>
-    <div class="acts"><button class="ghost" data-x>Vazgeç</button><button class="warn" data-y>Evet, çalıştır</button></div>`);
+  showSheet(`<h3>${esc(t('irreversible'))}</h3><p>${esc(t('irreversibleP'))}</p><pre class="c-cmd" style="max-height:30dvh;overflow:auto">${esc(r.command)}</pre>
+    <div class="acts"><button class="ghost" data-x>${esc(t('cancel'))}</button><button class="warn" data-y>${esc(t('yesRun'))}</button></div>`);
   $('#sheet [data-x]').onclick = hideSheet;
   $('#sheet [data-y]').onclick = async e => { e.currentTarget.classList.add('loading'); await onYes(); };
 }
 async function choose(n, btn) {
   const p = state.prompt; if (!p) return;
-  const r = await act(btn, () => api(`/api/sessions/${encodeURIComponent(state.current)}/choose`, {fingerprint: p.fingerprint, n}), p.multi ? '' : 'Gönderildi');
+  const r = await act(btn, () => api(`/api/sessions/${encodeURIComponent(state.current)}/choose`, {fingerprint: p.fingerprint, n}), p.multi ? '' : t('sent'));
   if (r) { if (p.multi) setTimeout(loadChat, 300); else afterDecision(r); } else loadChat();
 }
 async function sendKeys(keys, btn) {
@@ -321,7 +323,7 @@ $('#composer').addEventListener('submit', async e => {
   const text = ta.value.trim(); if (!text) return;
   const btn = $('#send');
   const r = await act(btn, () => api(`/api/sessions/${encodeURIComponent(state.current)}/prompt`, {text}), '');
-  if (r) { ta.value = ''; store.set('draft:' + state.current, ''); autosize(); toast('Gönderildi', 'ok'); setTimeout(loadChat, 500); }
+  if (r) { ta.value = ''; store.set('draft:' + state.current, ''); autosize(); toast(t('sent'), 'ok'); setTimeout(loadChat, 500); }
 });
 // keep the composer above the iOS keyboard
 if (window.visualViewport) {
@@ -335,12 +337,13 @@ function hideSheet() { $('#sheet').hidden = true; $('#sheetBack').hidden = true;
 $('#sheetBack').onclick = hideSheet;
 
 let quickLabel = '';
-api('/api/config').then(c => { quickLabel = c.quick_label || ''; $('#toQuick').hidden = !quickLabel; $('#toQuick').textContent = `Yaz: ${quickLabel}`; }).catch(() => {});
+function setQuickLabel() { $('#toQuick').textContent = quickLabel ? t('quickTo', {x: quickLabel}) : t('quickSend'); }
+api('/api/config').then(c => { quickLabel = c.quick_label || ''; $('#toQuick').hidden = !quickLabel; setQuickLabel(); }).catch(() => {});
 $('#toQuick').hidden = true;
 $('#toQuick').onclick = () => {
-  showSheet(`<h3>Yaz: ${esc(quickLabel)}</h3><textarea id="quickText" placeholder="Not, görev ya da soru…" autofocus></textarea><div class="acts"><button class="ghost" data-x>Vazgeç</button><button class="primary" data-y>Gönder</button></div>`);
+  showSheet(`<h3>${esc(t('quickTo', {x: quickLabel}))}</h3><textarea id="quickText" placeholder="${esc(t('quickPh'))}" autofocus></textarea><div class="acts"><button class="ghost" data-x>${esc(t('cancel'))}</button><button class="primary" data-y>${esc(t('send'))}</button></div>`);
   $('#sheet [data-x]').onclick = hideSheet;
-  $('#sheet [data-y]').onclick = async e => { const text = $('#quickText').value.trim(); if (!text) return; const r = await act(e.currentTarget, () => api('/api/quick', {text}), "Gönderildi"); if (r) hideSheet(); };
+  $('#sheet [data-y]').onclick = async e => { const text = $('#quickText').value.trim(); if (!text) return; const r = await act(e.currentTarget, () => api('/api/quick', {text}), t('sent')); if (r) hideSheet(); };
   setTimeout(() => $('#quickText')?.focus(), 250);
 };
 $('#newSession').onclick = async () => {
@@ -348,34 +351,34 @@ $('#newSession').onclick = async () => {
   let cwd = '', tool = 'claude', model = '';
   const draw = (filter = '') => {
     const rows = info.projects.filter(p => (p.display + p.name).toLowerCase().includes(filter.toLowerCase())).slice(0, 60);
-    $('#plist').innerHTML = rows.map(p => `<button type="button" class="${p.path === cwd ? 'on' : ''}" data-p="${esc(p.path)}"><span>${esc(p.name)}</span><small>${esc(p.display)}</small></button>`).join('') || '<p class="empty">Eşleşen klasör yok</p>';
+    $('#plist').innerHTML = rows.map(p => `<button type="button" class="${p.path === cwd ? 'on' : ''}" data-p="${esc(p.path)}"><span>${esc(p.name)}</span><small>${esc(p.display)}</small></button>`).join('') || `<p class="empty">${t('noFolder')}</p>`;
   };
-  const models = () => `<option value="">varsayılan</option>` + (info.tools[tool] || []).map(m => `<option>${esc(m)}</option>`).join('');
-  showSheet(`<h3>Yeni oturum</h3><input type="search" id="pfilter" placeholder="Klasör ara…" autocomplete="off"><div class="plist" id="plist"></div>
+  const models = () => `<option value="">${esc(t('defaultModel'))}</option>` + (info.tools[tool] || []).map(m => `<option>${esc(m)}</option>`).join('');
+  showSheet(`<h3>${esc(t('newTitle'))}</h3><input type="search" id="pfilter" placeholder="${esc(t('folderSearch'))}" autocomplete="off"><div class="plist" id="plist"></div>
     <div class="seg" id="tools">${Object.keys(info.tools).map(t => `<button type="button" data-t="${t}" class="${t === tool ? 'on' : ''}">${esc(TOOLNAME[t])}</button>`).join('')}</div>
     <select id="modelSel">${models()}</select>
-    <div class="acts"><button class="ghost" data-x>Vazgeç</button><button class="primary" data-y disabled>Başlat</button></div>`);
+    <div class="acts"><button class="ghost" data-x>${esc(t('cancel'))}</button><button class="primary" data-y disabled>${esc(t('start'))}</button></div>`);
   draw();
   $('#pfilter').oninput = e => draw(e.target.value);
   $('#plist').onclick = e => { const b = e.target.closest('[data-p]'); if (!b) return; cwd = b.dataset.p; draw($('#pfilter').value); $('#sheet [data-y]').disabled = false; };
   $('#tools').onclick = e => { const b = e.target.closest('[data-t]'); if (!b) return; tool = b.dataset.t; $('#tools').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); $('#modelSel').innerHTML = models(); };
   $('#sheet [data-x]').onclick = hideSheet;
   $('#sheet [data-y]').onclick = async e => {
-    const r = await act(e.currentTarget, () => api('/api/sessions', {cwd, tool, model: $('#modelSel').value}), 'Oturum başlıyor');
+    const r = await act(e.currentTarget, () => api('/api/sessions', {cwd, tool, model: $('#modelSel').value}), t('starting'));
     if (r) { hideSheet(); setTimeout(() => go(r.pane), 200); }
   };
 };
 $('#sMenu').onclick = () => {
   const s = state.sessions.get(state.current) || {};
-  showSheet(`<h3>${esc(s.project || 'Oturum')}</h3><p>${esc(s.cwd || '')}</p><div class="acts" style="flex-direction:column"><button data-r>Yenile</button><button class="danger" data-c>Oturumu kapat…</button><button class="ghost" data-x>Vazgeç</button></div>`);
+  showSheet(`<h3>${esc(s.project || t('pane'))}</h3><p>${esc(s.cwd || '')}</p><div class="acts" style="flex-direction:column"><button data-r>${esc(t('refreshSession'))}</button><button class="danger" data-c>${esc(t('closeSession'))}</button><button class="ghost" data-x>${esc(t('cancel'))}</button></div>`);
   $('#sheet [data-x]').onclick = hideSheet;
   $('#sheet [data-r]').onclick = () => { hideSheet(); state.chatHash = ''; loadChat(true); };
   $('#sheet [data-c]').onclick = async e => {
     const r = await act(e.currentTarget, () => api(`/api/sessions/${encodeURIComponent(state.current)}/close`, {}));
     if (!r || !r.confirm_required) return;
-    showSheet(`<h3>Oturum kapatılsın mı?</h3><p><b>${esc(r.project)}</b>${r.working ? ' şu an çalışıyor; yarım iş kaybolabilir.' : ' kapanacak.'} Geri alınamaz.</p><div class="acts"><button class="ghost" data-x>Vazgeç</button><button class="danger" data-y>Evet, kapat</button></div>`);
+    showSheet(`<h3>${esc(t('closeAsk'))}</h3><p><b>${esc(r.project)}</b>${esc(r.working ? t('closeWorking') : t('closeIdle'))}${esc(t('cannotUndo'))}</p><div class="acts"><button class="ghost" data-x>${esc(t('cancel'))}</button><button class="danger" data-y>${esc(t('yesClose'))}</button></div>`);
     $('#sheet [data-x]').onclick = hideSheet;
-    $('#sheet [data-y]').onclick = async b => { const ok = await act(b.currentTarget, () => api(`/api/sessions/${encodeURIComponent(state.current)}/close`, {confirm_token: r.confirm_token}), 'Kapatıldı'); if (ok) { hideSheet(); history.state ? history.back() : (location.hash = '', route()); } };
+    $('#sheet [data-y]').onclick = async b => { const ok = await act(b.currentTarget, () => api(`/api/sessions/${encodeURIComponent(state.current)}/close`, {confirm_token: r.confirm_token}), t('closed')); if (ok) { hideSheet(); history.state ? history.back() : (location.hash = '', route()); } };
   };
 };
 $('#refresh').onclick = e => act(e.currentTarget, loadList, '');
@@ -384,8 +387,8 @@ $('#refresh').onclick = e => act(e.currentTarget, loadList, '');
 (() => {
   const list = $('#list'), ptr = $('#ptr'); let y0 = null, dy = 0;
   list.addEventListener('touchstart', e => { y0 = list.scrollTop <= 0 ? e.touches[0].clientY : null; dy = 0; }, {passive: true});
-  list.addEventListener('touchmove', e => { if (y0 === null) return; dy = e.touches[0].clientY - y0; ptr.classList.toggle('show', dy > 20); ptr.textContent = dy > 70 ? 'Bırak, yenilensin' : 'Çek…'; }, {passive: true});
-  list.addEventListener('touchend', async () => { const go = dy > 70; ptr.classList.remove('show'); y0 = null; if (go) { ptr.textContent = ''; await loadList(); toast('Yenilendi', 'ok'); } });
+  list.addEventListener('touchmove', e => { if (y0 === null) return; dy = e.touches[0].clientY - y0; ptr.classList.toggle('show', dy > 20); ptr.textContent = dy > 70 ? t('pullRelease') : t('pull'); }, {passive: true});
+  list.addEventListener('touchend', async () => { const go = dy > 70; ptr.classList.remove('show'); y0 = null; if (go) { ptr.textContent = ''; await loadList(); toast(t('refreshed'), 'ok'); } });
 })();
 
 // ---------- push ----------
@@ -399,12 +402,12 @@ async function pushState() {
   bell.hidden = known;
 }
 $('#bell').onclick = e => act(e.currentTarget, async () => {
-  if (Notification.permission !== 'granted' && await Notification.requestPermission() !== 'granted') throw new Error('Bildirim izni verilmedi');
-  const {key} = await api('/api/push/public'); if (!key) throw new Error('Push anahtarı yok');
+  if (Notification.permission !== 'granted' && await Notification.requestPermission() !== 'granted') throw new Error(t('noPermission'));
+  const {key} = await api('/api/push/public'); if (!key) throw new Error(t('noPushKey'));
   const pad = key.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(key.length / 4) * 4, '=');
   const sub = await swReg.pushManager.getSubscription() || await swReg.pushManager.subscribe({userVisibleOnly: true, applicationServerKey: Uint8Array.from(atob(pad), c => c.charCodeAt(0))});
-  await api('/api/push/subscribe', sub.toJSON()); await pushState();
-}, 'Bildirimler açık');
+  await api('/api/push/subscribe', {...sub.toJSON(), lang: LANG}); await pushState();
+}, t('bellOn'));
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').then(r => { swReg = r; pushState(); }).catch(() => {});
   navigator.serviceWorker.addEventListener('message', e => { if (e.data?.type === 'open' && e.data.pane) { history.pushState({pane: e.data.pane}, '', `#/s/${e.data.pane}`); route(); } });
@@ -421,7 +424,66 @@ if ('serviceWorker' in navigator) {
 // ---------- notification history ----------
 $('#history').onclick = e => act(e.currentTarget, async () => {
   const {items} = await api('/api/notifications');
-  const rows = items.length ? items.map(n => `<button class="card b-${n.status === 'blocked' ? 'blocked' : 'done'}" data-pane="${esc(n.pane || '')}"><b>${esc(n.title || '')}</b><div>${esc(n.body || '')}</div><small>${ago(n.ts)}</small></button>`).join('') : '<div class="empty">Henüz bildirim yok</div>';
-  showSheet(`<h3>Bildirimler</h3><div class="scroll" style="max-height:65vh">${rows}</div>`);
+  const rows = items.length ? items.map(n => `<button class="card b-${n.status === 'blocked' ? 'blocked' : 'done'}" data-pane="${esc(n.pane || '')}"><b>${esc(histTitle(n))}</b><div>${esc(histBody(n))}</div><small>${ago(n.ts)}</small></button>`).join('') : `<div class="empty">${t('noNotifs')}</div>`;
+  showSheet(`<h3>${esc(t('notifications'))}</h3><div class="scroll" style="max-height:65vh">${rows}</div>`);
   $('#sheet').querySelectorAll('[data-pane]').forEach(b => b.onclick = () => { const p = b.dataset.pane; hideSheet(); if (p && state.sessions.has(p)) go(p); });
 });
+
+function histTitle(n) { return n.project ? t(n.status === 'blocked' ? 'needsYouTitle' : 'doneTitle', {p: n.project}) : (n.title || ''); }
+function histBody(n) { const b = n.body || ''; return n.project ? ((n.destructive ? '⚠ ' : '') + (b || t(n.status === 'blocked' ? 'askBody' : 'finishedBody'))) : b; }
+
+// ---------- limits ----------
+let limitData = null;
+const lvl = used => used >= 85 ? 'hot' : used >= 60 ? 'warn' : 'ok';
+function fmtIn(secs) {
+  if (secs <= 0) return t('justNow');
+  const d = Math.floor(secs / 86400), h = Math.floor(secs % 86400 / 3600), m = Math.floor(secs % 3600 / 60);
+  return d ? `${d}${t('day')} ${h}${t('hour')}` : h ? `${h}${t('hour')} ${m}${t('min')}` : `${Math.max(1, m)}${t('min')}`;
+}
+const resetText = (ts, now) => ts ? t('resets', {t: t('resetsIn', {t: fmtIn(ts - now)})}) : '';
+function renderLimits() {
+  const box = $('#limits');
+  const ps = limitData && limitData.providers || [];
+  box.hidden = !ps.length;
+  if (!ps.length) return;
+  const now = Date.now() / 1000;
+  box.innerHTML = ps.map(p => {
+    const show = [[...p.items].sort((a, b) => b.used - a.used)[0]];  // the tightest window; details on tap
+    const stale = p.updated && now - p.updated > 1800;
+    return `<span class="lim${stale ? ' stale' : ''}"><b>${esc(p.label)}</b>${show.map(i => `<span class="lv ${lvl(i.used)}" title="${esc(i.label)}"><i style="width:${Math.min(100, i.used)}%"></i></span><em>${esc(i.label.split(' · ').pop())} ${i.used}%</em>`).join('')}</span>`;
+  }).join('');
+}
+function limitsSheet() {
+  const now = Date.now() / 1000;
+  const ps = limitData && limitData.providers || [];
+  const body = ps.length ? ps.map(p => {
+    const stale = p.updated && now - p.updated > 1800;
+    return `<section class="lp"><h4>${esc(p.label)}${stale ? `<small>${esc(t('stale', {t: fmtIn(now - p.updated)}))}</small>` : ''}</h4>${p.items.map(i => `<div class="li"><div class="lt"><span>${esc(i.label)}</span><span>${esc(t('used', {n: i.used}))} · ${esc(t('left', {n: Math.max(0, 100 - i.used)}))}</span></div><div class="lv big ${lvl(i.used)}"><i style="width:${Math.min(100, i.used)}%"></i></div><small>${esc(resetText(i.resets_at, now))}</small></div>`).join('')}</section>`;
+  }).join('') : `<div class="empty">${esc(t('noLimits'))}</div>`;
+  showSheet(`<h3>${esc(t('limitsTitle'))}</h3><div class="scroll" style="max-height:65vh">${body}</div>`);
+}
+async function loadLimits() {
+  try { limitData = await api('/api/limits'); renderLimits(); } catch {}
+}
+$('#limits').onclick = limitsSheet;
+setInterval(() => { if (!document.hidden) loadLimits(); }, 60000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) loadLimits(); });
+
+// ---------- language ----------
+function refreshLang() {
+  applyStaticI18n();
+  $('#lang').textContent = LANG.toUpperCase();
+  document.title = t('appName');
+  setQuickLabel();
+  state.sessions.size && renderHome();
+  renderLimits();
+  if (state.current) { updateSessionHeader(); $('#promptZone').dataset.sig = ''; state.chatHash = ''; loadChat(); }
+}
+$('#lang').onclick = async () => {
+  LANG = LANG === 'tr' ? 'en' : 'tr';
+  store.set('lang', LANG);
+  hideSheet(); refreshLang();
+  try { const sub = await swReg?.pushManager.getSubscription(); if (sub) await api('/api/push/lang', {endpoint: sub.endpoint, lang: LANG}); } catch {}
+};
+refreshLang();
+loadLimits();

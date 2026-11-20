@@ -6,4 +6,5 @@ __pycache__/
 .state/
 devir/
 NOTES.md
-docs/
+docs/*
+!docs/screenshots/

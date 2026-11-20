@@ -20,37 +20,40 @@
     <header class="top">
       <h1>Ulak</h1>
       <span id="conn" class="conn" hidden></span>
-      <button id="bell" class="icon" aria-label="Bildirimleri aç" hidden>🔔</button>
-      <button id="history" class="icon" aria-label="Bildirim geçmişi">🕘</button>
-      <button id="refresh" class="icon" aria-label="Yenile">⟳</button>
+      <button id="bell" class="icon" data-i18n-aria="enableBell" hidden>🔔</button>
+      <button id="lang" class="icon lang" data-i18n-aria="language">EN</button>
+      <button id="history" class="icon" data-i18n-aria="history">🕘</button>
+      <button id="refresh" class="icon" data-i18n-aria="refresh">⟳</button>
     </header>
     <div id="summary" class="summary"></div>
-    <div id="list" class="scroll"><div id="ptr" class="ptr">Bırak, yenilensin</div><div id="groups"></div></div>
+    <button id="limits" class="limits" hidden></button>
+    <div id="list" class="scroll"><div id="ptr" class="ptr"></div><div id="groups"></div></div>
     <div class="dock">
-      <button id="toQuick" class="pill-btn">Hızlı yaz</button>
-      <button id="newSession" class="pill-btn primary">+ Yeni oturum</button>
+      <button id="toQuick" class="pill-btn" data-i18n="quickSend"></button>
+      <button id="newSession" class="pill-btn primary" data-i18n="newSession"></button>
     </div>
   </section>
   <section id="session" class="screen" hidden>
     <header class="top">
-      <button id="back" class="icon" aria-label="Geri">‹</button>
+      <button id="back" class="icon" data-i18n-aria="back">‹</button>
       <div class="s-title"><b id="sTitle"></b><span id="sSub"></span></div>
-      <button id="sMenu" class="icon" aria-label="Menü">⋯</button>
+      <button id="sMenu" class="icon" data-i18n-aria="menu">⋯</button>
     </header>
     <div id="messages" class="scroll msgs"></div>
     <button id="jump" class="jump" hidden>↓ Yeni</button>
     <div id="promptZone"></div>
     <div id="keybar" class="keybar" hidden></div>
     <form id="composer" class="composer">
-      <button type="button" id="keysBtn" class="icon" aria-label="Tuşlar">⌨</button>
-      <textarea id="message" rows="1" placeholder="Oturuma yaz…" enterkeyhint="send" autocomplete="off"></textarea>
-      <button type="submit" id="send" class="send" aria-label="Gönder">↑</button>
+      <button type="button" id="keysBtn" class="icon" data-i18n-aria="keys">⌨</button>
+      <textarea id="message" rows="1" data-i18n-ph="composerPh" enterkeyhint="send" autocomplete="off"></textarea>
+      <button type="submit" id="send" class="send" data-i18n-aria="sendAria">↑</button>
     </form>
   </section>
 </div>
 <div id="sheetBack" class="sheet-back" hidden></div>
 <div id="sheet" class="sheet" hidden></div>
 <div id="toasts"></div>
+<script src="/static/i18n.js"></script>
 <script src="/static/app.js" defer></script>
 </body>
 </html>

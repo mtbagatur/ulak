@@ -7,7 +7,7 @@ self.addEventListener('push', event => {
   event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
     if (list.some(c => c.visibilityState === 'visible')) { list.forEach(c => c.postMessage({ type: 'pushed', pane: d.pane })); return; }
     return self.registration.showNotification(d.title || 'Ulak', {
-    body: d.body || (d.status === 'blocked' ? 'Oturum yanıt bekliyor' : 'Oturum tamamlandı'),
+    body: d.body || (d.status === 'blocked' ? 'Session needs you' : 'Session finished'),
     tag: d.tag || `ulak-${d.pane}`, renotify: true, icon: '/static/icon-192.png', badge: '/static/icon-192.png',
     data: { pane: d.pane, url: d.url || '/' },
   });

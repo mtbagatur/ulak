@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from chat import claude_chat, claude_path, detect_model, preview_from_screen, screen_chat, SPINNER, strip_ansi
-from core import NotificationGate, bucket, build_push, is_destructive, parse_approval, parse_prompt, project_name, status_rank
+from core import NotificationGate, bucket, build_push, is_destructive, parse_approval, parse_limits, parse_prompt, project_name, status_rank
 from herdr_client import HerdrClient, HerdrError
 
 ROOT = Path(__file__).parent
@@ -34,6 +34,7 @@ CONFIG = load_config()
 RULES = CONFIG.get("rules_file") or None
 QUICK_TARGETS = {str(x).lower() for x in CONFIG.get("quick_targets", [])}
 QUICK_LABEL = CONFIG.get("quick_label", "")
+MIN_WORK = float(CONFIG.get("min_work_seconds", 120))  # no "finished" push for turns shorter than this
 sessions = {}       # pane -> card (what the phone shows)
 raw_agents = {}     # pane -> last agent record from herdr
 since = {}          # pane -> {"status", "ts"}
@@ -42,6 +43,7 @@ subscribers = set()
 pane_ids = set()
 read_cache = {}     # pane -> (time, screen text)
 pushed = {}         # pane -> last pushed prompt fingerprint
+work_started = {}   # pane -> when the current working stretch began (kept while blocked)
 gate = NotificationGate()
 client = HerdrClient()
 allowed_login = os.environ.get("ULAK_ALLOWED_LOGIN", "")
@@ -310,14 +312,25 @@ async def handle_event(msg):
         agent = raw_agents.setdefault(pane, {"pane_id": pane})
         agent.update({k: v for k, v in data.items() if k not in {"type", "pane_id"}})
         agent["agent_status"] = data.get("agent_status", "unknown")
+        now = time.time()
+        if agent["agent_status"] == "working":
+            work_started.setdefault(pane, now)
         card = await refresh_pane(pane)
         if card:
             await broadcast({"type": "session", "session": card})
+            worked = None
+            if card["status"] == "done":
+                began = work_started.pop(pane, None)
+                worked = None if began is None else now - began
+            elif card["status"] not in ("blocked", "working"):
+                work_started.pop(pane, None)
             if card["status"] in ("blocked", "done"):
-                asyncio.create_task(push_after_grace(pane, card["status"]))
+                asyncio.create_task(push_after_grace(pane, card["status"], worked))
 
 
-async def push_after_grace(pane, status):
+async def push_after_grace(pane, status, worked=None):
+    if status == "done" and worked is not None and worked < MIN_WORK:
+        return  # a quick turn: the phone does not need to buzz
     await asyncio.sleep(10)
     item = sessions.get(pane)
     if not item or item.get("status") != status or not gate.allow(pane, status, time.time()):
@@ -335,7 +348,7 @@ async def push_after_grace(pane, status):
         destructive = bool(prompt and prompt.get("destructive"))
     else:
         pushed.pop(pane, None)
-    await send_push(build_push(item, prompt, destructive))
+    await send_push(item, prompt, destructive)
 
 
 def read_subs():
@@ -359,6 +372,7 @@ def write_subs(subs):
 
 
 def log_notification(payload):
+    """History keeps language-neutral fields; the phone composes the title in its own language."""
     path = STATE / "notifications.json"
     try:
         STATE.mkdir(exist_ok=True)
@@ -366,24 +380,25 @@ def log_notification(payload):
             items = json.loads(path.read_text())
         except (OSError, ValueError):
             items = []
-        items.append({"ts": time.time(), "pane": payload.get("pane"), "status": payload.get("status"),
-                      "title": payload.get("title"), "body": payload.get("body")})
+        items.append({"ts": time.time(), "pane": payload.get("pane"), "status": payload.get("status"), "project": payload.get("project"),
+                      "body": payload.get("raw", ""), "destructive": payload.get("destructive", False)})
         path.write_text(json.dumps(items[-100:], ensure_ascii=False))
     except OSError:
         pass
 
 
-async def send_push(payload):
-    log_notification(payload)
+async def send_push(item, prompt=None, destructive=False):
+    log_notification(build_push(item, prompt, destructive))
     try:
         from pywebpush import WebPushException, webpush
         key = ROOT / ".secrets/vapid_private.pem"
         subs = read_subs()
         if not key.exists() or not subs:
             return
-        topic = re.sub(r"[^A-Za-z0-9_-]", "-", payload.get("tag", "ulak"))[:32]
         dead = []
         for sub in subs:
+            payload = build_push(item, prompt, destructive, lang=sub.get("lang", "en"))
+            topic = re.sub(r"[^A-Za-z0-9_-]", "-", payload.get("tag", "ulak"))[:32]
             try:
                 await asyncio.to_thread(webpush, sub, json.dumps(payload), str(key), {"sub": os.environ.get("ULAK_VAPID_SUBJECT", "mailto:local@localhost")},
                                         ttl=3600, headers={"Urgency": "high", "Topic": topic})
@@ -394,7 +409,7 @@ async def send_push(payload):
                 print(f"Push delivery failed ({code}): {exc}", flush=True)
         if dead:
             write_subs([s for s in subs if s not in dead])
-        print(f"Push sent: {payload.get('pane')} {payload.get('status')} {payload.get('body')[:60]!r}", flush=True)
+        print(f"Push sent: {item.get('pane_id')} {item.get('status')}", flush=True)
     except Exception as exc:
         print(f"Push delivery failed: {exc}", flush=True)
 
@@ -442,7 +457,7 @@ async def sw():
 
 def must_exist(pane):
     if pane not in sessions and pane not in raw_agents:
-        raise HTTPException(404, "Oturum kapalı ya da bilinmiyor")
+        raise HTTPException(404, "Session is closed or unknown")
     return sessions.get(pane) or {"pane_id": pane, "status": "unknown", "agent": "terminal"}
 
 
@@ -492,7 +507,7 @@ async def chat(pane: str, limit: int = 60):
 async def prompt(pane: str, action: Action):
     must_exist(pane)
     if not action.text or not action.text.strip():
-        raise HTTPException(400, "Mesaj boş")
+        raise HTTPException(400, "Message is empty")
     return await client.call("agent.prompt", {"target": pane, "text": action.text})
 
 
@@ -505,9 +520,9 @@ async def config():
 async def to_quick(action: Action):
     target = next((s for s in sessions.values() if s.get("quick")), None)
     if not target:
-        raise HTTPException(404, "Hedef oturum bulunamadı")
+        raise HTTPException(404, "Quick-send target not found")
     if not action.text or not action.text.strip():
-        raise HTTPException(400, "Mesaj boş")
+        raise HTTPException(400, "Message is empty")
     await client.call("agent.prompt", {"target": target["pane_id"], "text": action.text})
     return {"ok": True, "pane": target["pane_id"]}
 
@@ -516,9 +531,9 @@ async def to_quick(action: Action):
 async def approve(pane: str, action: Action):
     item = sessions.get(pane)
     if not item or pane not in pane_ids:
-        raise HTTPException(404, "Oturum kapalı ya da bilinmiyor")
+        raise HTTPException(404, "Session is closed or unknown")
     if item.get("status") != "blocked":
-        raise HTTPException(409, "Oturum artık onay beklemiyor")
+        raise HTTPException(409, "Session is no longer waiting for approval")
     if action.decision not in ("approve", "deny", "always"):
         raise HTTPException(400, "decision must be approve, deny, or always")
     # Always decide on the screen as it is now, never on a cached read.
@@ -527,15 +542,15 @@ async def approve(pane: str, action: Action):
     except Exception:
         pending = None
     if not pending:
-        raise HTTPException(409, "Ekranda tanınan bir onay yok; terminali kullan")
+        raise HTTPException(409, "No recognised approval on screen; use the terminal")
     if not action.fingerprint or not secrets.compare_digest(action.fingerprint, pending["fingerprint"]):
-        raise HTTPException(409, "Onay ekranı değişti; yenile")
+        raise HTTPException(409, "The approval screen changed; refresh")
     if action.decision not in pending["keys"]:
-        raise HTTPException(409, "Bu istemde böyle bir seçenek yok")
+        raise HTTPException(409, "This prompt has no such option")
     if pending.get("cut") and item.get("agent") == "claude" and action.decision != "deny":
-        raise HTTPException(409, "Komutun tamamı görünmüyor; yalnız reddedilebilir")
+        raise HTTPException(409, "The full command is not visible; it can only be denied")
     if action.decision == "always" and pending["destructive"]:
-        raise HTTPException(400, "Yıkıcı komutta oturum boyu izin kapalı")
+        raise HTTPException(400, "Session-wide allow is disabled for destructive commands")
     if pending["destructive"] and action.decision != "deny":
         confirmation = pending_confirm.get(pane)
         valid = bool(confirmation and confirmation["expires"] > time.time() and confirmation["decision"] == action.decision and confirmation["fingerprint"] == pending["fingerprint"] and secrets.compare_digest(action.confirm_token or "", confirmation["token"]))
@@ -552,17 +567,17 @@ async def approve(pane: str, action: Action):
 async def choose(pane: str, action: Action):
     item = sessions.get(pane)
     if not item or pane not in pane_ids:
-        raise HTTPException(404, "Oturum kapalı ya da bilinmiyor")
+        raise HTTPException(404, "Session is closed or unknown")
     if item.get("status") != "blocked":
-        raise HTTPException(409, "Oturum artık bir şey beklemiyor")
+        raise HTTPException(409, "Session is no longer waiting for anything")
     p = await fresh_prompt(pane, item.get("agent", "claude"))
     if not p or p["kind"] in ("approval", "dismiss"):
-        raise HTTPException(409, "Ekranda seçilecek bir menü yok")
+        raise HTTPException(409, "No menu to choose from on screen")
     if not action.fingerprint or not secrets.compare_digest(action.fingerprint, p["fingerprint"]):
-        raise HTTPException(409, "Ekran değişti; yenile")
+        raise HTTPException(409, "The screen changed; refresh")
     option = next((o for o in p["options"] if o["n"] == action.n), None)
     if not option:
-        raise HTTPException(409, "Böyle bir seçenek yok")
+        raise HTTPException(409, "No such option")
     await client.call("agent.send_keys", {"target": pane, "keys": option["keys"]})
     return {"ok": True, "next": next_blocked(pane)}
 
@@ -572,13 +587,13 @@ async def send_keys(pane: str, action: Action):
     item = must_exist(pane)
     keys = [ALLOWED_KEYS.get(str(k).lower()) for k in (action.keys or [])]
     if not keys or len(keys) > 4 or None in keys:
-        raise HTTPException(400, "Geçersiz tuş")
+        raise HTTPException(400, "Invalid key")
     if item.get("status") == "blocked":
         pending = await fresh_pending(pane)
         if pending and pending["destructive"]:
             danger = {"Enter", pending["keys"].get("approve"), pending["keys"].get("always"), "y"}
             if any(k in danger for k in keys):
-                raise HTTPException(409, "Yıkıcı komut: onay kartından iki adımla onayla")
+                raise HTTPException(409, "Destructive command: approve from the approval card (two steps)")
     await client.call("agent.send_keys", {"target": pane, "keys": keys})
     return {"ok": True}
 
@@ -626,12 +641,12 @@ async def projects():
 async def start_session(action: Action):
     tool = TOOLS.get(action.tool or "")
     if not tool or (action.model or "") not in tool["models"]:
-        raise HTTPException(400, "Araç ya da model geçersiz")
+        raise HTTPException(400, "Invalid tool or model")
     cwd = os.path.realpath(os.path.expanduser(action.cwd or ""))
     home = os.path.realpath(str(Path.home()))
     if not (cwd == home or cwd.startswith(home + "/")) or not os.path.isdir(cwd) or any(part.startswith(".") for part in Path(cwd[len(home):]).parts):
-        raise HTTPException(400, "Klasör geçersiz")
-    label = re.sub(r"[^A-Za-z0-9_-]", "", f"{Path(cwd).name}-{action.tool}")[:40] or "oturum"
+        raise HTTPException(400, "Invalid folder")
+    label = re.sub(r"[^A-Za-z0-9_-]", "", f"{Path(cwd).name}-{action.tool}")[:40] or "session"
     created = await client.call("workspace.create", {"cwd": cwd, "label": label, "focus": False})
     pane = created["root_pane"]["pane_id"]
     command = tool["cmd"] + tool["models"][action.model or ""]
@@ -686,7 +701,7 @@ async def put_pins(request: Request):
     body = await request.json()
     pins = body.get("pins")
     if not isinstance(pins, list) or len(pins) > 200 or not all(isinstance(x, str) and len(x) < 300 for x in pins):
-        raise HTTPException(400, "Geçersiz pin listesi")
+        raise HTTPException(400, "Invalid pin list")
     pins = list(dict.fromkeys(pins))
     STATE.mkdir(exist_ok=True)
     (STATE / "pins.json").write_text(json.dumps(pins, ensure_ascii=False))
@@ -695,14 +710,18 @@ async def put_pins(request: Request):
 
 @app.get("/api/limits")
 async def limits():
-    result = {}
+    """Usage limits from the files named in config `limit_files`, normalised to {providers: [...]}."""
+    out = []
     for key, path in CONFIG.get("limit_files", {}).items():
         path = Path(path).expanduser()
         try:
-            result[key] = json.loads(path.read_text()) if key == "claude" else path.read_text()
-        except (OSError, json.JSONDecodeError):
-            result[key] = None
-    return result
+            raw, mtime = path.read_text(), path.stat().st_mtime
+        except OSError:
+            continue
+        provider = parse_limits(key, raw, mtime)
+        if provider:
+            out.append(provider)
+    return {"providers": out, "now": time.time()}
 
 
 @app.get("/api/push/public")
@@ -717,9 +736,22 @@ async def push_public():
 async def push_subscribe(request: Request):
     body = await request.json()
     subs = [s for s in read_subs() if s.get("endpoint") != body.get("endpoint")]
+    body["lang"] = "tr" if body.get("lang") == "tr" else "en"
     subs.append(body)
     write_subs(subs)
     return {"ok": True, "count": len(subs)}
+
+
+@app.post("/api/push/lang")
+async def push_lang(request: Request):
+    body = await request.json()
+    lang = "tr" if body.get("lang") == "tr" else "en"
+    subs = read_subs()
+    for s in subs:
+        if s.get("endpoint") == body.get("endpoint"):
+            s["lang"] = lang
+    write_subs(subs)
+    return {"ok": True}
 
 
 @app.post("/api/push/known")

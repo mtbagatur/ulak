@@ -205,12 +205,14 @@ def test_prompt_fingerprint_changes_with_options():
 def test_push_blocked_payload_is_human():
     s = {"pane_id": "w9:p1", "status": "blocked", "cwd": "/home/x/projeler/ulak"}
     push = build_push(s, parse_prompt(CLAUDE), destructive=True)
-    assert push["title"] == "ulak · onay bekliyor" and push["body"].startswith("⚠ ") and "curl -s -X POST" in push["body"]
+    assert push["title"] == "ulak · needs you" and push["body"].startswith("⚠ ") and "curl -s -X POST" in push["body"]
     assert push["tag"] == "ulak-w9:p1" and push["url"] == "/?pane=w9:p1"
 
 def test_push_done_uses_preview():
     push = build_push({"pane_id": "w1:p1", "status": "done", "cwd": "/a/api", "preview": "Devir yazıldı."})
-    assert push["title"] == "api · bitti" and push["body"] == "Devir yazıldı."
+    assert push["title"] == "api · done" and push["body"] == "Devir yazıldı."
+    tr = build_push({"pane_id": "w1:p1", "status": "done", "cwd": "/a/api"}, lang="tr")
+    assert tr["title"] == "api · bitti" and tr["body"] == "İş bitti" and tr["raw"] == ""
 
 def test_sort_buckets_and_done_aging():
     now = 100000
@@ -240,7 +242,7 @@ def test_claude_jsonl_chat(tmp_path):
     assert msgs[2]["text"] == "ls -la" and msgs[2]["result"] == "a\nb" and model == "Sonnet 5.5"
 
 def test_project_name():
-    assert project_name({"cwd": "/home/b/ortak/panel/"}) == "panel"
+    assert project_name({"cwd": "/home/b/shared/panel/"}) == "panel"
 
 
 def test_approval_details_are_tidied():
@@ -354,3 +356,19 @@ def test_pins_roundtrip(monkeypatch, tmp_path):
     assert c.get("/api/pins", headers=h).json() == {"pins": ["a|b", "c|d"]}
     assert c.put("/api/pins", headers=h, json={"pins": [1]}).status_code == 400
     assert c.get("/api/pins").status_code == 403
+
+
+def test_parse_limits_json_and_text():
+    from core import parse_limits
+    claude = parse_limits("claude", '{"h5": {"used_percentage": 4, "resets_at": 100}, "d7": {"used_percentage": 16.4, "resets_at": 200}, "ts": 50}')
+    assert claude["label"] == "Claude" and claude["updated"] == 50
+    assert [(i["label"], i["used"], i["resets_at"]) for i in claude["items"]] == [("5h", 4, 100), ("7d", 16, 200)]
+    text = "Gemini Models\tWeekly Limit Remaining\t82%\t2026-11-25T13:17:24Z\nClaude and GPT models\tFive Hour Limit Remaining\tdisabled\t\n"
+    agy = parse_limits("agy", text, 7)
+    assert agy["updated"] == 7 and len(agy["items"]) == 1
+    assert agy["items"][0]["label"] == "Gemini Models · 7d" and agy["items"][0]["used"] == 18 and agy["items"][0]["resets_at"] > 1e9
+    assert parse_limits("x", "nonsense") is None
+
+def test_dismiss_and_trust_prompts_carry_no_localised_text():
+    trust = parse_prompt(open("fixtures/claude-trust.txt").read())
+    assert trust["kind"] == "trust" and trust["header"] == "" and not any(ord(c) > 127 for c in trust["question"].replace("~", ""))
