@@ -388,3 +388,21 @@ def test_tool_models_adds_discovered_and_validates(monkeypatch):
     monkeypatch.setattr(appmod.subprocess, "run", lambda *a, **k: type("R", (), {"stdout": "m-one\tOne\nbad slug;rm\tX\n"})())
     m = appmod.tool_models("agy")
     assert m["m-one"] == " --model m-one" and "" in m and not any(";" in k for k in m)
+
+
+def test_upload_saves_file_and_rejects_bad_types(monkeypatch, tmp_path):
+    fake, c, h = _setup(monkeypatch, CODEX)
+    monkeypatch.setattr(ulak, "STATE", tmp_path)
+    r = c.post("/api/sessions/w9:p1/upload", headers={**h, "Content-Type": "image/png"}, content=b"\x89PNG-data")
+    assert r.status_code == 200 and open(r.json()["path"], "rb").read() == b"\x89PNG-data" and r.json()["path"].endswith(".png")
+    assert c.post("/api/sessions/w9:p1/upload", headers={**h, "Content-Type": "application/x-sh"}, content=b"x").status_code == 415
+    assert c.post("/api/sessions/nope/upload", headers={**h, "Content-Type": "image/png"}, content=b"x").status_code == 404
+    assert c.post("/api/sessions/w9:p1/upload", content=b"x", headers={"Content-Type": "image/png"}).status_code == 403
+
+
+def test_limits_order_claude_codex_agy(monkeypatch, tmp_path):
+    fake, c, h = _setup(monkeypatch, CODEX)
+    f = tmp_path / "a.json"; f.write_text('{"h5": {"used_percentage": 1, "resets_at": 5}}')
+    monkeypatch.setattr(ulak, "CONFIG", {"limit_files": {"agy": str(f), "claude": str(f)}})
+    monkeypatch.setattr(ulak, "codex_limits", lambda: {"id": "codex", "label": "Codex", "updated": 1, "items": []})
+    assert [p["id"] for p in c.get("/api/limits", headers=h).json()["providers"]] == ["claude", "codex", "agy"]

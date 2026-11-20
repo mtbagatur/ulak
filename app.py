@@ -756,6 +756,35 @@ def codex_limits():
     return None
 
 
+UPLOAD_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif", "image/heic": ".heic", "application/pdf": ".pdf", "text/plain": ".txt"}
+UPLOAD_MAX = 15 * 1024 * 1024
+
+
+@app.post("/api/sessions/{pane}/upload")
+async def upload(pane: str, request: Request):
+    """Save an image/PDF/text file sent from the phone and return its absolute path, ready to paste into a prompt."""
+    must_exist(pane)
+    ctype = request.headers.get("content-type", "").split(";")[0].strip().lower()
+    if ctype not in UPLOAD_TYPES:
+        raise HTTPException(415, "Unsupported file type")
+    if int(request.headers.get("content-length") or 0) > UPLOAD_MAX:
+        raise HTTPException(413, "File too large (15 MB max)")
+    data = await request.body()
+    if not data or len(data) > UPLOAD_MAX:
+        raise HTTPException(413, "File too large (15 MB max)")
+    folder = STATE / "uploads"
+    folder.mkdir(parents=True, exist_ok=True)
+    for old in folder.iterdir():  # keep a week
+        try:
+            if time.time() - old.stat().st_mtime > 7 * 86400:
+                old.unlink()
+        except OSError:
+            pass
+    path = folder / f"{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(3)}{UPLOAD_TYPES[ctype]}"
+    path.write_bytes(data)
+    return {"ok": True, "path": str(path), "bytes": len(data)}
+
+
 @app.get("/api/limits")
 async def limits():
     """Usage limits from the files named in config `limit_files`, normalised to {providers: [...]}."""
@@ -773,6 +802,8 @@ async def limits():
         codex = codex_limits()
         if codex:
             out.append(codex)
+    order = {"claude": 0, "codex": 1}
+    out.sort(key=lambda p: order.get(p["id"], 2))  # Claude, Codex, then the rest (agy last)
     return {"providers": out, "now": time.time()}
 
 

@@ -27,6 +27,7 @@ Ulak is a small web app (PWA) that turns your [Herdr](https://herdr.dev) agent p
 - **Destructive commands need two steps.** `rm`, `git push`, `ssh`, `kubectl delete`, cloud CLIs and your own patterns show the full command and ask for a confirmation token on a second request. Anything too long to fit on screen can only be denied.
 - **Read it like a chat.** Claude Code transcripts become messages and tool cards; other agents are parsed from the screen.
 - **Answer questions and menus.** Single and multi-select questions, trust dialogs, raw keys when you need them.
+- **Attach files.** The paperclip uploads a photo, screenshot, PDF or text file (15 MB max, kept a week) to the server and puts its path in your message; agents read files by path.
 - **Push notifications.** Standard Web Push with your own VAPID keys. Nothing goes through a third-party service, nothing fires while the app is open on screen, and quick turns (under two minutes by default) do not buzz your phone when they finish.
 - **See your limits.** A strip on the home screen shows the tightest usage window per provider (5-hour and 7-day), turns orange and red as it fills, and opens to resets and staleness. Point it at the files your own scripts already write.
 - **English and Turkish.** Follows the phone's language; switch with the TR/EN button. Push text follows the language of each device.
@@ -65,7 +66,7 @@ They solve the same problem from different sides. HerdrChat is the polished nati
 
 - `GET /api/sessions`: enriched cards, ordered blocked > working > done (<1h) > idle.
 - `GET /api/sessions/{pane}/chat`: cleaned screen split into blocks (Claude JSONL when available).
-- `POST /api/sessions/{pane}/prompt`: send text. `POST /api/quick`: quick send to a configured pane (see Configuration). `GET/PUT /api/pins`: server-side pins, shared across devices.
+- `POST /api/sessions/{pane}/prompt`: send text. `POST /api/sessions/{pane}/upload`: raw file body (image, PDF or text), returns its server path. `POST /api/quick`: quick send to a configured pane (see Configuration). `GET/PUT /api/pins`: server-side pins, shared across devices.
 - `POST /api/sessions/{pane}/approve`: approve/always/deny, bound to the screen fingerprint (409 if it changed; destructive = two steps).
 - `POST /api/sessions/{pane}/choose`: pick a menu option (single/multi, trust dialog). `POST .../keys`: raw keys (Enter/approve keys refused on destructive prompts).
 - `POST /api/sessions/{pane}/close`: two-step close. `GET /api/projects`, `POST /api/sessions`: start a new session.

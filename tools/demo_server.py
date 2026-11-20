@@ -126,6 +126,11 @@ async def projects():
             "tools": {"claude": ["sonnet", "opus"], "codex": [], "agy": []}}
 
 
+@app.post("/api/sessions/{pane}/upload")
+async def upload(pane: str):
+    return {"ok": True, "path": "/home/you/.state/uploads/20261120-120000-abc123.png", "bytes": 1}
+
+
 @app.get("/api/events")
 async def events():
     async def stream():

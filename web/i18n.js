@@ -12,7 +12,7 @@ const I18N = {
     refresh: 'Refresh', refreshed: 'Refreshed', pullRelease: 'Release to refresh', pull: 'Pull…',
     quickSend: 'Quick send', quickTo: 'Send to {x}', quickPh: 'A note, task or question…', cancel: 'Cancel', send: 'Send',
     newSession: '+ New session', newTitle: 'New session', folderSearch: 'Search folders…', noFolder: 'No matching folder', defaultModel: 'default', start: 'Start', starting: 'Session starting',
-    back: 'Back', menu: 'Menu', keys: 'Keys', composerPh: 'Write to the session…', sendAria: 'Send',
+    back: 'Back', menu: 'Menu', keys: 'Keys', attach: 'Attach file', attached: 'File attached. Add a note and send.', composerPh: 'Write to the session…', sendAria: 'Send',
     loading: 'Loading…', noChat: 'Nothing said yet.', tool: 'tool', working: 'Working…', newMsgs: '↓ New',
     closedSession: 'This session has closed.', backToList: 'Back to list',
     waitingApproval: 'Waiting for approval', destructive: '⚠ destructive', cutNote: 'The full command does not fit on screen, so it can only be denied.',
@@ -36,7 +36,7 @@ const I18N = {
     refresh: 'Yenile', refreshed: 'Yenilendi', pullRelease: 'Bırak, yenilensin', pull: 'Çek…',
     quickSend: 'Hızlı yaz', quickTo: 'Yaz: {x}', quickPh: 'Not, görev ya da soru…', cancel: 'Vazgeç', send: 'Gönder',
     newSession: '+ Yeni oturum', newTitle: 'Yeni oturum', folderSearch: 'Klasör ara…', noFolder: 'Eşleşen klasör yok', defaultModel: 'varsayılan', start: 'Başlat', starting: 'Oturum başlıyor',
-    back: 'Geri', menu: 'Menü', keys: 'Tuşlar', composerPh: 'Oturuma yaz…', sendAria: 'Gönder',
+    back: 'Geri', menu: 'Menü', keys: 'Tuşlar', attach: 'Dosya ekle', attached: 'Dosya eklendi. Not yazıp gönder.', composerPh: 'Oturuma yaz…', sendAria: 'Gönder',
     loading: 'Yükleniyor…', noChat: 'Henüz konuşma yok.', tool: 'araç', working: 'Çalışıyor…', newMsgs: '↓ Yeni',
     closedSession: 'Bu oturum kapandı.', backToList: 'Listeye dön',
     waitingApproval: 'Onay bekliyor', destructive: '⚠ yıkıcı', cutNote: 'Komutun tamamı ekrana sığmıyor; güvenlik için yalnız reddedilebilir.',
@@ -52,6 +52,7 @@ const I18N = {
 };
 // Server error strings (English on the wire) -> Turkish.
 const ERR_TR = {
+  'Unsupported file type': 'Desteklenmeyen dosya türü', 'File too large (15 MB max)': 'Dosya çok büyük (en çok 15 MB)',
   'Session is closed or unknown': 'Oturum kapalı ya da bilinmiyor', 'Message is empty': 'Mesaj boş', 'Quick-send target not found': 'Hedef oturum bulunamadı',
   'Session is no longer waiting for approval': 'Oturum artık onay beklemiyor', 'No recognised approval on screen; use the terminal': 'Ekranda tanınan bir onay yok; terminali kullan',
   'The approval screen changed; refresh': 'Onay ekranı değişti; yenile', 'This prompt has no such option': 'Bu istemde böyle bir seçenek yok',

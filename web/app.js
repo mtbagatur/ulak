@@ -326,6 +326,19 @@ $('#composer').addEventListener('submit', async e => {
   const r = await act(btn, () => api(`/api/sessions/${encodeURIComponent(state.current)}/prompt`, {text}), '');
   if (r) { ta.value = ''; store.set('draft:' + state.current, ''); autosize(); toast(t('sent'), 'ok'); setTimeout(loadChat, 500); }
 });
+// attach: upload the file to the server, then put its path in the draft (agents read files by path)
+$('#attachBtn').onclick = () => $('#fileIn').click();
+$('#fileIn').onchange = async e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  const btn = $('#attachBtn');
+  const r = await act(btn, async () => {
+    let res;
+    try { res = await fetch(`/api/sessions/${encodeURIComponent(state.current)}/upload`, {method: 'POST', headers: {'Content-Type': f.type || 'application/octet-stream'}, body: f}); } catch { throw new Error(t('offline')); }
+    if (!res.ok) { let m = `${res.status}`; try { m = (await res.json()).detail || m; } catch {} throw new Error(errText(m)); }
+    return res.json();
+  }, t('attached'));
+  if (r) { ta.value = (ta.value ? ta.value.replace(/\s*$/, ' ') : '') + r.path + ' '; store.set('draft:' + state.current, ta.value); autosize(); ta.focus(); }
+};
 // keep the composer above the iOS keyboard
 if (window.visualViewport) {
   const fit = () => { document.documentElement.style.setProperty('--vvh', visualViewport.height + 'px'); document.documentElement.classList.toggle('kb', window.innerHeight - visualViewport.height > 120); window.scrollTo(0, 0); const b = $('#messages'); if (!$('#session').hidden && document.activeElement === ta) b.scrollTop = b.scrollHeight; };
