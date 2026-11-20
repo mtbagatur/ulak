@@ -340,6 +340,7 @@ $('#fileIn').onchange = async e => {
   if (r) { ta.value = (ta.value ? ta.value.replace(/\s*$/, ' ') : '') + r.path + ' '; store.set('draft:' + state.current, ta.value); autosize(); ta.focus(); }
 };
 // keep the composer above the iOS keyboard
+if (/iPhone|iPad|iPod/.test(navigator.userAgent)) document.documentElement.classList.add('ios');
 if (window.visualViewport) {
   const fit = () => { document.documentElement.style.setProperty('--vvh', visualViewport.height + 'px'); document.documentElement.classList.toggle('kb', window.innerHeight - visualViewport.height > 120); window.scrollTo(0, 0); const b = $('#messages'); if (!$('#session').hidden && document.activeElement === ta) b.scrollTop = b.scrollHeight; };
   visualViewport.addEventListener('resize', fit); visualViewport.addEventListener('scroll', () => window.scrollTo(0, 0)); fit();
