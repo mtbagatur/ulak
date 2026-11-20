@@ -120,6 +120,12 @@ async def push_public():
     return {"key": ""}
 
 
+@app.get("/api/projects")
+async def projects():
+    return {"projects": [{"name": n, "path": f"/home/you/projects/{n}", "display": f"~/projects/{n}"} for n in ("billing-api", "web-app", "docs")],
+            "tools": {"claude": ["sonnet", "opus"], "codex": [], "agy": []}}
+
+
 @app.get("/api/events")
 async def events():
     async def stream():
@@ -132,7 +138,7 @@ async def events():
 
 @app.api_route("/api/{rest:path}", methods=["POST", "PUT"])
 async def swallow(rest: str):
-    return {"ok": True}
+    return {"ok": True, "pane": "d4:p1"}
 
 
 if __name__ == "__main__":
