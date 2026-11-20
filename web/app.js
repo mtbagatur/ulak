@@ -349,8 +349,8 @@ if (window.visualViewport) {
     baseH = Math.max(baseH, visualViewport.height);  // tallest viewport seen = keyboard closed (innerHeight also shrinks in a home-screen app)
     const kb = baseH - visualViewport.height > 120;
     document.documentElement.classList.toggle('kb', kb);
-    // iOS leaves its ^ v ✓ accessory bar out of visualViewport; reserve room for it
-    document.documentElement.style.setProperty('--vvh', (visualViewport.height - (kb && document.documentElement.classList.contains('ios') ? 52 : 0)) + 'px'); window.scrollTo(0, 0); const b = $('#messages'); if (!$('#session').hidden && document.activeElement === ta) b.scrollTop = b.scrollHeight; };
+    // Measured on iPhone (?debug=1, Safari tab): visualViewport already ends above the URL pill and ^ v ✓ bar, so no reserve is needed
+    document.documentElement.style.setProperty('--vvh', visualViewport.height + 'px'); window.scrollTo(0, 0); const b = $('#messages'); if (!$('#session').hidden && document.activeElement === ta) b.scrollTop = b.scrollHeight; };
   if (/[?&]debug=1/.test(location.search)) {  // on-screen metrics for diagnosing keyboard gaps
     const d = document.createElement('pre');
     d.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;margin:0;padding:4px 6px;font:11px/1.3 monospace;background:#000c;color:#0f0;pointer-events:none;white-space:pre-wrap';
