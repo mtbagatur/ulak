@@ -77,6 +77,15 @@ The server binds only to `127.0.0.1`; Tailscale Serve is an external deployment 
 
 ## Run
 
+One command (venv, dependencies, push keys, systemd user service):
+
+```sh
+ULAK_ALLOWED_LOGIN=you@github ULAK_VAPID_SUBJECT=mailto:you@example.com ./install.sh
+tailscale serve --bg 8765
+```
+
+The unit it installs is `deploy/ulak.service.example`. Without systemd, run it by hand:
+
 ```sh
 python3 -m venv .venv
 . .venv/bin/activate

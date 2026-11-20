@@ -1,0 +1,15 @@
+# Copy to ~/.config/systemd/user/ulak.service and edit the two Environment lines.
+[Unit]
+Description=Ulak (Herdr agent panes over Tailscale)
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/ulak
+Environment=ULAK_ALLOWED_LOGIN=you@github
+Environment=ULAK_VAPID_SUBJECT=mailto:you@example.com
+ExecStart=%h/ulak/.venv/bin/python app.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
