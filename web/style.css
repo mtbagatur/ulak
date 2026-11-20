@@ -141,4 +141,3 @@ details.tool pre{margin:6px 0 0;padding:8px 10px;background:var(--bg2);border-ra
 
 .kb .composer{padding-bottom:8px}
 /* iOS keeps its ^ v ✓ accessory bar outside visualViewport; leave room for it so the composer sits on the bar, not under a gap */
-.ios.kb #app{height:calc(var(--vvh,100dvh) - 52px)}

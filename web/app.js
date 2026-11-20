@@ -342,7 +342,13 @@ $('#fileIn').onchange = async e => {
 // keep the composer above the iOS keyboard
 if (/iPhone|iPad|iPod/.test(navigator.userAgent)) document.documentElement.classList.add('ios');
 if (window.visualViewport) {
-  const fit = () => { document.documentElement.style.setProperty('--vvh', visualViewport.height + 'px'); document.documentElement.classList.toggle('kb', window.innerHeight - visualViewport.height > 120); window.scrollTo(0, 0); const b = $('#messages'); if (!$('#session').hidden && document.activeElement === ta) b.scrollTop = b.scrollHeight; };
+  let baseH = 0;
+  const fit = () => {
+    baseH = Math.max(baseH, visualViewport.height);  // tallest viewport seen = keyboard closed (innerHeight also shrinks in a home-screen app)
+    const kb = baseH - visualViewport.height > 120;
+    document.documentElement.classList.toggle('kb', kb);
+    // iOS leaves its ^ v ✓ accessory bar out of visualViewport; reserve room for it
+    document.documentElement.style.setProperty('--vvh', (visualViewport.height - (kb && document.documentElement.classList.contains('ios') ? 52 : 0)) + 'px'); window.scrollTo(0, 0); const b = $('#messages'); if (!$('#session').hidden && document.activeElement === ta) b.scrollTop = b.scrollHeight; };
   visualViewport.addEventListener('resize', fit); visualViewport.addEventListener('scroll', () => window.scrollTo(0, 0)); fit();
 }
 
