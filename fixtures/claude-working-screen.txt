@@ -1,0 +1,21 @@
+╭──────────────────────────────────────────────╮
+│ ✻ Welcome to Claude Code!                    │
+╰──────────────────────────────────────────────╯
+
+❯ list the files here
+
+● I'll list the files in this directory.
+
+● Bash(ls)
+  ⎿  app.py
+     core.py
+
+● There are two Python files: **app.py** and `core.py`.
+
+✻ Cooking… (12s · ↓ 1.2k tokens · esc to interrupt)
+
+────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────
+  Sonnet 5.5/medium | ctx 3% 6k | 7d 1%(6d → Per 22:00) | $0.05
+  ⏵⏵ auto mode on (shift+tab to cycle)

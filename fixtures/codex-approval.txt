@@ -1,0 +1,9 @@
+• I need to run a command outside the sandbox.
+
+  Would you like to run the following command?
+
+  $ touch ulak-probe2.txt
+
+› 1. Yes, proceed (y)
+  2. Yes, and don't ask again for this command (a)
+  3. No, and tell Codex what to do differently (esc)

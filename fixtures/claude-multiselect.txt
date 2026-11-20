@@ -1,0 +1,9 @@
+ ☐ Checks
+
+Which checks should run?
+
+❯ 1. [ ] Lint
+  2. [x] Unit tests
+  3. [ ] Type check
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

@@ -1,0 +1,12 @@
+ ☐ Database
+
+Which database should the service use?
+
+❯ 1. PostgreSQL
+     Relational, strong consistency, what we run in production today.
+  2. SQLite
+     Single file, zero setup, fine for a prototype.
+  3. Type something.
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#21232E">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Ulak">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <title>Ulak</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="app">
+  <section id="home" class="screen">
+    <header class="top">
+      <h1>Ulak</h1>
+      <span id="conn" class="conn" hidden></span>
+      <button id="bell" class="icon" aria-label="Bildirimleri aç" hidden>🔔</button>
+      <button id="history" class="icon" aria-label="Bildirim geçmişi">🕘</button>
+      <button id="refresh" class="icon" aria-label="Yenile">⟳</button>
+    </header>
+    <div id="summary" class="summary"></div>
+    <div id="list" class="scroll"><div id="ptr" class="ptr">Bırak, yenilensin</div><div id="groups"></div></div>
+    <div class="dock">
+      <button id="toQuick" class="pill-btn">Hızlı yaz</button>
+      <button id="newSession" class="pill-btn primary">+ Yeni oturum</button>
+    </div>
+  </section>
+  <section id="session" class="screen" hidden>
+    <header class="top">
+      <button id="back" class="icon" aria-label="Geri">‹</button>
+      <div class="s-title"><b id="sTitle"></b><span id="sSub"></span></div>
+      <button id="sMenu" class="icon" aria-label="Menü">⋯</button>
+    </header>
+    <div id="messages" class="scroll msgs"></div>
+    <button id="jump" class="jump" hidden>↓ Yeni</button>
+    <div id="promptZone"></div>
+    <div id="keybar" class="keybar" hidden></div>
+    <form id="composer" class="composer">
+      <button type="button" id="keysBtn" class="icon" aria-label="Tuşlar">⌨</button>
+      <textarea id="message" rows="1" placeholder="Oturuma yaz…" enterkeyhint="send" autocomplete="off"></textarea>
+      <button type="submit" id="send" class="send" aria-label="Gönder">↑</button>
+    </form>
+  </section>
+</div>
+<div id="sheetBack" class="sheet-back" hidden></div>
+<div id="sheet" class="sheet" hidden></div>
+<div id="toasts"></div>
+<script src="/static/app.js" defer></script>
+</body>
+</html>
