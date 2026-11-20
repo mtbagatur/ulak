@@ -1,4 +1,5 @@
 import asyncio
+import subprocess
 import getpass
 import json
 import os
@@ -14,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from chat import claude_chat, claude_path, detect_model, preview_from_screen, screen_chat, SPINNER, strip_ansi
-from core import NotificationGate, bucket, build_push, is_destructive, parse_approval, parse_limits, parse_prompt, project_name, status_rank
+from core import NotificationGate, bucket, build_push, is_destructive, parse_approval, parse_codex_limits, parse_limits, parse_prompt, project_name, status_rank
 from herdr_client import HerdrClient, HerdrError
 
 ROOT = Path(__file__).parent
@@ -53,6 +54,36 @@ TOOLS = {
     "codex": {"cmd": "codex", "models": {"": "", "gpt-6-luna": " -m gpt-6-luna"}},
     "agy": {"cmd": "agy", "models": {"": ""}},
 }
+_models_cache = {}
+
+
+def tool_models(name):
+    """{slug: command-line suffix} for a tool; codex and agy lists are read from the tools themselves (cached 10 min)."""
+    base = TOOLS[name]["models"]
+    if name == "claude":
+        return base
+    hit = _models_cache.get(name)
+    if hit and time.time() - hit[0] < 600:
+        return hit[1]
+    found = []
+    try:
+        if name == "codex":
+            data = json.loads((Path.home() / ".codex/models_cache.json").read_text())
+            found = [m["slug"] for m in data.get("models", []) if m.get("visibility") == "list"]
+        elif name == "agy":
+            out = subprocess.run(["agy", "models"], capture_output=True, text=True, timeout=15).stdout
+            found = [ln.split("\t")[0].strip() for ln in out.splitlines() if "\t" in ln]
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    flag = " -m " if name == "codex" else " --model "
+    models = {"": ""}
+    models.update({s: flag + s for s in found if re.fullmatch(r"[A-Za-z0-9._-]{1,60}", s)})
+    for s, v in base.items():
+        models.setdefault(s, v)
+    _models_cache[name] = (time.time(), models)
+    return models
+
+
 ALLOWED_KEYS = {"esc": "esc", "enter": "Enter", "up": "Up", "down": "Down", "left": "Left", "right": "Right", "tab": "Tab", "space": "Space",
                 "y": "y", "n": "n", **{str(i): str(i) for i in range(1, 10)}}
 
@@ -634,13 +665,14 @@ def project_dirs():
 @app.get("/api/projects")
 async def projects():
     return {"projects": [{"path": p, "name": Path(p).name, "display": display_cwd(p)} for p in project_dirs()],
-            "tools": {k: [m for m in v["models"] if m] for k, v in TOOLS.items()}}
+            "tools": {k: [m for m in await asyncio.to_thread(tool_models, k) if m] for k in TOOLS}}
 
 
 @app.post("/api/sessions")
 async def start_session(action: Action):
     tool = TOOLS.get(action.tool or "")
-    if not tool or (action.model or "") not in tool["models"]:
+    models = await asyncio.to_thread(tool_models, action.tool) if tool else {}
+    if not tool or (action.model or "") not in models:
         raise HTTPException(400, "Invalid tool or model")
     cwd = os.path.realpath(os.path.expanduser(action.cwd or ""))
     home = os.path.realpath(str(Path.home()))
@@ -649,7 +681,7 @@ async def start_session(action: Action):
     label = re.sub(r"[^A-Za-z0-9_-]", "", f"{Path(cwd).name}-{action.tool}")[:40] or "session"
     created = await client.call("workspace.create", {"cwd": cwd, "label": label, "focus": False})
     pane = created["root_pane"]["pane_id"]
-    command = tool["cmd"] + tool["models"][action.model or ""]
+    command = tool["cmd"] + models[action.model or ""]
     await client.call("pane.send_text", {"pane_id": pane, "text": command})
     await client.call("pane.send_keys", {"pane_id": pane, "keys": ["Enter"]})
     return {"ok": True, "pane": pane}
@@ -708,6 +740,22 @@ async def put_pins(request: Request):
     return {"pins": pins}
 
 
+def codex_limits():
+    """Codex writes its rate limits into every session rollout; read the newest one (no config needed)."""
+    files = sorted((Path.home() / ".codex/sessions").glob("*/*/*/rollout-*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True)[:6]
+    for f in files:
+        try:
+            with f.open("rb") as fh:
+                fh.seek(0, 2); fh.seek(max(0, fh.tell() - 200_000))
+                lines = fh.read().decode("utf-8", "ignore").splitlines()
+            found = parse_codex_limits(lines, f.stat().st_mtime)
+        except OSError:
+            continue
+        if found:
+            return found
+    return None
+
+
 @app.get("/api/limits")
 async def limits():
     """Usage limits from the files named in config `limit_files`, normalised to {providers: [...]}."""
@@ -721,6 +769,10 @@ async def limits():
         provider = parse_limits(key, raw, mtime)
         if provider:
             out.append(provider)
+    if not any(p["id"] == "codex" for p in out):
+        codex = codex_limits()
+        if codex:
+            out.append(codex)
     return {"providers": out, "now": time.time()}
 
 

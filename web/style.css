@@ -138,3 +138,5 @@ details.tool pre{margin:6px 0 0;padding:8px 10px;background:var(--bg2);border-ra
 .li{padding:8px 0;border-bottom:1px solid var(--line)}.li:last-child{border:0}
 .lt{display:flex;justify-content:space-between;gap:10px;font-size:14px}.lt span:last-child{color:var(--muted);font-size:13px;white-space:nowrap}
 .li small{color:var(--muted);font-size:12px}
+
+.kb .composer{padding-bottom:8px}

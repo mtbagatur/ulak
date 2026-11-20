@@ -317,6 +317,7 @@ $('#keysBtn').onclick = () => { buildKeybar(); const kb = $('#keybar'); kb.hidde
 // ---------- composer ----------
 const ta = $('#message');
 function autosize() { ta.style.height = 'auto'; const h = Math.min(ta.scrollHeight, window.innerHeight * 0.38); ta.style.height = h + 'px'; ta.style.overflowY = ta.scrollHeight > h ? 'auto' : 'hidden'; $('#send').disabled = !ta.value.trim(); }
+ta.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('#composer').requestSubmit(); } });
 ta.addEventListener('input', () => { autosize(); store.set('draft:' + state.current, ta.value); });
 $('#composer').addEventListener('submit', async e => {
   e.preventDefault();
@@ -327,7 +328,7 @@ $('#composer').addEventListener('submit', async e => {
 });
 // keep the composer above the iOS keyboard
 if (window.visualViewport) {
-  const fit = () => { document.documentElement.style.setProperty('--vvh', visualViewport.height + 'px'); window.scrollTo(0, 0); const b = $('#messages'); if (!$('#session').hidden && document.activeElement === ta) b.scrollTop = b.scrollHeight; };
+  const fit = () => { document.documentElement.style.setProperty('--vvh', visualViewport.height + 'px'); document.documentElement.classList.toggle('kb', window.innerHeight - visualViewport.height > 120); window.scrollTo(0, 0); const b = $('#messages'); if (!$('#session').hidden && document.activeElement === ta) b.scrollTop = b.scrollHeight; };
   visualViewport.addEventListener('resize', fit); visualViewport.addEventListener('scroll', () => window.scrollTo(0, 0)); fit();
 }
 
@@ -365,7 +366,7 @@ $('#newSession').onclick = async () => {
   $('#sheet [data-x]').onclick = hideSheet;
   $('#sheet [data-y]').onclick = async e => {
     const r = await act(e.currentTarget, () => api('/api/sessions', {cwd, tool, model: $('#modelSel').value}), t('starting'));
-    if (r) { hideSheet(); setTimeout(() => go(r.pane), 200); }
+    if (r) { hideSheet(); for (let i = 0; i < 20 && !state.sessions.has(r.pane); i++) { await new Promise(ok => setTimeout(ok, 300)); await loadList(); } go(r.pane); }
   };
 };
 $('#sMenu').onclick = () => {

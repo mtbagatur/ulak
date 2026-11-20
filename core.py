@@ -375,3 +375,24 @@ def build_push(session, prompt=None, destructive=False, lang="en", short=False):
         title = f"{project} · {text['done']}"
     return {"pane": pane, "status": status, "title": title, "body": body, "tag": f"ulak-{pane}", "url": f"/?pane={pane}",
             "project": project, "raw": raw, "destructive": bool(destructive)}
+
+
+def parse_codex_limits(lines, mtime=None):
+    """Newest `rate_limits` in a Codex rollout (JSONL lines) as a limits provider, or None."""
+    for line in reversed(lines):
+        if '"rate_limits"' not in line:
+            continue
+        try:
+            rl = json.loads(line)["payload"]["rate_limits"]
+        except (ValueError, KeyError, TypeError):
+            continue
+        items = []
+        for slot, label in (("primary", "5h"), ("secondary", "7d")):
+            w = (rl or {}).get(slot)
+            if isinstance(w, dict) and w.get("used_percent") is not None:
+                if w.get("window_minutes") and w["window_minutes"] not in (300, 10080):
+                    label = f"{round(w['window_minutes'] / 60)}h"
+                items.append({"label": label, "used": round(w["used_percent"]), "resets_at": w.get("resets_at")})
+        if items:
+            return {"id": "codex", "label": "Codex", "updated": mtime, "items": items}
+    return None

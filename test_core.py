@@ -372,3 +372,19 @@ def test_parse_limits_json_and_text():
 def test_dismiss_and_trust_prompts_carry_no_localised_text():
     trust = parse_prompt(open("fixtures/claude-trust.txt").read())
     assert trust["kind"] == "trust" and trust["header"] == "" and not any(ord(c) > 127 for c in trust["question"].replace("~", ""))
+
+
+def test_codex_limits_read_newest_rate_limits():
+    from core import parse_codex_limits
+    line = '{"payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":2.0,"window_minutes":300,"resets_at":100},"secondary":{"used_percent":9.4,"window_minutes":10080,"resets_at":200}}}}'
+    p = parse_codex_limits(["noise", line, '{"payload":{"rate_limits":null}}'], 5)
+    assert p["id"] == "codex" and [(i["label"], i["used"]) for i in p["items"]] == [("5h", 2), ("7d", 9)]
+    assert parse_codex_limits(["nothing"]) is None
+
+
+def test_tool_models_adds_discovered_and_validates(monkeypatch):
+    import app as appmod
+    appmod._models_cache.clear()
+    monkeypatch.setattr(appmod.subprocess, "run", lambda *a, **k: type("R", (), {"stdout": "m-one\tOne\nbad slug;rm\tX\n"})())
+    m = appmod.tool_models("agy")
+    assert m["m-one"] == " --model m-one" and "" in m and not any(";" in k for k in m)
