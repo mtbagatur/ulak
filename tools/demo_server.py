@@ -48,6 +48,23 @@ CHAT = [
     {"role": "assistant", "text": "I added jitter to the backoff. Let me run the billing tests to confirm."},
 ]
 
+import os
+if os.environ.get("ULAK_DEMO_WORST"):  # break-ui: worst-case data (long names, unbreakable strings, huge command, RTL/CJK/emoji)
+    LONG = "x" * 200
+    BIG = "\n".join(f"find / -name '*.log' -exec rm -f {{}} \\; # step {i} " + "a" * 60 for i in range(60))
+    SESSIONS[:] = [
+        card("w1:p1", "claude", "blocked", "blocked", "a-very-long-project-name-that-keeps-going-and-going-and-going-forever", "workspace-with-a-long-label", LONG,
+             "Unbreakable: " + LONG + " 日本語の長い文章がここに入ります 🙂🙂🙂 مرحبا بالعالم", 90, "Sonnet-4-5-with-an-absurdly-long-model-name",
+             {**APPROVAL, "details": BIG, "question": "Do you want to proceed? " * 12}),
+        card("w2:p1", "codex", "working", "working", "a", "", "", "", 5, ""),
+        card("w3:p1", "agy", "done", "done", "同じ名前", "ws", "t" * 90, "y" * 400, 99999999),
+        card("w4:p1", "claude", "idle", "idle", "same", "w1", "", "", 7200, ""),
+        card("w5:p1", "claude", "idle", "idle", "same", "w2", "", "", 7200, ""),
+    ]
+    CHAT[:] = [{"role": "user", "text": "z" * 300 + "\n" * 5 + "end"},
+               {"role": "assistant", "text": "```\n" + "long_line_" * 40 + "\n```\n" + LONG + "\nhttps://example.com/" + "p" * 200},
+               {"role": "tool", "tool": "Bash", "text": BIG[:400], "result": BIG}]
+
 app = FastAPI()
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 pins = ["work|billing-api"]

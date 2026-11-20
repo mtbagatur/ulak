@@ -74,7 +74,9 @@ const isPinned = s => pins.has(pinKey(s));
 function cardHtml(s) {
   const dup = [...state.sessions.values()].some(o => o !== s && o.project === s.project);
   const p = s.pending;
-  const inline = p && p.kind === 'approval' && !p.destructive && !p.cut && p.roles.includes('approve');
+  // one-tap approve only when the whole command is visible in the card (the preview box is ~3 lines); long ones open the session to read first
+  const shown = p ? (p.details || p.question || '') : '';
+  const inline = p && p.kind === 'approval' && !p.destructive && !p.cut && p.roles.includes('approve') && shown.length <= 160 && shown.split('\n').length <= 3;
   const stateText = s.bucket === 'idle' && s.status === 'done' ? t('doneAgo', {t: ago(s.since)}) : `${statusText(s.status)}${s.status === 'unknown' ? '' : ' · ' + ago(s.since)}`;
   const body = p ? `<pre class="c-cmd">${esc((p.destructive ? '⚠ ' : '') + (p.details || p.question))}</pre>` : (s.preview ? `<div class="c-prev">${esc(s.preview)}</div>` : '');
   return `<div class="c-top"><span class="proj">${esc(s.project)}</span>${dup && s.workspace_label ? `<span class="ws">${esc(s.workspace_label)}</span>` : ''}<span class="chip ${esc(s.agent)}">${esc(TOOLNAME[s.agent] || s.agent)}</span><span class="model">${esc(s.model)}</span><button class="pin ${isPinned(s) ? 'on' : ''}" data-pin aria-label="${esc(t('pin'))}">📌</button></div>
