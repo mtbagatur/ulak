@@ -276,6 +276,10 @@ def tidy_details(block):
         skip = False
         if re.search(r"requires approval$", t, re.I):
             continue
+        if re.match(r"Hook \S+ requires confirmation", t, re.I):
+            break  # everything after is the hook's own explanation, not the command
+        if re.fullmatch(r"(Bash command|Run shell command)", t, re.I):
+            continue
         out.append(t)
     return "\n".join(l for l in out if l)
 

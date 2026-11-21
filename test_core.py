@@ -406,3 +406,9 @@ def test_limits_order_claude_codex_agy(monkeypatch, tmp_path):
     monkeypatch.setattr(ulak, "CONFIG", {"limit_files": {"agy": str(f), "claude": str(f)}})
     monkeypatch.setattr(ulak, "codex_limits", lambda: {"id": "codex", "label": "Codex", "updated": 1, "items": []})
     assert [p["id"] for p in c.get("/api/limits", headers=h).json()["providers"]] == ["claude", "codex", "agy"]
+
+
+def test_tidy_details_keeps_only_the_command():
+    block = "Bash command\n  git push origin main\n  Run shell command\nHook PreToolUse:Bash requires confirmation for this command:\n[x] Disari giden"
+    from core import tidy_details
+    assert tidy_details(block) == "git push origin main"
