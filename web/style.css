@@ -1,5 +1,5 @@
-:root{color-scheme:dark;--bg:#21232E;--bg2:#1a1c25;--card:#2a2d3b;--card2:#323648;--line:#3b4054;--text:#B8BDCB;--strong:#e3e6ef;--muted:#7f869a;--blue:#105BFF;--blue-t:#6b9bff;--orange:#FE8500;--green:#5fd39a;--red:#ff6b6b;
-  --ease-out:cubic-bezier(.23,1,.32,1);--ease-drawer:cubic-bezier(.32,.72,0,1);--safe-t:env(safe-area-inset-top);--safe-b:env(safe-area-inset-bottom);font:16px/1.4 -apple-system,system-ui,"Segoe UI",sans-serif}
+:root{color-scheme:dark;--bg:#21232E;--bg2:#1a1c25;--card:#2a2d3b;--card2:#323648;--line:#3b4054;--text:#B8BDCB;--strong:#e3e6ef;--muted:#969db0;--blue:#105BFF;--blue-t:#6b9bff;--orange:#FE8500;--green:#5fd39a;--red:#ff6b6b;
+  --ease-out:cubic-bezier(.23,1,.32,1);--ease-drawer:cubic-bezier(.32,.72,0,1);--safe-t:env(safe-area-inset-top);--safe-r:env(safe-area-inset-right);--safe-b:env(safe-area-inset-bottom);--safe-l:env(safe-area-inset-left);font:16px/1.4 -apple-system,system-ui,"Segoe UI",sans-serif}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html{-webkit-text-size-adjust:100%}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--text);overscroll-behavior:none}
@@ -8,13 +8,14 @@ body{position:fixed;inset:0;overflow:hidden;-webkit-text-size-adjust:100%}
 #app{position:absolute;inset:0;height:var(--vvh,100dvh)}
 /* Measured in the home-screen app: the webview ends 47px above the screen bottom (inner=797, screen=844); painting past it is clipped even with body/#app grown, so the 34px safe-area inset is already outside the page: drop it */
 .sa{--safe-b:0px}
-.screen{position:absolute;inset:0;display:flex;flex-direction:column;padding-top:var(--safe-t);background:var(--bg)}
+.screen{position:absolute;inset:0;display:flex;flex-direction:column;padding:var(--safe-t) var(--safe-r) 0 var(--safe-l);background:var(--bg)}
 #session{animation:slidein .22s var(--ease-out)}
 @keyframes slidein{from{transform:translateX(24px);opacity:0}}
 button,a,[role=button],summary{touch-action:manipulation}
 button,summary,.chip{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 button{font:inherit;color:inherit;background:var(--card2);border:0;border-radius:12px;padding:11px 14px;min-height:44px;cursor:pointer;transition:transform .12s var(--ease-out),opacity .15s,background .15s}
 button:active{transform:scale(.97)}
+button:focus-visible,summary:focus-visible,[role=button]:focus-visible{outline:2px solid var(--blue-t);outline-offset:3px}
 button:disabled{opacity:.5}
 button.primary{background:var(--blue);color:#fff}
 button.warn{background:var(--orange);color:#1b1305;font-weight:650}
@@ -44,6 +45,9 @@ button.loading::after{content:"";position:absolute;left:calc(50% - 8px);top:calc
 .card.b-working{border-left-color:var(--blue)}
 .card.b-done{border-left-color:var(--green)}
 .card.b-idle{opacity:.82}
+.card-open{position:absolute;inset:0;z-index:0;width:100%;height:100%;min-height:0;padding:0;border:0;border-radius:16px;background:transparent;transition:none}
+.card-open:active{transform:none}
+.card>.c-top,.card>.state,.card>.c-title,.card>.c-cmd,.card>.c-prev,.card>.c-act{position:relative;z-index:1}
 .c-top{display:flex;align-items:center;gap:8px}
 .proj{color:var(--strong);font-size:17px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .chip{font-size:11px;font-weight:700;border-radius:6px;padding:1px 6px;background:var(--card2);color:var(--muted);flex:none}
@@ -107,7 +111,7 @@ details.tool pre{margin:6px 0 0;padding:8px 10px;background:var(--bg2);border-ra
 .send:disabled{background:var(--card2);opacity:.6}
 .sheet-back{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:20;animation:fade .15s}
 @keyframes fade{from{opacity:0}}
-.sheet{position:fixed;left:0;right:0;bottom:0;z-index:21;background:var(--bg);border-radius:22px 22px 0 0;padding:14px 16px calc(16px + var(--safe-b));max-height:86dvh;overflow-y:auto;overscroll-behavior:contain;animation:up .28s var(--ease-drawer);box-shadow:0 -10px 30px rgba(0,0,0,.4)}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:21;background:var(--bg);border-radius:22px 22px 0 0;padding:14px calc(16px + var(--safe-r)) calc(16px + var(--safe-b)) calc(16px + var(--safe-l));max-height:86dvh;overflow-y:auto;overscroll-behavior:contain;animation:up .28s var(--ease-drawer);box-shadow:0 -10px 30px rgba(0,0,0,.4)}
 @keyframes up{from{transform:translateY(100%)}}
 .sheet.closing{transform:translateY(100%);transition:transform .2s var(--ease-out);animation:none}.sheet-back.closing{opacity:0;transition:opacity .2s;animation:none}
 .sheet h3{margin:2px 0 10px;color:var(--strong);font-size:18px}
@@ -124,7 +128,15 @@ details.tool pre{margin:6px 0 0;padding:8px 10px;background:var(--bg2);border-ra
 .toast.ok{background:#1f4a37;color:#d6ffe9}.toast.err{background:#5a2d35;color:#ffd5d5}
 @keyframes drop{from{opacity:0;transform:translateY(-10px)}}
 .toast.out{opacity:0;transform:translateY(-6px);transition:opacity .18s,transform .18s var(--ease-out)}
-@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}button.loading::after{animation:spin .7s linear infinite!important}.sheet-back.closing{transition:opacity .2s!important}.toast.out{transform:none;transition:opacity .18s!important}.sheet.closing{transform:none;opacity:0;transition:opacity .2s!important}}
+@media (prefers-reduced-motion:reduce){
+  #session,.card,.prompt,.sheet-back,.sheet,.toast{animation:fade .15s ease-out both!important}
+  .b-working .state .d,.hint,button.loading::after{animation:none!important}
+  button{transition:opacity .15s ease,background .15s ease!important}
+  button:active{transform:none!important}
+  .sheet{transition:opacity .15s ease-out!important}
+  .sheet-back.closing,.toast.out{opacity:0;transform:none;transition:opacity .15s ease-out!important}
+  .sheet.closing{transform:none;opacity:0;transition:opacity .15s ease-out!important}
+}
 
 .ws{font-size:11px;opacity:.7;background:#ffffff14;border-radius:8px;padding:1px 6px;margin-left:6px}
 .pin{background:transparent;margin-left:auto;padding:2px 6px;font-size:14px;opacity:.3;min-width:32px}

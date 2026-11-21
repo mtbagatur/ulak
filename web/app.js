@@ -79,7 +79,8 @@ function cardHtml(s) {
   const inline = p && p.kind === 'approval' && !p.destructive && !p.cut && p.roles.includes('approve') && shown.length <= 160 && shown.split('\n').length <= 3;
   const stateText = s.bucket === 'idle' && s.status === 'done' ? t('doneAgo', {t: ago(s.since)}) : `${statusText(s.status)}${s.status === 'unknown' ? '' : ' · ' + ago(s.since)}`;
   const body = p ? `<pre class="c-cmd">${esc((p.destructive ? '⚠ ' : '') + (p.details || p.question))}</pre>` : (s.preview ? `<div class="c-prev">${esc(s.preview)}</div>` : '');
-  return `<div class="c-top"><span class="proj">${esc(s.project)}</span>${dup && s.workspace_label ? `<span class="ws">${esc(s.workspace_label)}</span>` : ''}<span class="chip ${esc(s.agent)}">${esc(TOOLNAME[s.agent] || s.agent)}</span><span class="model">${esc(s.model)}</span><button class="pin ${isPinned(s) ? 'on' : ''}" data-pin aria-label="${esc(t('pin'))}">📌</button></div>
+  const pinned = isPinned(s);
+  return `<button class="card-open" type="button" aria-label="${esc(t('openSession', {project: s.project}))}"></button><div class="c-top"><span class="proj">${esc(s.project)}</span>${dup && s.workspace_label ? `<span class="ws">${esc(s.workspace_label)}</span>` : ''}<span class="chip ${esc(s.agent)}">${esc(TOOLNAME[s.agent] || s.agent)}</span><span class="model">${esc(s.model)}</span><button class="pin ${pinned ? 'on' : ''}" data-pin aria-label="${esc(t(pinned ? 'unpin' : 'pin'))}" aria-pressed="${pinned}">📌</button></div>
     <div class="state"><span class="d"></span>${esc(stateText)}</div>
     ${s.title ? `<div class="c-title">${esc(s.title)}</div>` : ''}${body}
     ${inline ? `<div class="c-act"><button class="danger" data-act="deny">${esc(t('deny'))}</button><button class="warn" data-act="approve">${esc(t('approve'))}</button></div>` : ''}`;
@@ -119,7 +120,7 @@ function renderHome() {
     wrap.className = `group g-${g.id}`;
     const box = wrap.querySelector('.cards');
     box.hidden = g.id === 'idle' && !state.idleOpen;
-    patch(box, g.items, s => s.pane_id, cardHtml, s => { const b = document.createElement('div'); b._base = 'card'; b.setAttribute('role', 'button'); b.tabIndex = 0; return b; });
+    patch(box, g.items, s => s.pane_id, cardHtml, s => { const b = document.createElement('div'); b._base = 'card'; return b; });
     for (const el of box.children) { const s = state.sessions.get(el.dataset.key); el.className = `card b-${s.bucket}`; }
   }
 }
@@ -127,7 +128,7 @@ $('#groups').addEventListener('click', e => {
   if (e.target.closest('[data-toggle="1"]')) { state.idleOpen = !state.idleOpen; store.set('idleOpen', state.idleOpen ? '1' : '0'); renderHome(); return; }
   const card = e.target.closest('.card'); if (!card) return;
   const pb = e.target.closest('[data-pin]');
-  if (pb) { e.stopPropagation(); const s = state.sessions.get(card.dataset.key); if (s) { const k = pinKey(s); pins.has(k) ? pins.delete(k) : pins.add(k); renderHome(); savePins(); } return; }
+  if (pb) { e.stopPropagation(); const s = state.sessions.get(card.dataset.key); if (s) { const pane = card.dataset.key, k = pinKey(s); pins.has(k) ? pins.delete(k) : pins.add(k); renderHome(); savePins(); requestAnimationFrame(() => [...document.querySelectorAll('.card')].find(el => el.dataset.key === pane)?.querySelector('[data-pin]')?.focus({preventScroll: true})); } return; }
   const pane = card.dataset.key, a = e.target.closest('[data-act]');
   if (a) { e.stopPropagation(); inlineDecide(pane, a.dataset.act, a); return; }
   go(pane);
