@@ -179,7 +179,7 @@ def parse_prompt(text, agent="claude"):
         order = [("approve", "approve"), ("always", "always"), ("deny", "deny")]
         options = [{"n": int(approval["keys"][d]), "label": approval["labels"][d], "desc": "", "role": role, "keys": [approval["keys"][d]]}
                    for d, role in order if d in approval["keys"]]
-        done = _finish({"kind": "approval", "question": approval["question"], "header": "", "details": tidy_details(approval["command"]), "options": options, "multi": False,
+        done = _finish({"kind": "approval", "question": approval["question"], "header": "", "details": tidy_details(approval["command"]), "hook_note": hook_note(approval["command"]), "options": options, "multi": False,
                         "cut": approval.get("cut", False)})
         done["fingerprint"] = approval["fingerprint"]  # same id the approve endpoint checks
         return done
@@ -282,6 +282,19 @@ def tidy_details(block):
             continue
         out.append(t)
     return "\n".join(l for l in out if l)
+
+
+def hook_note(block):
+    """Return the first line of a hook's explanation, if present."""
+    lines = [line.strip().lstrip("│┃").strip() for line in str(block).splitlines()]
+    for i, line in enumerate(lines):
+        if re.match(r"Hook \S+ requires confirmation", line, re.I):
+            for note in lines[i + 1:]:
+                note = re.sub(r"^\[[ xX✔✓]\]\s*", "", note).strip()
+                if note:
+                    return note[:160]
+            break
+    return ""
 
 
 def _finish(p):

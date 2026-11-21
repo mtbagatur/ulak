@@ -265,7 +265,7 @@ function renderPrompt(p, status) {
   if (p.kind === 'approval') {
     const roles = Object.fromEntries(p.options.map(o => [o.role, o]));
     const denyOnly = p.cut;
-    zone.innerHTML = `<div class="prompt"><h3>${esc(t('waitingApproval'))} ${tag}</h3><pre>${esc(p.details)}</pre>${denyOnly ? `<p class="q">${esc(t('cutNote'))}</p>` : ''}
+    zone.innerHTML = `<div class="prompt"><h3>${esc(t('waitingApproval'))} ${tag}</h3><pre>${esc(p.details)}</pre>${p.hook_note ? `<p class="hook-note">${esc(p.hook_note)}</p>` : ''}${denyOnly ? `<p class="q">${esc(t('cutNote'))}</p>` : ''}
       <div class="acts"><button class="danger" data-d="deny">${esc(t('deny'))}</button>${denyOnly ? '' : `<button class="warn" data-d="approve">${esc(t('approve'))}</button>`}</div>
       ${!denyOnly && roles.always && !p.destructive ? `<button class="also" data-d="always">${esc(t('alwaysAllow'))}</button>` : ''}</div>`;
     zone.querySelectorAll('[data-d]').forEach(b => b.onclick = () => decide(b.dataset.d, b));

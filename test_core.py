@@ -424,3 +424,9 @@ def test_tidy_details_boxed_hook_lines():
     from core import tidy_details
     block = "Bash command\n  Run shell command\n  │ git push origin main\n  │ Hook PreToolUse:Bash requires confirmation for this command:\n  │ [x] why"
     assert tidy_details(block) == "git push origin main"
+
+
+def test_hook_explanation_is_extracted_as_single_line():
+    from core import hook_note
+    block = "Bash command\n  git push origin main\nHook PreToolUse:Bash requires confirmation for this command:\n[x] This sends changes to the remote repository.\nMore explanation"
+    assert hook_note(block) == "This sends changes to the remote repository."

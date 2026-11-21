@@ -87,6 +87,7 @@ details.tool pre{margin:6px 0 0;padding:8px 10px;background:var(--bg2);border-ra
 .prompt{margin:0 10px 8px;background:#34302f;border:1px solid var(--orange);border-radius:16px;padding:12px;animation:pop .18s var(--ease-out)}
 .prompt h3{margin:0 0 6px;font-size:13px;color:var(--orange);text-transform:uppercase;letter-spacing:.7px;display:flex;gap:8px;align-items:center}
 .prompt .q{color:var(--strong);margin:0 0 8px;font-size:15px}
+.prompt .hook-note{color:var(--muted);margin:-4px 0 10px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .prompt pre{margin:0 0 10px;padding:9px 11px;background:var(--bg2);border-radius:10px;font:12.5px/1.4 ui-monospace,Menlo,monospace;color:var(--strong);white-space:pre-wrap;word-break:break-all;max-height:30vh;overflow:auto;user-select:text;-webkit-user-select:text}
 .tag{font-size:11px;border-radius:6px;padding:1px 7px;background:#5a2d35;color:#ffd5d5;text-transform:none;letter-spacing:0}
 .acts{display:flex;gap:10px}.acts button{flex:1;min-height:50px;font-weight:650}
