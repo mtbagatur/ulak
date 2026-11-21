@@ -123,7 +123,7 @@ details.tool pre{margin:6px 0 0;padding:8px 10px;background:var(--bg2);border-ra
 .toast.ok{background:#1f4a37;color:#d6ffe9}.toast.err{background:#5a2d35;color:#ffd5d5}
 @keyframes drop{from{opacity:0;transform:translateY(-10px)}}
 .toast.out{opacity:0;transform:translateY(-6px);transition:opacity .18s,transform .18s var(--ease-out)}
-@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}button.loading::after{animation:spin .7s linear infinite!important}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}button.loading::after{animation:spin .7s linear infinite!important}.sheet-back.closing{transition:opacity .2s!important}.toast.out{transform:none;transition:opacity .18s!important}.sheet.closing{transform:none;opacity:0;transition:opacity .2s!important}}
 
 .ws{font-size:11px;opacity:.7;background:#ffffff14;border-radius:8px;padding:1px 6px;margin-left:6px}
 .pin{background:transparent;margin-left:auto;padding:2px 6px;font-size:14px;opacity:.3;min-width:32px}
