@@ -106,7 +106,7 @@ details.tool pre{margin:6px 0 0;padding:8px 10px;background:var(--bg2);border-ra
 .send:disabled{background:var(--card2);opacity:.6}
 .sheet-back{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:20;animation:fade .15s}
 @keyframes fade{from{opacity:0}}
-.sheet{position:fixed;left:0;right:0;bottom:0;z-index:21;background:var(--bg);border-radius:22px 22px 0 0;padding:14px 16px calc(16px + var(--safe-b));max-height:86dvh;overflow-y:auto;animation:up .28s var(--ease-drawer);box-shadow:0 -10px 30px rgba(0,0,0,.4)}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:21;background:var(--bg);border-radius:22px 22px 0 0;padding:14px 16px calc(16px + var(--safe-b));max-height:86dvh;overflow-y:auto;overscroll-behavior:contain;animation:up .28s var(--ease-drawer);box-shadow:0 -10px 30px rgba(0,0,0,.4)}
 @keyframes up{from{transform:translateY(100%)}}
 .sheet.closing{transform:translateY(100%);transition:transform .2s var(--ease-out);animation:none}.sheet-back.closing{opacity:0;transition:opacity .2s;animation:none}
 .sheet h3{margin:2px 0 10px;color:var(--strong);font-size:18px}

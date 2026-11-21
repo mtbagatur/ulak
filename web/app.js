@@ -386,6 +386,35 @@ function hideSheet() {
   sheetTimer = setTimeout(() => { s.hidden = true; b.hidden = true; s.innerHTML = ''; s.classList.remove('closing'); b.classList.remove('closing'); }, 200);
 }
 $('#sheetBack').onclick = hideSheet;
+// Sheet: drag down to dismiss. Track = 1:1 transform, release = distance OR velocity.
+(() => {
+  const s = $('#sheet'), b = $('#sheetBack');
+  let y0 = null, dy = 0, t0 = 0, drag = false;
+  s.addEventListener('touchstart', e => {
+    if (e.touches.length !== 1 || s.classList.contains('closing')) { y0 = null; return; }
+    y0 = e.touches[0].clientY; dy = 0; t0 = performance.now(); drag = false;
+  }, {passive: true});
+  s.addEventListener('touchmove', e => {
+    if (y0 === null) return;
+    const d = e.touches[0].clientY - y0;
+    if (!drag) { if (d > 6 && s.scrollTop <= 0) { drag = true; s.style.transition = b.style.transition = 'none'; y0 = e.touches[0].clientY; t0 = performance.now(); dy = 0; } else return; }
+    e.preventDefault();
+    dy = Math.max(0, e.touches[0].clientY - y0);
+    s.style.transform = `translateY(${dy}px)`;
+    b.style.opacity = String(Math.max(0, 1 - dy / s.offsetHeight));
+  }, {passive: false});
+  const end = () => {
+    if (!drag) { y0 = null; return; }
+    const v = dy / Math.max(1, performance.now() - t0);
+    drag = false; y0 = null;
+    s.style.transition = b.style.transition = '';
+    if (dy > s.offsetHeight * 0.4 || v > 0.5) { s.style.transform = ''; b.style.opacity = ''; hideSheet(); return; }
+    s.style.transition = 'transform .25s var(--ease-drawer)'; b.style.transition = 'opacity .25s';
+    s.style.transform = ''; b.style.opacity = '';
+    setTimeout(() => { s.style.transition = ''; b.style.transition = ''; }, 260);
+  };
+  s.addEventListener('touchend', end); s.addEventListener('touchcancel', end);
+})();
 
 let quickLabel = '';
 function setQuickLabel() { $('#toQuick').textContent = quickLabel ? t('quickTo', {x: quickLabel}) : t('quickSend'); }
