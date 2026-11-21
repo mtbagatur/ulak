@@ -331,15 +331,19 @@ $('#composer').addEventListener('submit', async e => {
 // attach: upload the file to the server, then put its path in the draft (agents read files by path)
 $('#attachBtn').onclick = () => $('#fileIn').click();
 $('#fileIn').onchange = async e => {
-  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  const files = [...e.target.files]; e.target.value = ''; if (!files.length) return;
   const btn = $('#attachBtn');
+  const paths = [];
   const r = await act(btn, async () => {
-    let res;
-    try { res = await fetch(`/api/sessions/${encodeURIComponent(state.current)}/upload`, {method: 'POST', headers: {'Content-Type': f.type || 'application/octet-stream'}, body: f}); } catch { throw new Error(t('offline')); }
-    if (!res.ok) { let m = `${res.status}`; try { m = (await res.json()).detail || m; } catch {} throw new Error(errText(m)); }
-    return res.json();
+    for (const f of files) {  // one upload per file, sequential; paths are collected as they succeed
+      let res;
+      try { res = await fetch(`/api/sessions/${encodeURIComponent(state.current)}/upload`, {method: 'POST', headers: {'Content-Type': f.type || 'application/octet-stream'}, body: f}); } catch { throw new Error(t('offline')); }
+      if (!res.ok) { let m = `${res.status}`; try { m = (await res.json()).detail || m; } catch {} throw new Error(errText(m)); }
+      paths.push((await res.json()).path);
+    }
+    return true;
   }, t('attached'));
-  if (r) { ta.value = (ta.value ? ta.value.replace(/\s*$/, ' ') : '') + r.path + ' '; store.set('draft:' + state.current, ta.value); autosize(); ta.focus(); }
+  if (paths.length) { ta.value = (ta.value ? ta.value.replace(/\s*$/, ' ') : '') + paths.join(' ') + ' '; store.set('draft:' + state.current, ta.value); autosize(); ta.focus(); }
 };
 // keep the composer above the iOS keyboard
 if (/iPhone|iPad|iPod/.test(navigator.userAgent)) document.documentElement.classList.add('ios');
@@ -352,9 +356,7 @@ if (window.visualViewport) {
     const kb = baseH - visualViewport.height > 120;
     document.documentElement.classList.toggle('kb', kb);
     // Measured on iPhone (?debug=1, Safari tab): visualViewport already ends above the URL pill and ^ v ✓ bar, so no reserve is needed
-    // Measured in the home-screen app: innerHeight=797 but outerHeight=screen=844 (top safe area 47), so the page stopped 47px above the screen bottom; use outerHeight when the keyboard is closed
-    const h = sa && !kb ? Math.max(outerHeight, visualViewport.height) : visualViewport.height;
-    document.documentElement.style.setProperty('--vvh', h + 'px'); window.scrollTo(0, 0); const b = $('#messages'); if (!$('#session').hidden && document.activeElement === ta) b.scrollTop = b.scrollHeight; };
+    document.documentElement.style.setProperty('--vvh', visualViewport.height + 'px'); window.scrollTo(0, 0); const b = $('#messages'); if (!$('#session').hidden && document.activeElement === ta) b.scrollTop = b.scrollHeight; };
   let debugOn = false;
   const startDebug = () => { if (debugOn) return; debugOn = true;  // on-screen metrics for diagnosing keyboard gaps
     const d = document.createElement('pre');

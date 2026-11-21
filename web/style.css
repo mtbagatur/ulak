@@ -6,8 +6,8 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--text);overscroll
 body{position:fixed;inset:0;overflow:hidden;-webkit-text-size-adjust:100%}
 [hidden]{display:none!important}
 #app{position:absolute;inset:0;height:var(--vvh,100dvh)}
-.sa body{bottom:auto;height:var(--vvh,100%)}  /* body is fixed+overflow:hidden, so it clipped #app at innerHeight (797) */
-.sa #app{position:fixed;bottom:auto}
+/* Measured in the home-screen app: the webview ends 47px above the screen bottom (inner=797, screen=844); painting past it is clipped even with body/#app grown, so the 34px safe-area inset is already outside the page: drop it */
+.sa{--safe-b:0px}
 .screen{position:absolute;inset:0;display:flex;flex-direction:column;padding-top:var(--safe-t);background:var(--bg)}
 #session{animation:slidein .22s var(--ease-out)}
 @keyframes slidein{from{transform:translateX(24px);opacity:0}}
