@@ -345,12 +345,16 @@ $('#fileIn').onchange = async e => {
 if (/iPhone|iPad|iPod/.test(navigator.userAgent)) document.documentElement.classList.add('ios');
 if (window.visualViewport) {
   let baseH = 0;
+  const sa = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
+  if (sa) document.documentElement.classList.add('sa');
   const fit = () => {
     baseH = Math.max(baseH, visualViewport.height);  // tallest viewport seen = keyboard closed (innerHeight also shrinks in a home-screen app)
     const kb = baseH - visualViewport.height > 120;
     document.documentElement.classList.toggle('kb', kb);
     // Measured on iPhone (?debug=1, Safari tab): visualViewport already ends above the URL pill and ^ v ✓ bar, so no reserve is needed
-    document.documentElement.style.setProperty('--vvh', visualViewport.height + 'px'); window.scrollTo(0, 0); const b = $('#messages'); if (!$('#session').hidden && document.activeElement === ta) b.scrollTop = b.scrollHeight; };
+    // Measured in the home-screen app: innerHeight=797 but outerHeight=screen=844 (top safe area 47), so the page stopped 47px above the screen bottom; use outerHeight when the keyboard is closed
+    const h = sa && !kb ? Math.max(outerHeight, visualViewport.height) : visualViewport.height;
+    document.documentElement.style.setProperty('--vvh', h + 'px'); window.scrollTo(0, 0); const b = $('#messages'); if (!$('#session').hidden && document.activeElement === ta) b.scrollTop = b.scrollHeight; };
   let debugOn = false;
   const startDebug = () => { if (debugOn) return; debugOn = true;  // on-screen metrics for diagnosing keyboard gaps
     const d = document.createElement('pre');
