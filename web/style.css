@@ -1,5 +1,5 @@
 :root{color-scheme:dark;--bg:#21232E;--bg2:#1a1c25;--card:#2a2d3b;--card2:#323648;--line:#3b4054;--text:#B8BDCB;--strong:#e3e6ef;--muted:#7f869a;--blue:#105BFF;--blue-t:#6b9bff;--orange:#FE8500;--green:#5fd39a;--red:#ff6b6b;
-  --ease-out:cubic-bezier(.23,1,.32,1);--safe-t:env(safe-area-inset-top);--safe-b:env(safe-area-inset-bottom);font:16px/1.4 -apple-system,system-ui,"Segoe UI",sans-serif}
+  --ease-out:cubic-bezier(.23,1,.32,1);--ease-drawer:cubic-bezier(.32,.72,0,1);--safe-t:env(safe-area-inset-top);--safe-b:env(safe-area-inset-bottom);font:16px/1.4 -apple-system,system-ui,"Segoe UI",sans-serif}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html{-webkit-text-size-adjust:100%}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--text);overscroll-behavior:none}
@@ -106,8 +106,9 @@ details.tool pre{margin:6px 0 0;padding:8px 10px;background:var(--bg2);border-ra
 .send:disabled{background:var(--card2);opacity:.6}
 .sheet-back{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:20;animation:fade .15s}
 @keyframes fade{from{opacity:0}}
-.sheet{position:fixed;left:0;right:0;bottom:0;z-index:21;background:var(--bg);border-radius:22px 22px 0 0;padding:14px 16px calc(16px + var(--safe-b));max-height:86dvh;overflow-y:auto;animation:up .2s var(--ease-out);box-shadow:0 -10px 30px rgba(0,0,0,.4)}
-@keyframes up{from{transform:translateY(40px);opacity:0}}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:21;background:var(--bg);border-radius:22px 22px 0 0;padding:14px 16px calc(16px + var(--safe-b));max-height:86dvh;overflow-y:auto;animation:up .28s var(--ease-drawer);box-shadow:0 -10px 30px rgba(0,0,0,.4)}
+@keyframes up{from{transform:translateY(100%)}}
+.sheet.closing{transform:translateY(100%);transition:transform .2s var(--ease-out);animation:none}.sheet-back.closing{opacity:0;transition:opacity .2s;animation:none}
 .sheet h3{margin:2px 0 10px;color:var(--strong);font-size:18px}
 .sheet p{margin:0 0 10px}
 .sheet input[type=search],.sheet textarea,.sheet select{width:100%;font:16px -apple-system,system-ui,"Segoe UI",sans-serif;background:var(--card);color:var(--strong);border:1px solid var(--line);border-radius:12px;padding:11px 13px;margin-bottom:10px;outline:none}
@@ -121,6 +122,7 @@ details.tool pre{margin:6px 0 0;padding:8px 10px;background:var(--bg2);border-ra
 .toast{background:var(--card2);color:var(--strong);padding:10px 16px;border-radius:999px;font-size:14px;box-shadow:0 6px 20px rgba(0,0,0,.45);animation:drop .2s var(--ease-out);max-width:90%}
 .toast.ok{background:#1f4a37;color:#d6ffe9}.toast.err{background:#5a2d35;color:#ffd5d5}
 @keyframes drop{from{opacity:0;transform:translateY(-10px)}}
+.toast.out{opacity:0;transform:translateY(-6px);transition:opacity .18s,transform .18s var(--ease-out)}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}button.loading::after{animation:spin .7s linear infinite!important}}
 
 .ws{font-size:11px;opacity:.7;background:#ffffff14;border-radius:8px;padding:1px 6px;margin-left:6px}

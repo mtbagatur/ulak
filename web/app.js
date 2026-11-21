@@ -26,7 +26,7 @@ function toast(text, kind = '') {
   el.className = `toast ${kind}`; el.textContent = text;
   $('#toasts').appendChild(el);
   if (kind === 'ok' && navigator.vibrate) navigator.vibrate(12);
-  setTimeout(() => el.remove(), kind === 'err' ? 4200 : 2200);
+  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 200); }, kind === 'err' ? 4200 : 2200);
 }
 async function act(btn, fn, okText) {
   // Button loading state + toast, errors never become unhandled rejections.
@@ -377,8 +377,14 @@ if (window.visualViewport) {
 }
 
 // ---------- sheets ----------
-function showSheet(html) { $('#sheet').innerHTML = html; $('#sheet').hidden = false; $('#sheetBack').hidden = false; }
-function hideSheet() { $('#sheet').hidden = true; $('#sheetBack').hidden = true; $('#sheet').innerHTML = ''; }
+let sheetTimer = 0;
+function showSheet(html) { clearTimeout(sheetTimer); $('#sheet').classList.remove('closing'); $('#sheetBack').classList.remove('closing'); $('#sheet').innerHTML = html; $('#sheet').hidden = false; $('#sheetBack').hidden = false; }
+function hideSheet() {
+  const s = $('#sheet'), b = $('#sheetBack');
+  if (s.hidden) return;
+  clearTimeout(sheetTimer); s.classList.add('closing'); b.classList.add('closing');
+  sheetTimer = setTimeout(() => { s.hidden = true; b.hidden = true; s.innerHTML = ''; s.classList.remove('closing'); b.classList.remove('closing'); }, 200);
+}
 $('#sheetBack').onclick = hideSheet;
 
 let quickLabel = '';
