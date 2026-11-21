@@ -418,3 +418,9 @@ def test_codex_idle_composer_is_chrome():
     from chat import clean_lines
     screen = "› devam\n\n• Tamam.\n\n› Ask Codex to do anything\n\n  GPT-6-Luna default · ~/ortak/panel · Panel devri"
     assert clean_lines(screen) == ["› devam", "", "• Tamam."]
+
+
+def test_tidy_details_boxed_hook_lines():
+    from core import tidy_details
+    block = "Bash command\n  Run shell command\n  │ git push origin main\n  │ Hook PreToolUse:Bash requires confirmation for this command:\n  │ [x] why"
+    assert tidy_details(block) == "git push origin main"

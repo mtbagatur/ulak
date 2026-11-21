@@ -267,7 +267,7 @@ def tidy_details(block):
     """Drop Claude's hint line (and its wrapped tail) and the boilerplate from an approval block."""
     out, skip = [], False
     for line in str(block).splitlines():
-        t = line.strip()
+        t = line.strip().lstrip("│┃").strip()
         if t.startswith("Tip:"):
             skip = True
             continue

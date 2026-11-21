@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from chat import claude_chat, claude_path, detect_model, preview_from_screen, screen_chat, SPINNER, strip_ansi
-from core import NotificationGate, bucket, build_push, is_destructive, parse_approval, parse_codex_limits, parse_limits, parse_prompt, project_name, status_rank
+from core import NotificationGate, tidy_details, bucket, build_push, is_destructive, parse_approval, parse_codex_limits, parse_limits, parse_prompt, project_name, status_rank
 from herdr_client import HerdrClient, HerdrError
 
 ROOT = Path(__file__).parent
@@ -588,7 +588,7 @@ async def approve(pane: str, action: Action):
         if not valid:
             token = secrets.token_urlsafe(24)
             pending_confirm[pane] = {"token": token, "decision": action.decision, "fingerprint": pending["fingerprint"], "expires": time.time() + 120}
-            return {"confirm_required": True, "confirm_token": token, "command": pending["command"]}
+            return {"confirm_required": True, "confirm_token": token, "command": tidy_details(pending["command"])}
         pending_confirm.pop(pane, None)
     await client.call("agent.send_keys", {"target": pane, "keys": [pending["keys"][action.decision]]})
     return {"ok": True, "next": next_blocked(pane)}
