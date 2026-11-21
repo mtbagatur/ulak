@@ -355,9 +355,13 @@ if (window.visualViewport) {
     const d = document.createElement('pre');
     d.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;margin:0;padding:4px 6px;font:11px/1.3 monospace;background:#000c;color:#0f0;pointer-events:none;white-space:pre-wrap';
     document.body.appendChild(d);
-    const dbg = () => { const c = $('#composer'), r = c && c.getBoundingClientRect(); d.textContent =
-      `vv.h=${visualViewport.height.toFixed(0)} vv.top=${visualViewport.offsetTop.toFixed(0)} inner=${innerHeight} screen=${screen.height} base=${baseH.toFixed(0)}\n` +
-      `composer.bottom=${r ? r.bottom.toFixed(0) : '-'} --vvh=${document.documentElement.style.getPropertyValue('--vvh')} cls=${document.documentElement.className}`; };
+    const probe = document.createElement('div');  // resolves env(safe-area-inset-*) to pixels
+    probe.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none;top:0;left:0;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)';
+    document.body.appendChild(probe);
+    const dbg = () => { const c = $('#composer'), r = c && c.getBoundingClientRect(), a = $('#app'), ar = a && a.getBoundingClientRect(), cs = getComputedStyle(probe), de = document.documentElement; d.textContent =
+      `vv.h=${visualViewport.height.toFixed(0)} vv.top=${visualViewport.offsetTop.toFixed(0)} inner=${innerHeight} outer=${outerHeight} screen=${screen.height} base=${baseH.toFixed(0)}\n` +
+      `html.clientH=${de.clientHeight} body.clientH=${document.body.clientHeight} app.bottom=${ar ? ar.bottom.toFixed(0) : '-'} composer.bottom=${r ? r.bottom.toFixed(0) : '-'} --vvh=${de.style.getPropertyValue('--vvh')}\n` +
+      `safe t/r/b/l=${cs.paddingTop}/${cs.paddingRight}/${cs.paddingBottom}/${cs.paddingLeft} standalone=${navigator.standalone === true || matchMedia('(display-mode: standalone)').matches} scrollY=${scrollY.toFixed(0)} cls=${de.className}`; };
     visualViewport.addEventListener('resize', dbg); visualViewport.addEventListener('scroll', dbg); document.addEventListener('focusin', () => setTimeout(dbg, 300)); setInterval(dbg, 500); dbg();
   }
   visualViewport.addEventListener('resize', fit); visualViewport.addEventListener('scroll', () => window.scrollTo(0, 0)); fit();
