@@ -412,3 +412,9 @@ def test_tidy_details_keeps_only_the_command():
     block = "Bash command\n  git push origin main\n  Run shell command\nHook PreToolUse:Bash requires confirmation for this command:\n[x] Disari giden"
     from core import tidy_details
     assert tidy_details(block) == "git push origin main"
+
+
+def test_codex_idle_composer_is_chrome():
+    from chat import clean_lines
+    screen = "› devam\n\n• Tamam.\n\n› Ask Codex to do anything\n\n  GPT-6-Luna default · ~/ortak/panel · Panel devri"
+    assert clean_lines(screen) == ["› devam", "", "• Tamam."]
