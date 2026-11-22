@@ -379,13 +379,39 @@ if (window.visualViewport) {
 
 // ---------- sheets ----------
 let sheetTimer = 0;
-function showSheet(html) { clearTimeout(sheetTimer); $('#sheet').classList.remove('closing'); $('#sheetBack').classList.remove('closing'); $('#sheet').innerHTML = html; $('#sheet').hidden = false; $('#sheetBack').hidden = false; }
+let sheetOpener = null;
+function showSheet(html) {
+  const s = $('#sheet');
+  if (s.hidden) sheetOpener = document.activeElement;
+  clearTimeout(sheetTimer); s.classList.remove('closing'); $('#sheetBack').classList.remove('closing');
+  s.innerHTML = html;
+  const title = s.querySelector('h3');
+  if (title) { title.id = 'sheetTitle'; s.setAttribute('aria-labelledby', title.id); }
+  else s.removeAttribute('aria-labelledby');
+  s.hidden = false; $('#sheetBack').hidden = false;
+  (s.querySelector('[autofocus],button:not(:disabled),input:not(:disabled),textarea:not(:disabled),select:not(:disabled)') || s).focus({preventScroll: true});
+}
 function hideSheet() {
   const s = $('#sheet'), b = $('#sheetBack');
   if (s.hidden) return;
   clearTimeout(sheetTimer); s.classList.add('closing'); b.classList.add('closing');
-  sheetTimer = setTimeout(() => { s.hidden = true; b.hidden = true; s.innerHTML = ''; s.classList.remove('closing'); b.classList.remove('closing'); }, 200);
+  sheetTimer = setTimeout(() => {
+    s.hidden = true; b.hidden = true; s.innerHTML = ''; s.classList.remove('closing'); b.classList.remove('closing');
+    if (sheetOpener?.isConnected && !sheetOpener.closest('[hidden]')) sheetOpener.focus({preventScroll: true});
+    sheetOpener = null;
+  }, 200);
 }
+document.addEventListener('keydown', e => {
+  const s = $('#sheet');
+  if (s.hidden) return;
+  if (e.key === 'Escape') { e.preventDefault(); hideSheet(); return; }
+  if (e.key !== 'Tab') return;
+  const focusable = [...s.querySelectorAll('a[href],button:not(:disabled),input:not(:disabled),textarea:not(:disabled),select:not(:disabled),[tabindex]:not([tabindex="-1"])')].filter(el => !el.hidden);
+  if (!focusable.length) { e.preventDefault(); s.focus(); return; }
+  const first = focusable[0], last = focusable[focusable.length - 1];
+  if (e.shiftKey && (document.activeElement === first || !s.contains(document.activeElement))) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && (document.activeElement === last || !s.contains(document.activeElement))) { e.preventDefault(); first.focus(); }
+});
 $('#sheetBack').onclick = hideSheet;
 // Sheet: drag down to dismiss. Track = 1:1 transform, release = distance OR velocity.
 (() => {

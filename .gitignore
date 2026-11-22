@@ -8,3 +8,4 @@ devir/
 NOTES.md
 docs/*
 !docs/screenshots/
+!docs/rakip-analizi.md
