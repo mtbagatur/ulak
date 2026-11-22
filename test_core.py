@@ -1,6 +1,6 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from core import NotificationGate, is_destructive, quiet_hours, status_rank
+from core import NotificationGate, is_destructive, quiet_hours, status_rank, bucket
 import asyncio, json
 from herdr_client import HerdrClient
 from fastapi.testclient import TestClient
@@ -27,6 +27,9 @@ def test_daytime_allowed(): assert not quiet_hours(datetime(2026,11,20,12,0,tzin
 def test_quick_target_not_special_in_order():
     assert status_rank({"workspace_label":"main","status":"working","since":1}) > status_rank({"workspace_label":"work","status":"working","since":2})
 def test_blocked_before_working(): assert status_rank({'status':'blocked'}) < status_rank({'status':'working'})
+def test_unknown_is_not_grouped_as_idle():
+    assert bucket("unknown") == "unknown"
+    assert status_rank({"bucket": "unknown"}) < status_rank({"bucket": "idle"})
 
 def test_tailscale_header_required(monkeypatch):
     monkeypatch.setattr(ulak, 'allowed_login', 'user@example.test')
@@ -52,6 +55,56 @@ def test_fake_herdr_socket_rpc(tmp_path):
             result=await client.call('agent.list')
             assert result=={'ok':True,'method':'agent.list'}
             await client.close()
+    asyncio.run(scenario())
+
+def test_passive_screen_reads_do_not_request_scrollback(monkeypatch):
+    class ReadClient:
+        def __init__(self): self.params = []
+        async def call(self, method, params=None):
+            self.params.append(params)
+            return {"read": {"text": params["source"]}}
+
+    async def scenario():
+        fake = ReadClient()
+        monkeypatch.setattr(ulak, "client", fake)
+        ulak.read_cache.clear()
+        assert await ulak.read_screen("w1:p1", "idle", force=True) == "visible"
+        # A user-opened chat may inspect bounded recent history; it must not reuse
+        # the passive snapshot cached for the session card.
+        assert await ulak.read_screen("w1:p1", "idle", history=True) == "recent_unwrapped"
+        assert await ulak.read_screen("w1:p1", "blocked", history=True, force=True) == "visible"
+        assert [p["source"] for p in fake.params] == ["visible", "recent_unwrapped", "visible"]
+        assert fake.params[1]["lines"] == 120
+        ulak.read_cache.clear()
+
+    asyncio.run(scenario())
+
+def test_closed_pane_drops_ephemeral_state(monkeypatch):
+    class CloseClient:
+        async def subscribe(self, subscriptions):
+            return None
+
+    async def scenario():
+        pane = "w99:p99"
+        monkeypatch.setattr(ulak, "client", CloseClient())
+        ulak.sessions[pane] = {"pane_id": pane}
+        ulak.raw_agents[pane] = {"pane_id": pane}
+        ulak.read_cache[pane] = (0, "stale", "idle", "visible")
+        ulak.pending_confirm[pane] = {"token": "test"}
+        ulak.pushed[pane] = "fingerprint"
+        ulak.work_started[pane] = 1
+        ulak.pane_ids.add(pane)
+
+        await ulak.handle_event({"event": "pane.closed", "data": {"pane_id": pane}})
+
+        assert pane not in ulak.sessions
+        assert pane not in ulak.raw_agents
+        assert pane not in ulak.read_cache
+        assert pane not in ulak.pending_confirm
+        assert pane not in ulak.pushed
+        assert pane not in ulak.work_started
+        assert pane not in ulak.pane_ids
+
     asyncio.run(scenario())
 
 
@@ -123,6 +176,18 @@ def test_destructive_needs_two_steps(monkeypatch):
     assert c.post("/api/sessions/w9:p1/approve", headers=h, json={"decision": "always", "fingerprint": fp}).status_code == 400
     ok = c.post("/api/sessions/w9:p1/approve", headers=h, json={"decision": "approve", "fingerprint": fp, "confirm_token": r["confirm_token"]})
     assert ok.status_code == 200 and fake.sent == [["1"]]
+
+def test_destructive_confirmation_rejects_changed_prompt(monkeypatch):
+    fake, c, h = _setup(monkeypatch, CLAUDE)
+    fp = parse_approval(CLAUDE)["fingerprint"]
+    first = c.post("/api/sessions/w9:p1/approve", headers=h, json={"decision": "approve", "fingerprint": fp}).json()
+    assert first["confirm_required"]
+
+    fake.text = CLAUDE.replace("/ulak-probe", "/ulak-probe-changed")
+    changed = c.post("/api/sessions/w9:p1/approve", headers=h, json={
+        "decision": "approve", "fingerprint": fp, "confirm_token": first["confirm_token"]
+    })
+    assert changed.status_code == 409 and fake.sent == []
 
 def test_destructive_deny_is_one_step(monkeypatch):
     fake, c, h = _setup(monkeypatch, CLAUDE)

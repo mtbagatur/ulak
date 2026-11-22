@@ -42,7 +42,7 @@ since = {}          # pane -> {"status", "ts"}
 pending_confirm = {}
 subscribers = set()
 pane_ids = set()
-read_cache = {}     # pane -> (time, screen text)
+read_cache = {}     # pane -> (time, screen text, status, read source)
 pushed = {}         # pane -> last pushed prompt fingerprint
 work_started = {}   # pane -> when the current working stretch began (kept while blocked)
 gate = NotificationGate()
@@ -163,21 +163,22 @@ async def subscribe_pane(pane):
     await resubscribe()
 
 
-async def read_screen(pane, status, max_age=3.0, force=False):
-    """Visible screen for a blocked pane, recent output otherwise (cached for a moment)."""
+async def read_screen(pane, status, max_age=3.0, force=False, history=False):
+    """Read passively from the visible screen; read recent history only on an explicit chat view."""
+    source = "recent_unwrapped" if history and status != "blocked" else "visible"
     hit = read_cache.get(pane)
-    if hit and not force and time.time() - hit[0] < max_age and hit[2] == status:
+    if hit and not force and time.time() - hit[0] < max_age and hit[2] == status and hit[3] == source:
         return hit[1]
-    if status == "blocked":
-        params = {"target": pane, "source": "visible"}
-    else:
-        params = {"target": pane, "source": "recent_unwrapped", "lines": 120}
+    params = {"target": pane, "source": source}
+    if source == "recent_unwrapped":
+        params["lines"] = 120
     try:
         result = await client.call("agent.read", params)
     except HerdrError:
         result = await client.call("agent.read", {"target": pane, "source": "visible"})
+        source = "visible"
     text = result.get("read", {}).get("text", "")
-    read_cache[pane] = (time.time(), text, status)
+    read_cache[pane] = (time.time(), text, status, source)
     return text
 
 
@@ -286,6 +287,10 @@ async def load_all():
     gone = set(sessions) - set(raw_agents)
     for pane in gone:
         sessions.pop(pane, None)
+        read_cache.pop(pane, None)
+        pending_confirm.pop(pane, None)
+        pushed.pop(pane, None)
+        work_started.pop(pane, None)
     sem = asyncio.Semaphore(6)
 
     async def one(pane):
@@ -335,7 +340,10 @@ async def handle_event(msg):
     elif event == "pane_closed" and pane:
         sessions.pop(pane, None)
         raw_agents.pop(pane, None)
+        read_cache.pop(pane, None)
         pending_confirm.pop(pane, None)
+        pushed.pop(pane, None)
+        work_started.pop(pane, None)
         pane_ids.discard(pane)
         await resubscribe()
         await broadcast({"type": "removed", "pane": pane})
@@ -511,7 +519,7 @@ async def list_sessions():
 async def chat(pane: str, limit: int = 60):
     item = must_exist(pane)
     status = item.get("status", "unknown")
-    screen = await read_screen(pane, status, max_age=1.0)
+    screen = await read_screen(pane, status, max_age=1.0, history=True)
     prompt = None
     if status == "blocked":
         prompt = parse_prompt(screen, item.get("agent", "claude"))

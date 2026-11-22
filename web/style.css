@@ -140,7 +140,7 @@ details.tool pre{margin:6px 0 0;padding:8px 10px;background:var(--bg2);border-ra
   .sheet.closing{transform:none;opacity:0;transition:opacity .15s ease-out!important}
 }
 
-.ws{font-size:11px;opacity:.7;background:#ffffff14;border-radius:8px;padding:1px 6px;margin-left:6px}
+.ws{font-size:11px;opacity:.7;background:#ffffff14;border-radius:8px;padding:1px 6px;margin-left:6px;min-width:0;flex:0 1 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pin{background:transparent;margin-left:auto;padding:2px 6px;font-size:14px;opacity:.3;min-width:32px}
 .pin.on{opacity:1}
 

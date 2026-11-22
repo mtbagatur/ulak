@@ -74,8 +74,8 @@ function ago(ts) {
 }
 
 // ---------- home ----------
-const GROUPS = ['blocked', 'working', 'done', 'idle'];
-const rank = s => ({blocked: 0, working: 1, done: 2, idle: 3}[s.bucket] ?? 3);
+const GROUPS = ['blocked', 'working', 'done', 'unknown', 'idle'];
+const rank = s => ({blocked: 0, working: 1, done: 2, unknown: 3, idle: 4}[s.bucket] ?? 3);
 function sorted() {
   return [...state.sessions.values()].sort((a, b) => rank(a) - rank(b) || (b.since - a.since));
 }
@@ -132,13 +132,14 @@ function patch(container, items, keyOf, htmlOf, make) {
 function renderHome() {
   const all = sorted();
   const blocked = all.filter(s => s.bucket === 'blocked').length;
-  $('#summary').innerHTML = !all.length ? '' : blocked ? t('summaryBlocked', {n: blocked}) : t('summaryCalm', {n: all.filter(s => s.bucket === 'working').length});
+  const unknown = all.filter(s => s.bucket === 'unknown').length;
+  $('#summary').innerHTML = !all.length ? '' : blocked ? t('summaryBlocked', {n: blocked}) : unknown ? t('summaryUnknown', {n: unknown}) : t('summaryCalm', {n: all.filter(s => s.bucket === 'working').length});
   if (navigator.setAppBadge) { blocked ? navigator.setAppBadge(blocked).catch(() => {}) : navigator.clearAppBadge?.().catch(() => {}); }
   const groups = $('#groups');
   if (!all.length) { groups.innerHTML = `<div class="empty">${t('empty')}</div>`; return; }
   if (groups.querySelector('.empty')) groups.innerHTML = '';
   const pinned = all.filter(isPinned);
-  const defs = [...(pinned.length ? [{id: 'pinned', title: t('g_pinned'), items: pinned}] : []), ...GROUPS.map(id => ({id, title: t('g_' + id), items: all.filter(s => !isPinned(s) && (s.bucket === id || (id === 'idle' && !['blocked', 'working', 'done'].includes(s.bucket))))}))].filter(g => g.items.length);
+  const defs = [...(pinned.length ? [{id: 'pinned', title: t('g_pinned'), items: pinned}] : []), ...GROUPS.map(id => ({id, title: t('g_' + id), items: all.filter(s => !isPinned(s) && s.bucket === id)}))].filter(g => g.items.length);
   patch(groups, defs, g => g.id, g => `<h2 class="${g.id === 'idle' ? 'tap' : ''}" data-toggle="${g.id === 'idle' ? 1 : ''}"><span>${g.title} · ${g.items.length}</span>${g.id === 'idle' ? `<span>${state.idleOpen ? t('hide') : t('show')}</span>` : ''}</h2><div class="cards"></div>`, g => {
     const el = document.createElement('div'); el._base = 'group'; return el;
   });

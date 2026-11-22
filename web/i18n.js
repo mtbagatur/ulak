@@ -2,10 +2,10 @@
 // Ulak i18n: tiny dictionary + t(). Language: saved choice, else browser language (tr -> tr, anything else -> en).
 const I18N = {
   en: {
-    appName: 'Ulak', st_blocked: 'Needs you', st_working: 'Working', st_done: 'Done', st_idle: 'Idle', st_unknown: 'Starting…',
-    g_pinned: 'Pinned', g_blocked: 'Needs you', g_working: 'Working', g_done: 'Just finished', g_idle: 'Idle',
+    appName: 'Ulak', st_blocked: 'Needs you', st_working: 'Working', st_done: 'Done', st_idle: 'Idle', st_unknown: 'Status unknown',
+    g_pinned: 'Pinned', g_blocked: 'Needs you', g_working: 'Working', g_done: 'Just finished', g_unknown: 'Status unknown', g_idle: 'Idle',
     show: 'Show', hide: 'Hide', justNow: 'just now', min: 'm', hour: 'h', day: 'd',
-    doneAgo: 'Done · {t}', summaryBlocked: '<b>{n}</b> waiting for you', summaryCalm: '{n} working · all calm',
+    doneAgo: 'Done · {t}', summaryBlocked: '<b>{n}</b> waiting for you', summaryUnknown: 'Unknown status: {n}', summaryCalm: '{n} working · all calm',
     empty: 'No sessions yet.<br>Start one below.', openSession: 'Open {project}', pin: 'Pin', unpin: 'Unpin', pinFail: 'Could not save the pin',
     deny: 'Deny', approve: 'Approve', approved: 'Approved', denied: 'Denied', sent: 'Sent', replySent: 'Reply sent',
     offline: 'No connection', reconnecting: 'Reconnecting…', enableBell: 'Turn on notifications', history: 'Notification history',
@@ -26,10 +26,10 @@ const I18N = {
     pane: 'pane', settings: 'Settings', install: 'Add to Home Screen for push notifications',
   },
   tr: {
-    appName: 'Ulak', st_blocked: 'Seni bekliyor', st_working: 'Çalışıyor', st_done: 'Bitti', st_idle: 'Boşta', st_unknown: 'Başlıyor…',
-    g_pinned: 'Sabitlenenler', g_blocked: 'Seni bekleyenler', g_working: 'Çalışıyor', g_done: 'Yeni bitenler', g_idle: 'Boşta',
+    appName: 'Ulak', st_blocked: 'Seni bekliyor', st_working: 'Çalışıyor', st_done: 'Bitti', st_idle: 'Boşta', st_unknown: 'Durum bilinmiyor',
+    g_pinned: 'Sabitlenenler', g_blocked: 'Seni bekleyenler', g_working: 'Çalışıyor', g_done: 'Yeni bitenler', g_unknown: 'Durumu bilinmeyenler', g_idle: 'Boşta',
     show: 'Göster', hide: 'Gizle', justNow: 'az önce', min: 'dk', hour: 'sa', day: 'g',
-    doneAgo: 'Bitti · {t}', summaryBlocked: '<b>{n}</b> oturum seni bekliyor', summaryCalm: '{n} çalışıyor · hepsi sakin',
+    doneAgo: 'Bitti · {t}', summaryBlocked: '<b>{n}</b> oturum seni bekliyor', summaryUnknown: 'Durumu bilinmeyen oturum: {n}', summaryCalm: '{n} çalışıyor · hepsi sakin',
     empty: 'Henüz oturum yok.<br>Aşağıdan yeni bir tane başlat.', openSession: '{project} oturumunu aç', pin: 'Sabitle', unpin: 'Sabitlemeyi kaldır', pinFail: 'Sabitleme kaydedilemedi',
     deny: 'Reddet', approve: 'Onayla', approved: 'Onaylandı', denied: 'Reddedildi', sent: 'Gönderildi', replySent: 'Yanıt gönderildi',
     offline: 'Bağlantı yok', reconnecting: 'Yeniden bağlanıyor…', enableBell: 'Bildirimleri aç', history: 'Bildirim geçmişi',

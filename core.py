@@ -32,7 +32,7 @@ def is_destructive(command, rules_path=None):
     return False
 
 
-BUCKETS = {"blocked": 0, "working": 1, "done": 2, "idle": 3, "unknown": 3}
+BUCKETS = {"blocked": 0, "working": 1, "done": 2, "unknown": 3, "idle": 4}
 DONE_WINDOW = 3600  # a finished session counts as "recent" for an hour, then it is just idle
 
 
