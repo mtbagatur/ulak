@@ -52,10 +52,20 @@ class FakeAPI:
         self.ended = threading.Event()
         self.stream_generation = 0
         self.ready = threading.Event()
+        self.fail_list = False
+        self.fail_chat = False
+        self.list_failed = threading.Event()
+        self.chat_failed = threading.Event()
+        self.list_started = threading.Event()
+        self.list_respond = threading.Event()
+        self.list_respond.set()
 
     def publish_prompt(self, approval):
+        self.publish_session("blocked", approval)
+
+    def publish_session(self, status, approval=None):
         self.approval = approval
-        self.cards = [card("blocked", pending=approval)]
+        self.cards = [card(status, pending=approval)]
         self.events.append({"type": "session", "session": self.cards[0]})
 
 
@@ -73,14 +83,28 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def do_GET(self):
         if self.path == "/api/events":
             self.stream()
         elif self.path == "/api/sessions":
-            self.json(self.api.cards)
+            if self.api.fail_list:
+                self.json({"detail": "Fixture snapshot unavailable"}, 503)
+                self.api.list_failed.set()
+                return
+            rows = self.api.cards
+            self.api.list_started.set()
+            assert self.api.list_respond.wait(8), "test did not release the held snapshot"
+            self.json(rows)
         elif self.path == "/api/sessions/fake%3Ap1/chat":
+            if self.api.fail_chat:
+                self.json({"detail": "Fixture chat unavailable"}, 503)
+                self.api.chat_failed.set()
+                return
             item = self.api.cards[0]
             self.json({
                 "messages": self.api.messages, "source": "transcript", "prompt": self.api.approval,
@@ -142,6 +166,7 @@ def serve_fake_api():
             yield api, f"http://127.0.0.1:{server.server_port}"
         finally:
             api.respond.set()
+            api.list_respond.set()
             api.ended.set()
             server.shutdown()
             worker.join()
@@ -259,6 +284,9 @@ def test_inline_approval_ignores_second_keyboard_reply_while_request_is_pending(
     chrome.click("[data-act=deny]")
     api.respond.set()
     chrome.wait("document.querySelector('#toasts .ok')?.textContent === 'Reply sent'")
+    assert chrome.js("document.activeElement.getAttribute('aria-disabled')") == "true"
+    chrome.key("Enter", "Enter", 13)
+    api.publish_prompt({**APPROVAL, "fingerprint": "follow-up"})
     chrome.wait("document.activeElement.matches('[data-act=approve]') && !document.activeElement.hasAttribute('aria-disabled')")
     assert api.requests == [{"decision": "approve", "fingerprint": APPROVAL["fingerprint"]}]
 
@@ -322,13 +350,33 @@ def test_changed_prompt_cannot_be_approved_by_old_confirmation_sheet(ulak):
 
 
 def test_delayed_approval_navigation_does_not_interrupt_another_pane(ulak):
-    chrome, _, url = ulak
+    chrome, api, url = ulak
     open_first(chrome, url)
+    chrome.js("""(() => {
+        const schedule = window.setTimeout;
+        window.setTimeout = (callback, delay, ...args) => {
+            if (delay !== 450) return schedule(callback, delay, ...args);
+            window.finishApprovalNavigation = () => callback(...args);
+            return 0;
+        };
+    })()""")
     chrome.click(APPROVE)
     chrome.wait("document.querySelector('#toasts .ok') !== null")
-    chrome.js("go('fake:p2'); setTimeout(() => window.navigationChecked = true, 550)")
-    chrome.wait("window.navigationChecked")
+    api.publish_session("working")
+    chrome.wait("typeof window.finishApprovalNavigation === 'function'")
+    chrome.js("go('fake:p2'); window.finishApprovalNavigation()")
     assert chrome.js("location.hash") == "#/s/fake:p2"
+
+
+def test_unknown_after_reply_times_out_without_resending_or_leaving_chat(ulak):
+    chrome, api, url = ulak
+    open_first(chrome, url)
+    chrome.click(APPROVE)
+    chrome.wait("document.querySelector('#toasts .ok')?.textContent === 'Reply sent'")
+    api.publish_session("unknown")
+    chrome.wait("[...document.querySelectorAll('#toasts .err')].some(e => e.textContent.includes('could not verify a screen change'))")
+    assert chrome.js("location.hash") == "#/s/fake:p1"
+    assert len(api.replies) == len(api.requests) == 1
 
 
 def test_approval_409_shows_error_and_refreshes_prompt(ulak):
@@ -435,3 +483,68 @@ def test_offline_refresh_retains_cards_and_sse_reconnect_loads_snapshot(ulak):
     assert api.ready.wait(5)
     chrome.wait("document.querySelector('.g-unknown .proj')?.textContent === 'updated-while-offline'")
     assert chrome.js("document.querySelector('#conn').hidden")
+
+
+def test_open_chat_retains_draft_and_waits_for_fresh_data_after_sse_ready(ulak):
+    chrome, api, url = ulak
+    open_first(chrome, url)
+    chrome.wait("document.querySelector('#conn').hidden")
+    chrome.js("""(() => {
+        const draft = document.querySelector('#message');
+        draft.value = 'A draft stays here';
+        draft.dispatchEvent(new Event('input', {bubbles: true}));
+    })()""")
+    api.fail_list = api.fail_chat = True
+    api.ready.clear()
+    api.stream_generation += 1
+    chrome.wait("document.querySelector('#conn').getClientRects().length > 0")
+    assert api.ready.wait(6)
+    assert api.list_failed.wait(6)
+    assert chrome.js("document.querySelector('#conn').getClientRects().length > 0")
+    assert chrome.js("document.querySelector('#messages .msg').textContent") == "Example answer"
+
+    api.chat_failed.clear()
+    api.fail_list = False
+    assert api.chat_failed.wait(6)
+    assert chrome.js("document.querySelector('#conn').getClientRects().length > 0")
+    api.messages = [{"role": "assistant", "text": "Updated after reconnect"}]
+    api.fail_chat = False
+    chrome.wait("document.querySelector('#messages .msg').textContent === 'Updated after reconnect'")
+    chrome.wait("document.querySelector('#conn').hidden")
+    assert chrome.js("document.querySelector('#message').value") == "A draft stays here"
+
+
+def test_sse_update_survives_a_late_list_snapshot(ulak):
+    chrome, api, url = ulak
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelector('#conn').hidden && document.querySelector('.g-blocked .card') !== null")
+    api.list_started.clear()
+    api.list_respond.clear()
+    chrome.click("#refresh")
+    assert api.list_started.wait(5)
+    api.publish_session("unknown")
+    chrome.wait("document.querySelector('.g-unknown .card') !== null")
+    api.list_respond.set()
+    chrome.wait("!document.querySelector('#refresh').classList.contains('loading')")
+    assert chrome.js("document.querySelector('.g-unknown .card') !== null")
+    assert chrome.js("document.querySelector('.g-blocked .card') === null")
+
+
+def test_stalled_snapshot_recovers_without_reopening_the_stream(ulak):
+    chrome, api, url = ulak
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelector('#conn').hidden && document.querySelector('.g-blocked .card') !== null")
+    chrome.js("""(() => {
+        const schedule = window.setTimeout;
+        window.setTimeout = (callback, delay, ...args) => schedule(callback, delay === 15000 ? 150 : delay, ...args);
+    })()""")
+    api.ready.clear()
+    api.list_started.clear()
+    api.list_respond.clear()
+    chrome.click("#refresh")
+    assert api.list_started.wait(5)
+    chrome.wait("!document.querySelector('#conn').hidden")
+    api.cards = [card("unknown")]
+    api.list_respond.set()
+    chrome.wait("document.querySelector('#conn').hidden && document.querySelector('.g-unknown .card') !== null")
+    assert not api.ready.is_set()

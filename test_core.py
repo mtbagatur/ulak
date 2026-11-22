@@ -173,6 +173,18 @@ def test_safe_approve_sends_option_key(monkeypatch):
     assert c.post("/api/sessions/w9:p1/approve", headers=h, json={"decision": "approve", "fingerprint": fp}).status_code == 200
     assert fake.sent == [["1"]]
 
+def test_approval_fingerprint_changes_with_the_question_but_survives_color(monkeypatch):
+    question = "Would you like to run the following command?"
+    fake, client, headers = _setup(monkeypatch, CODEX)
+    path = "/api/sessions/w9:p1/approve"
+    action = {"decision": "approve", "fingerprint": parse_prompt(CODEX, "codex")["fingerprint"]}
+    fake.text = CODEX.replace(question, "Would you like to allow the following command?")
+    assert client.post(path, headers=headers, json=action).status_code == 409
+    assert fake.sent == []
+    fake.text = CODEX.replace(question, f"\033[1m{question}\033[0m")
+    assert client.post(path, headers=headers, json=action).status_code == 200
+    assert fake.sent == [["1"]]
+
 def test_destructive_needs_two_steps(monkeypatch):
     fake, c, h = _setup(monkeypatch, CLAUDE)  # curl -X POST is destructive
     fp = parse_approval(CLAUDE)["fingerprint"]

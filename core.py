@@ -83,7 +83,7 @@ def parse_approval(text):
     Keys are taken from the numbered options themselves, never assumed:
     Claude puts "No" at 3 or 4 depending on the prompt.
     """
-    lines = str(text or "").splitlines()
+    lines = strip_ansi(str(text or "")).splitlines()
     q = next((i for i in range(len(lines) - 1, -1, -1) if QUESTION.search(lines[i])), None)
     if q is None:
         return None
@@ -117,10 +117,12 @@ def parse_approval(text):
     block = "\n".join(l.rstrip() for l in shown if l.strip() and not DIVIDER.match(l)).strip()
     if not block:
         return None
-    fingerprint = hashlib.sha256((block + "|" + repr(sorted(options.items()))).encode()).hexdigest()[:16]
+    question = lines[q].strip()
+    signature = (block, question, sorted(options.items()))
+    fingerprint = hashlib.sha256(repr(signature).encode()).hexdigest()[:16]
     return {
         "command": block,
-        "question": lines[q].strip(),
+        "question": question,
         "keys": {d: k for d, (k, _) in options.items()},
         "labels": {d: l for d, (_, l) in options.items()},
         "fingerprint": fingerprint,

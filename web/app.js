@@ -10,16 +10,25 @@ const store = {get(k){try{return localStorage.getItem(k)}catch{return null}}, se
 const state = {sessions: new Map(), current: null, view: 0, chatHash: '', rendered: 0, prompt: null, idleOpen: store.get('idleOpen') === '1', busy: new Set(), live: false};
 
 // ---------- network ----------
-async function api(url, body, method) {
-  const opt = body === undefined ? {} : {method: method || 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)};
+async function api(url, body, method, signal) {
+  const opt = body === undefined ? {signal} : {method: method || 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)};
   let r;
-  try { r = await fetch(url, opt); } catch { throw new Error(t('offline')); }
+  try { r = await fetch(url, opt); } catch (error) {
+    if (signal?.aborted) throw error;
+    throw Object.assign(new Error(t('offline')), {network: true});
+  }
   if (!r.ok) {
     let msg = `${r.status}`;
     try { const j = await r.json(); msg = j.detail || msg; } catch {}
-    throw new Error(errText(msg));
+    throw Object.assign(new Error(errText(msg)), {status: r.status});
   }
   return r.json();
+}
+async function readSnapshot(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try { return await api(url, undefined, undefined, controller.signal); }
+  finally { clearTimeout(timer); }
 }
 function toast(text, kind = '') {
   const el = document.createElement('div');
@@ -175,47 +184,155 @@ $('#groups').addEventListener('click', e => {
 });
 async function inlineDecide(pane, decision, btn) {
   const s = state.sessions.get(pane); if (!s || !s.pending) return;
+  const view = state.view, fingerprint = s.pending.fingerprint;
   const unlock = beginPaneAction(pane); if (!unlock) return;
   try {
-    const r = await act(btn, () => api(`/api/sessions/${encodeURIComponent(pane)}/approve`, {decision, fingerprint: s.pending.fingerprint}), t('replySent'));
-    if (r) setTimeout(loadList, 700);
+    const r = await act(btn, () => api(`/api/sessions/${encodeURIComponent(pane)}/approve`, {decision, fingerprint}));
+    if (r?.ok) await watchApprovalReply(pane, fingerprint, view);
+    else {
+      if (r?.confirm_required) toast(t('reviewInSession'), 'err');
+      loadList();
+    }
   } finally { unlock(); }
 }
 
 // ---------- data ----------
-async function loadList() {
-  try {
-    const rows = await api('/api/sessions');
-    state.sessions = new Map(rows.map(s => [s.pane_id, s]));
-    renderHome();
-    if (state.current) { if (!state.sessions.has(state.current)) closedBanner(); else updateSessionHeader(); }
-    return true;
-  } catch (e) { setConn(false, e.message); return false; }
+let es = null, streamReady = false, retryTimer = null, retries = 0;
+let snapshotGeneration = 0, listReady = false, chatReadyView = -1, networkError = false;
+let listRequest = null;
+function loadList() {
+  const generation = snapshotGeneration;
+  if (listRequest?.generation === generation) return listRequest.promise;
+  const request = {generation, events: new Map()};
+  listRequest = request;
+  request.promise = (async () => {
+    try {
+      const rows = await readSnapshot('/api/sessions');
+      if (generation !== snapshotGeneration) return false;
+      state.sessions = new Map(rows.map(s => [s.pane_id, s]));
+      for (const [pane, session] of request.events) {
+        if (session) state.sessions.set(pane, session);
+        else state.sessions.delete(pane);
+      }
+      renderHome();
+      if (state.current) {
+        if (state.sessions.has(state.current)) updateSessionHeader();
+        else { closedBanner(); chatReadyView = state.view; }
+      }
+      listReady = true;
+      networkError = false;
+      updateConnection();
+      return true;
+    } catch (e) {
+      if (generation === snapshotGeneration) snapshotFailed(e);
+      return false;
+    } finally {
+      if (listRequest === request) listRequest = null;
+    }
+  })();
+  return request.promise;
 }
-let es = null, retry = 0;
-function setConn(ok, msg) {
-  state.live = ok;
-  const c = $('#conn');
-  if (ok) { c.hidden = true; return; }
-  c.hidden = false; const bad = msg === t('offline'); c.className = 'conn' + (bad ? ' bad' : ''); c.textContent = bad ? t('offline') : t('reconnecting');
+function updateConnection() {
+  const offline = navigator.onLine === false || networkError;
+  if (!state.live && !offline && streamReady && listReady && (!state.current || chatReadyView === state.view)) {
+    state.live = true;
+    retries = 0;
+    clearRetry();
+  }
+  const banner = $('#conn');
+  const text = state.live ? '' : t(offline ? 'offline' : streamReady ? 'syncing' : 'reconnecting');
+  banner.hidden = state.live;
+  banner.classList.toggle('bad', offline);
+  if (banner.textContent !== text) banner.textContent = text;
+}
+function beginRecovery(network = false) {
+  // A response from before this recovery cannot certify the current snapshot.
+  snapshotGeneration++;
+  state.live = false;
+  listReady = false;
+  chatReadyView = -1;
+  networkError = network;
+  updateConnection();
+}
+function snapshotFailed(error) {
+  beginRecovery(error.network);
+  if (streamReady) scheduleRetry();
+}
+function clearRetry() {
+  clearTimeout(retryTimer);
+  retryTimer = null;
+}
+function scheduleRetry() {
+  if (retryTimer !== null || document.hidden || navigator.onLine === false) return;
+  retryTimer = setTimeout(resumeConnection, Math.min(8000, 1000 * 2 ** retries++));
+}
+function refreshSnapshots() {
+  const generation = snapshotGeneration;
+  loadList().then(ok => {
+    if (ok && generation === snapshotGeneration && state.sessions.has(state.current)) loadChat(!state.chatHash);
+  });
+}
+function resumeConnection() {
+  clearRetry();
+  if (document.hidden || navigator.onLine === false) return;
+  if (es?.readyState === EventSource.CLOSED) {
+    es = null;
+    streamReady = false;
+    beginRecovery();
+  }
+  if (!es) connect();
+  refreshSnapshots();
 }
 function connect() {
-  if (es) es.close();
-  es = new EventSource('/api/events');
-  es.addEventListener('ready', () => { retry = 0; setConn(true); loadList(); loadPins(); if (state.current) loadChat(); });
-  es.onmessage = ev => {
+  const source = new EventSource('/api/events');
+  es = source;
+  source.addEventListener('ready', () => {
+    if (es !== source) return;
+    clearRetry();
+    streamReady = true;
+    beginRecovery();
+    refreshSnapshots();
+    loadPins();
+  });
+  source.onmessage = ev => {
+    if (es !== source || !streamReady) return;
     const m = JSON.parse(ev.data);
-    if (m.type === 'session') { state.sessions.set(m.session.pane_id, m.session); renderHome(); if (m.session.pane_id === state.current) { updateSessionHeader(); loadChat(); } }
-    else if (m.type === 'removed') { state.sessions.delete(m.pane); renderHome(); if (m.pane === state.current) closedBanner(); }
+    if (m.type !== 'session' && m.type !== 'removed') return;
+    const session = m.type === 'session' ? m.session : null;
+    const pane = session ? session.pane_id : m.pane;
+    if (listRequest?.generation === snapshotGeneration) listRequest.events.set(pane, session);
+    if (session) state.sessions.set(pane, session);
+    else state.sessions.delete(pane);
+    renderHome();
+    if (pane !== state.current) return;
+    if (session) { updateSessionHeader(); loadChat(); }
+    else { closedBanner(); chatReadyView = state.view; updateConnection(); }
   };
-  es.onerror = () => { setConn(false, t('reconnecting')); es.close(); setTimeout(connect, Math.min(8000, 1000 * 2 ** retry++) + Math.random() * 400); };
+  source.onerror = () => {
+    if (es !== source) return;
+    clearRetry();
+    streamReady = false;
+    beginRecovery();
+    // EventSource retries automatically while CONNECTING.
+    if (source.readyState === EventSource.CLOSED) {
+      es = null;
+      scheduleRetry();
+    }
+  };
 }
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) return;
-  // Phones kill sockets while asleep: probe, then reconnect if the stream is dead.
-  Promise.race([loadList(), new Promise(r => setTimeout(() => r(false), 2500))]).then(ok => { if (!ok || !es || es.readyState !== 1) connect(); });
-  if (state.current) loadChat();
+  if (document.hidden) clearRetry();
+  else resumeConnection();
 });
+window.addEventListener('offline', () => {
+  clearRetry();
+  const source = es;
+  es = null;
+  source?.close();
+  streamReady = false;
+  beginRecovery();
+});
+window.addEventListener('online', resumeConnection);
 setInterval(() => { if (!document.hidden) { renderHome(); if (state.current) loadChat(); } }, 4000);
 
 // ---------- routing ----------
@@ -230,6 +347,7 @@ function showHome() {
   state.view++;
   state.current = null; state.prompt = null; $('#session').hidden = true; $('#home').hidden = false;
   $('#promptZone').innerHTML = ''; $('#promptStatus').textContent = ''; hideSheet();
+  updateConnection();
 }
 
 // ---------- session screen ----------
@@ -251,6 +369,7 @@ function updateSessionHeader() {
   $('#sSub').textContent = [TOOLNAME[s.agent] || s.agent, s.model, statusText(s.status), ago(s.since)].filter(Boolean).join(' · ');
 }
 function closedBanner() {
+  chatRequest = null;
   if ($('#sheet [data-confirm-approval]')) hideSheet();
   state.prompt = null;
   delete $('#promptZone').dataset.sig;
@@ -272,25 +391,41 @@ function msgNode(m) {
   }
   const d = document.createElement('div'); d.className = `msg ${m.role}`; d.innerHTML = md(m.text); return d;
 }
-let loading = false, again = false;
-async function loadChat(first) {
-  const pane = state.current, view = state.view; if (!pane) return;
-  if (loading) { again = true; return; }  // an update arrived mid-request: run once more afterwards, never drop it
-  loading = true;
+let chatRequest = null;
+async function loadChat(first = false) {
+  const pane = state.current, view = state.view, generation = snapshotGeneration;
+  if (!pane || navigator.onLine === false || (!state.live && !listReady)) return;
+  if (chatRequest?.view === view && chatRequest.generation === generation) {
+    chatRequest.again = true;
+    chatRequest.first ||= first;
+    return;
+  }
+  const request = {view, generation, again: false, first: false};
+  chatRequest = request;
   try {
-    const r = await api(`/api/sessions/${encodeURIComponent(pane)}/chat`);
-    if (view !== state.view) return;
+    const r = await readSnapshot(`/api/sessions/${encodeURIComponent(pane)}/chat`);
+    if (chatRequest !== request || view !== state.view || generation !== snapshotGeneration) return;
     const key = JSON.stringify([r.messages.length, r.messages.at(-1), r.hint]);
     if (key !== state.chatHash) { state.chatHash = key; renderMessages(r, first); }
     renderPrompt(r.prompt, r.status);
     if (state.busy.has(pane)) setPaneActionsBusy(pane, true);
     if (r.session) { state.sessions.set(pane, {...state.sessions.get(pane), ...r.session}); updateSessionHeader(); }
+    chatReadyView = view;
+    networkError = false;
+    updateConnection();
   } catch (e) {
-    if (view !== state.view) return;
-    if (/404/.test(e.message) || e.message === errText('Session is closed or unknown')) closedBanner();
-    else setConn(false, e.message);
+    if (chatRequest !== request || view !== state.view || generation !== snapshotGeneration) return;
+    if (e.status === 404) {
+      closedBanner();
+      chatReadyView = view;
+      updateConnection();
+    } else snapshotFailed(e);
+  } finally {
+    if (chatRequest === request) {
+      chatRequest = null;
+      if (request.again && view === state.view && generation === snapshotGeneration) loadChat(request.first);
+    }
   }
-  finally { loading = false; if (again) { again = false; loadChat(); } }
 }
 function renderMessages(r, first) {
   const box = $('#messages');
@@ -360,6 +495,28 @@ function afterDecision(r, view) {
     else { location.hash = ''; route(); }
   }, next ? 350 : 450);
 }
+async function watchApprovalReply(pane, fingerprint, view) {
+  toast(t('replySent'), 'ok');
+  const deadline = performance.now() + 6500;
+  for (const delay of [700, 2500, 2300]) {
+    if (performance.now() + delay >= deadline) break;
+    await new Promise(resolve => setTimeout(resolve, delay));
+    const remaining = deadline - performance.now();
+    if (remaining <= 0) break;
+    let timer;
+    const fresh = await Promise.race([
+      loadList(),
+      new Promise(resolve => { timer = setTimeout(resolve, remaining, false); }),
+    ]);
+    clearTimeout(timer);
+    if (!fresh) continue;
+    const session = state.sessions.get(pane);
+    if (session?.pending?.fingerprint && session.pending.fingerprint !== fingerprint) return 'changed';
+    if (['working', 'idle', 'done'].includes(session?.status)) return 'cleared';
+  }
+  if (state.view === view || state.current === pane) toast(t('replyUnverified'), 'err');
+  return null;
+}
 async function decide(decision, btn, confirmation) {
   const pane = state.current, p = state.prompt, view = state.view;
   if (confirmation && (pane !== confirmation.pane || p?.fingerprint !== confirmation.fingerprint)) {
@@ -373,7 +530,16 @@ async function decide(decision, btn, confirmation) {
     const url = `/api/sessions/${encodeURIComponent(pane)}/approve`;
     const body = {decision, fingerprint: confirmation?.fingerprint ?? p.fingerprint, confirm_token: confirmation?.token};
     const r = await act(btn, () => api(url, body));
-    if (r?.ok) toast(t('replySent'), 'ok');
+    if (r?.ok) {
+      if (confirmation && state.view === view) hideSheet();
+      const observed = await watchApprovalReply(pane, p.fingerprint, view);
+      if (state.current === pane) loadChat();
+      if (observed === 'cleared') {
+        const next = state.sessions.get(r.next)?.status === 'blocked' ? r.next : null;
+        afterDecision({next}, view);
+      }
+      return;
+    }
     if (state.view !== view) return;
     if (!r) { if (confirmation) hideSheet(); loadChat(); return; }
     if (r.confirm_required) {
@@ -385,7 +551,6 @@ async function decide(decision, btn, confirmation) {
       confirmSheet(r, context, button => decide(decision, button, context));
       return;
     }
-    hideSheet(); afterDecision(r, view);
   } finally { unlock(); }
 }
 function confirmSheet(r, context, onYes) {
@@ -606,7 +771,7 @@ $('#refresh').onclick = e => act(e.currentTarget, loadList, '');
   const list = $('#list'), ptr = $('#ptr'); let y0 = null, dy = 0;
   list.addEventListener('touchstart', e => { y0 = list.scrollTop <= 0 ? e.touches[0].clientY : null; dy = 0; }, {passive: true});
   list.addEventListener('touchmove', e => { if (y0 === null) return; dy = e.touches[0].clientY - y0; ptr.classList.toggle('show', dy > 20); ptr.textContent = dy > 70 ? t('pullRelease') : t('pull'); }, {passive: true});
-  list.addEventListener('touchend', async () => { const go = dy > 70; ptr.classList.remove('show'); y0 = null; if (go) { ptr.textContent = ''; await loadList(); toast(t('refreshed'), 'ok'); } });
+  list.addEventListener('touchend', async () => { const go = dy > 70; ptr.classList.remove('show'); y0 = null; if (go) { ptr.textContent = ''; if (await loadList()) toast(t('refreshed'), 'ok'); } });
 })();
 
 // ---------- push ----------
@@ -635,8 +800,8 @@ if ('serviceWorker' in navigator) {
 (() => {
   const q = new URLSearchParams(location.search).get('pane');
   if (q) history.replaceState({pane: q}, '', `/#/s/${q}`);
-  loadList().then(() => route());
-  connect();
+  route();
+  resumeConnection();
 })();
 
 // ---------- notification history ----------
@@ -690,6 +855,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) load
 // ---------- language ----------
 function refreshLang() {
   applyStaticI18n();
+  updateConnection();
   $('#lang').textContent = LANG.toUpperCase();
   document.title = t('appName');
   setQuickLabel();

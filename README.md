@@ -43,6 +43,8 @@ pip install -r requirements.txt
 python tools/demo_server.py      # http://127.0.0.1:8766
 ```
 
+Run `python -m pytest -q` to verify the backend and the PWA. Browser cases use Chrome or Chromium with the `websockets` package and a loopback-only fake API. They skip when those browser dependencies are unavailable.
+
 ## How it compares
 
 | | Ulak | [HerdrChat](https://github.com/cobanov/herdrchat) |
@@ -60,11 +62,11 @@ They solve the same problem from different sides. HerdrChat is the polished nati
 - `herdr_client.py` speaks newline-delimited JSON over `~/.config/herdr/herdr.sock`.
 - Startup subscribes to the current pane set and adds/removes pane subscriptions as lifecycle events arrive.
 - Herdr events flow through the backend to browser clients as Server-Sent Events; the PWA uses REST for reads and actions.
-- Push notifications use local VAPID keys and the browser Push API. No relay service is used.
+- Push notifications use local VAPID keys and go directly to the browser's Web Push endpoint. The [encrypted payload](https://www.rfc-editor.org/rfc/rfc8291) includes the project label, a short command or output preview, and the pane link. The device can display the preview on its lock screen.
 
 ## API
 
-- `GET /api/sessions`: enriched cards, ordered blocked > working > done (<1h) > idle.
+- `GET /api/sessions`: enriched cards, ordered blocked > working > done (<1h) > unknown > idle.
 - `GET /api/sessions/{pane}/chat`: cleaned screen split into blocks (Claude JSONL when available).
 - `POST /api/sessions/{pane}/prompt`: send text. `POST /api/sessions/{pane}/upload`: raw file body (image, PDF or text), returns its server path. `POST /api/quick`: quick send to a configured pane (see Configuration). `GET/PUT /api/pins`: server-side pins, shared across devices.
 - `POST /api/sessions/{pane}/approve`: approve/always/deny, bound to the screen fingerprint (409 if it changed; destructive = two steps).
