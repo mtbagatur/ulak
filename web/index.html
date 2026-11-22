@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<div id="app">
+<main id="app">
   <section id="home" class="screen">
     <header class="top">
       <h1>Ulak</h1>
@@ -47,14 +47,15 @@
       <button type="button" id="keysBtn" class="icon" data-i18n-aria="keys">⌨</button>
       <button type="button" id="attachBtn" class="icon" data-i18n-aria="attach">📎</button>
       <input type="file" id="fileIn" accept="image/*,application/pdf,text/plain" multiple hidden>
-      <textarea id="message" rows="1" data-i18n-ph="composerPh" enterkeyhint="send" autocomplete="off"></textarea>
+      <textarea id="message" rows="1" data-i18n-ph="composerPh" data-i18n-aria="composerPh" enterkeyhint="send" autocomplete="off"></textarea>
       <button type="submit" id="send" class="send" data-i18n-aria="sendAria">↑</button>
     </form>
   </section>
-</div>
+</main>
 <div id="sheetBack" class="sheet-back" hidden></div>
 <div id="sheet" class="sheet" role="dialog" aria-modal="true" tabindex="-1" hidden></div>
-<div id="toasts"></div>
+<div id="promptStatus" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+<div id="toasts" role="status" aria-live="polite"></div>
 <script src="/static/i18n.js"></script>
 <script src="/static/app.js" defer></script>
 </body>

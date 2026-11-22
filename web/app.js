@@ -292,6 +292,14 @@ function renderPrompt(p, status) {
   const sig = p ? p.fingerprint + (p.options || []).map(o => o.checked).join() : status === 'blocked' ? 'unknown' : '';
   if (zone.dataset.sig === sig && !zone.querySelector('.loading')) return;
   zone.dataset.sig = sig; state.prompt = p;
+  const promptAnnouncement = !p
+    ? status === 'blocked' ? t('unknownScreen') : ''
+    : p.kind === 'approval' ? t('waitingApproval')
+      : p.kind === 'trust' ? t('trustQ', {f: p.question})
+        : p.kind === 'dismiss' ? t('filePicker')
+          : [p.header, p.question].filter(Boolean).join('. ') || t('question');
+  const promptStatus = $('#promptStatus');
+  if (promptStatus.textContent !== promptAnnouncement) promptStatus.textContent = promptAnnouncement;
   if (!p && status !== 'blocked') { zone.innerHTML = ''; return; }
   if (!p) { zone.innerHTML = `<div class="prompt"><h3>${esc(t('unknownScreen'))}</h3><p class="q">${esc(t('unknownHelp'))}</p></div>`; $('#keybar').hidden = false; buildKeybar(); return; }
   const tag = p.destructive ? `<span class="tag">${esc(t('destructive'))}</span>` : '';
@@ -491,7 +499,7 @@ function setQuickLabel() { $('#toQuick').textContent = quickLabel ? t('quickTo',
 api('/api/config').then(c => { quickLabel = c.quick_label || ''; $('#toQuick').hidden = !quickLabel; setQuickLabel(); }).catch(() => {});
 $('#toQuick').hidden = true;
 $('#toQuick').onclick = () => {
-  showSheet(`<h3>${esc(t('quickTo', {x: quickLabel}))}</h3><textarea id="quickText" placeholder="${esc(t('quickPh'))}" autofocus></textarea><div class="acts"><button class="ghost" data-x>${esc(t('cancel'))}</button><button class="primary" data-y>${esc(t('send'))}</button></div>`);
+  showSheet(`<h3>${esc(t('quickTo', {x: quickLabel}))}</h3><textarea id="quickText" aria-label="${esc(t('quickPh'))}" placeholder="${esc(t('quickPh'))}" autofocus></textarea><div class="acts"><button class="ghost" data-x>${esc(t('cancel'))}</button><button class="primary" data-y>${esc(t('send'))}</button></div>`);
   $('#sheet [data-x]').onclick = hideSheet;
   $('#sheet [data-y]').onclick = async e => { const text = $('#quickText').value.trim(); if (!text) return; const r = await act(e.currentTarget, () => api('/api/quick', {text}), t('sent')); if (r) hideSheet(); };
   setTimeout(() => $('#quickText')?.focus(), 250);
@@ -504,9 +512,9 @@ $('#newSession').onclick = async () => {
     $('#plist').innerHTML = rows.map(p => `<button type="button" class="${p.path === cwd ? 'on' : ''}" data-p="${esc(p.path)}"><span>${esc(p.name)}</span><small>${esc(p.display)}</small></button>`).join('') || `<p class="empty">${t('noFolder')}</p>`;
   };
   const models = () => `<option value="">${esc(t('defaultModel'))}</option>` + (info.tools[tool] || []).map(m => `<option>${esc(m)}</option>`).join('');
-  showSheet(`<h3>${esc(t('newTitle'))}</h3><input type="search" id="pfilter" placeholder="${esc(t('folderSearch'))}" autocomplete="off"><div class="plist" id="plist"></div>
+  showSheet(`<h3>${esc(t('newTitle'))}</h3><input type="search" id="pfilter" aria-label="${esc(t('folderSearch'))}" placeholder="${esc(t('folderSearch'))}" autocomplete="off"><div class="plist" id="plist"></div>
     <div class="seg" id="tools">${Object.keys(info.tools).map(t => `<button type="button" data-t="${t}" class="${t === tool ? 'on' : ''}">${esc(TOOLNAME[t])}</button>`).join('')}</div>
-    <select id="modelSel">${models()}</select>
+    <select id="modelSel" aria-label="${esc(t('modelLabel'))}">${models()}</select>
     <div class="acts"><button class="ghost" data-x>${esc(t('cancel'))}</button><button class="primary" data-y disabled>${esc(t('start'))}</button></div>`);
   draw();
   $('#pfilter').oninput = e => draw(e.target.value);
