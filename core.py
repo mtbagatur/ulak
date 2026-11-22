@@ -71,7 +71,7 @@ class NotificationGate:
 
 
 # --- Approval screen parsing  ---
-QUESTION = re.compile(r"(do you want to proceed\?|would you like to|allow .*\?|do you want to (make|create|run|allow))", re.I)
+QUESTION = re.compile(r"(do you want to proceed\?|would you like to|allow .*\?|do you want to (make|create|run|allow)|accept this file edit\?)", re.I)
 OPTION = re.compile(r"^\s*(?:[❯›>]\s*)?(\d)\.\s+(.+?)\s*$")
 DIVIDER = re.compile(r"^[\s─━╌┄—-]{10,}$")
 ALWAYS = re.compile(r"don['’]t ask again|always", re.I)
@@ -99,11 +99,11 @@ def parse_approval(text):
         seen_option = True
         key, label = m.group(1), m.group(2)
         low = label.lower()
-        if low.startswith("no"):
+        if low.startswith(("no", "reject")):
             options.setdefault("deny", (key, label))
         elif low.startswith("yes") and ALWAYS.search(label):
             options.setdefault("always", (key, label))
-        elif low.startswith("yes") and "auto mode" not in low:
+        elif (low.startswith("yes") or low.startswith("accept")) and "auto mode" not in low:
             options.setdefault("approve", (key, label))
     if "approve" not in options or "deny" not in options:
         return None

@@ -371,6 +371,7 @@ def test_detect_model():
     assert detect_model(fx("claude-working-screen.txt")) == "Sonnet 5.5"
     assert detect_model("\n  GPT-6-Luna medium · ~/api · title\n") == "GPT-6-Luna"
     assert detect_model("nothing here") == ""
+    assert detect_model("accept-edits · Gemini 3.8 Flash · high") == "Gemini 3.8 Flash"
     assert pretty_model("claude-sonnet-5-5") == "Sonnet 5.5"
 
 def test_ask_user_question_options_and_descriptions():
@@ -403,6 +404,22 @@ def test_claude_bash_approval_is_approval_kind():
     p = parse_prompt(CLAUDE)
     assert p["kind"] == "approval" and "ulak-probe" in p["details"]
     assert [o["keys"] for o in p["options"]] == [["1"], ["2"], ["4"]]
+
+def test_agy_file_edit_is_an_approval():
+    p = parse_prompt(fx("agy-file-edit-approval.txt"), "agy")
+    assert p["kind"] == "approval"
+    assert [o["role"] for o in p["options"]] == ["approve", "deny"]
+    assert [o["keys"] for o in p["options"]] == [["1"], ["2"]]
+    assert "accept-edits · Gemini" not in " ".join(b["text"] for b in screen_chat(fx("agy-file-edit-approval.txt")))
+
+def test_agy_file_edit_overrides_terminal_done_status(monkeypatch):
+    async def fake_read_screen(*args, **kwargs):
+        return fx("agy-file-edit-approval.txt")
+    monkeypatch.setattr(ulak, "read_screen", fake_read_screen)
+    card = asyncio.run(ulak.make_card({"pane_id": "agy-test:p1", "agent": "agy", "agent_status": "done", "cwd": "/tmp/ulak-test"}))
+    assert card["status"] == card["bucket"] == "blocked"
+    assert card["pending"]["kind"] == "approval"
+    assert card["model"] == "Gemini 3.8 Flash"
 
 def test_mention_popup_is_dismiss_only():
     p = parse_prompt("All Results  Filesystem Only  Plugins\n 1. a\n 2. b")

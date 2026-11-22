@@ -274,13 +274,14 @@ async def make_card(agent, force=False):
             except OSError:
                 pass
     card["preview"] = preview or ("" if card.get("transcript") else preview_from_screen(screen)) or card["preview"]
-    if status == "blocked":
-        p = parse_prompt(screen, card["agent"])
-        if p:
-            card["pending"] = {"kind": p["kind"], "question": p["question"], "details": "\n".join(p["details"].splitlines()[-4:]),
-                               "destructive": p["kind"] == "approval" and is_destructive(p["details"], RULES),
-                               "fingerprint": p["fingerprint"], "cut": p.get("cut", False),
-                               "roles": [o["role"] for o in p["options"]]}
+    p = parse_prompt(screen, card["agent"])
+    if p and (status == "blocked" or (card["agent"] == "agy" and p["kind"] == "approval")):
+        card["status"] = "blocked"
+        card["bucket"] = "blocked"
+        card["pending"] = {"kind": p["kind"], "question": p["question"], "details": "\n".join(p["details"].splitlines()[-4:]),
+                           "destructive": p["kind"] == "approval" and is_destructive(p["details"], RULES),
+                           "fingerprint": p["fingerprint"], "cut": p.get("cut", False),
+                           "roles": [o["role"] for o in p["options"]]}
     discard_changed_confirmation(pane, (card["pending"] or {}).get("fingerprint"))
     return card
 

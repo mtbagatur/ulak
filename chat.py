@@ -17,6 +17,7 @@ CHROME = [
     re.compile(p, re.I) for p in (
         r"\bctx \d+%", r"⏵⏵", r"\? for shortcuts", r"esc to interrupt", r"shift\+tab",
         r"← for agents", r"^\s*(GPT[\w.-]*|o\d[\w.-]*)\s+(low|medium|high|xhigh|default)\s*·",
+        r"^\s*(?:accept-edits|auto|plan)\s*[·|]\s*Gemini[\w. -]+?\s*[·|]\s*(?:low|medium|high|xhigh|max)\b",
         r"^\s*(?:[❯›>]\s+)?Ask Codex to do anything\s*$",
         r"Update installed", r"Remote Control", r"bypass permissions", r"auto mode (on|handles)",
         r"^\s*Tip:", r"ctrl\+t to", r"Esc to cancel", r"Enter to (select|confirm)",
@@ -136,6 +137,7 @@ def preview_from_screen(text, limit=140):
 CLAUDE_MODEL = re.compile(r"^\s*([A-Za-z][\w. ]*?)/(?:low|medium|high|xhigh|max)\s*\|", re.M)
 CODEX_MODEL = re.compile(r"^\s*(GPT[\w.-]*|o\d[\w.-]*)\s+(?:low|medium|high|xhigh|default)\s*·", re.M)
 GEMINI_MODEL = re.compile(r"(Gemini[\w. -]{1,24}?)(?:\s{2,}|\s*\||$)", re.M)
+AGY_MODEL = re.compile(r"(?:accept-edits|auto|plan)\s*[·|]\s*(Gemini[\w. -]+?)\s*[·|]\s*(?:low|medium|high|xhigh|max)\b", re.I)
 
 
 def detect_model(text):
@@ -145,6 +147,9 @@ def detect_model(text):
         if found:
             last = found[-1]
             return (last if isinstance(last, str) else last[0]).strip()
+    found = AGY_MODEL.findall(raw)
+    if found:
+        return found[-1].strip()
     return ""
 
 

@@ -1,0 +1,9 @@
+ ... 83 more lines (f for full diff)
+
+Accept this file edit?
+
+  1. Yes, accept this change
+  2. No, reject this change
+  ↑/↓ Navigate · f full diff
+
+                  accept-edits · Gemini 3.8 Flash · high
