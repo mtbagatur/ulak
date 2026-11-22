@@ -6,7 +6,7 @@ import os
 import re
 import secrets
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -40,6 +40,7 @@ sessions = {}       # pane -> card (what the phone shows)
 raw_agents = {}     # pane -> last agent record from herdr
 since = {}          # pane -> {"status", "ts"}
 pending_confirm = {}
+replying_panes = set()
 subscribers = set()
 pane_ids = set()
 read_cache = {}     # pane -> (time, screen text, status, read source)
@@ -205,6 +206,24 @@ async def fresh_prompt(pane, agent):
     return p
 
 
+def discard_changed_confirmation(pane, fingerprint):
+    confirmation = pending_confirm.get(pane)
+    if confirmation and confirmation["fingerprint"] != fingerprint:
+        pending_confirm.pop(pane, None)
+
+
+@contextmanager
+def exclusive_prompt_reply(pane):
+    # Claim the pane before the first await so competing replies fail immediately.
+    if pane in replying_panes:
+        raise HTTPException(409, "A reply is already in progress")
+    replying_panes.add(pane)
+    try:
+        yield
+    finally:
+        replying_panes.remove(pane)
+
+
 def display_cwd(cwd):
     home = str(Path.home())
     cwd = str(cwd or "")
@@ -262,6 +281,7 @@ async def make_card(agent, force=False):
                                "destructive": p["kind"] == "approval" and is_destructive(p["details"], RULES),
                                "fingerprint": p["fingerprint"], "cut": p.get("cut", False),
                                "roles": [o["role"] for o in p["options"]]}
+    discard_changed_confirmation(pane, (card["pending"] or {}).get("fingerprint"))
     return card
 
 
@@ -525,6 +545,7 @@ async def chat(pane: str, limit: int = 60):
         prompt = parse_prompt(screen, item.get("agent", "claude"))
         if prompt:
             prompt["destructive"] = bool(prompt["kind"] == "approval" and is_destructive(prompt["details"], RULES))
+    discard_changed_confirmation(pane, (prompt or {}).get("fingerprint"))
     agent = raw_agents.get(pane, {})
     sid = (agent.get("agent_session") or {}).get("value")
     messages, source = None, "screen"
@@ -572,33 +593,45 @@ async def approve(pane: str, action: Action):
     if not item or pane not in pane_ids:
         raise HTTPException(404, "Session is closed or unknown")
     if item.get("status") != "blocked":
+        discard_changed_confirmation(pane, None)
         raise HTTPException(409, "Session is no longer waiting for approval")
     if action.decision not in ("approve", "deny", "always"):
         raise HTTPException(400, "decision must be approve, deny, or always")
-    # Always decide on the screen as it is now, never on a cached read.
-    try:
-        pending = await fresh_pending(pane)
-    except Exception:
-        pending = None
-    if not pending:
-        raise HTTPException(409, "No recognised approval on screen; use the terminal")
-    if not action.fingerprint or not secrets.compare_digest(action.fingerprint, pending["fingerprint"]):
-        raise HTTPException(409, "The approval screen changed; refresh")
-    if action.decision not in pending["keys"]:
-        raise HTTPException(409, "This prompt has no such option")
-    if pending.get("cut") and item.get("agent") == "claude" and action.decision != "deny":
-        raise HTTPException(409, "The full command is not visible; it can only be denied")
-    if action.decision == "always" and pending["destructive"]:
-        raise HTTPException(400, "Session-wide allow is disabled for destructive commands")
-    if pending["destructive"] and action.decision != "deny":
-        confirmation = pending_confirm.get(pane)
-        valid = bool(confirmation and confirmation["expires"] > time.time() and confirmation["decision"] == action.decision and confirmation["fingerprint"] == pending["fingerprint"] and secrets.compare_digest(action.confirm_token or "", confirmation["token"]))
-        if not valid:
+    with exclusive_prompt_reply(pane):
+        try:
+            pending = await fresh_pending(pane)
+        except Exception:
+            pending = None
+        discard_changed_confirmation(pane, (pending or {}).get("fingerprint"))
+        if not pending:
+            raise HTTPException(409, "No recognised approval on screen; use the terminal")
+        if not action.fingerprint or not secrets.compare_digest(action.fingerprint, pending["fingerprint"]):
+            raise HTTPException(409, "The approval screen changed; refresh")
+        if action.decision not in pending["keys"]:
+            raise HTTPException(409, "This prompt has no such option")
+        if pending.get("cut") and item.get("agent") == "claude" and action.decision != "deny":
+            raise HTTPException(409, "The full command is not visible; it can only be denied")
+        if action.decision == "always" and pending["destructive"]:
+            raise HTTPException(400, "Session-wide allow is disabled for destructive commands")
+        needs_confirmation = pending["destructive"] and action.decision == "approve"
+        if action.confirm_token is not None:
+            confirmation = pending_confirm.get(pane)
+            valid = (
+                needs_confirmation and confirmation
+                and confirmation["expires"] > time.time()
+                and confirmation["decision"] == action.decision
+                and confirmation["fingerprint"] == pending["fingerprint"]
+                and action.confirm_token.isascii()
+                and secrets.compare_digest(action.confirm_token, confirmation["token"])
+            )
+            if not valid:
+                raise HTTPException(409, "The confirmation is no longer valid; try again")
+        elif needs_confirmation:
             token = secrets.token_urlsafe(24)
             pending_confirm[pane] = {"token": token, "decision": action.decision, "fingerprint": pending["fingerprint"], "expires": time.time() + 120}
             return {"confirm_required": True, "confirm_token": token, "command": tidy_details(pending["command"])}
         pending_confirm.pop(pane, None)
-    await client.call("agent.send_keys", {"target": pane, "keys": [pending["keys"][action.decision]]})
+        await client.call("agent.send_keys", {"target": pane, "keys": [pending["keys"][action.decision]]})
     return {"ok": True, "next": next_blocked(pane)}
 
 
@@ -609,15 +642,17 @@ async def choose(pane: str, action: Action):
         raise HTTPException(404, "Session is closed or unknown")
     if item.get("status") != "blocked":
         raise HTTPException(409, "Session is no longer waiting for anything")
-    p = await fresh_prompt(pane, item.get("agent", "claude"))
-    if not p or p["kind"] in ("approval", "dismiss"):
-        raise HTTPException(409, "No menu to choose from on screen")
-    if not action.fingerprint or not secrets.compare_digest(action.fingerprint, p["fingerprint"]):
-        raise HTTPException(409, "The screen changed; refresh")
-    option = next((o for o in p["options"] if o["n"] == action.n), None)
-    if not option:
-        raise HTTPException(409, "No such option")
-    await client.call("agent.send_keys", {"target": pane, "keys": option["keys"]})
+    with exclusive_prompt_reply(pane):
+        p = await fresh_prompt(pane, item.get("agent", "claude"))
+        if not p or p["kind"] in ("approval", "dismiss"):
+            raise HTTPException(409, "No menu to choose from on screen")
+        if not action.fingerprint or not secrets.compare_digest(action.fingerprint, p["fingerprint"]):
+            raise HTTPException(409, "The screen changed; refresh")
+        option = next((o for o in p["options"] if o["n"] == action.n), None)
+        if not option:
+            raise HTTPException(409, "No such option")
+        pending_confirm.pop(pane, None)
+        await client.call("agent.send_keys", {"target": pane, "keys": option["keys"]})
     return {"ok": True, "next": next_blocked(pane)}
 
 
@@ -627,13 +662,15 @@ async def send_keys(pane: str, action: Action):
     keys = [ALLOWED_KEYS.get(str(k).lower()) for k in (action.keys or [])]
     if not keys or len(keys) > 4 or None in keys:
         raise HTTPException(400, "Invalid key")
-    if item.get("status") == "blocked":
-        pending = await fresh_pending(pane)
-        if pending and pending["destructive"]:
-            danger = {"Enter", pending["keys"].get("approve"), pending["keys"].get("always"), "y"}
-            if any(k in danger for k in keys):
-                raise HTTPException(409, "Destructive command: approve from the approval card (two steps)")
-    await client.call("agent.send_keys", {"target": pane, "keys": keys})
+    with exclusive_prompt_reply(pane):
+        if item.get("status") == "blocked":
+            pending = await fresh_pending(pane)
+            if pending and pending["destructive"]:
+                danger = {"Enter", pending["keys"].get("approve"), pending["keys"].get("always"), "y"}
+                if any(k in danger for k in keys):
+                    raise HTTPException(409, "Destructive command: approve from the approval card (two steps)")
+        pending_confirm.pop(pane, None)
+        await client.call("agent.send_keys", {"target": pane, "keys": keys})
     return {"ok": True}
 
 

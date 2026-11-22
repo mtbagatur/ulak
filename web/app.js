@@ -7,7 +7,7 @@ const statusText = s => t('st_' + (['blocked', 'working', 'done', 'idle'].includ
 const TOOLNAME = {claude: 'Claude', codex: 'Codex', agy: 'agy', terminal: 'Terminal'};
 const store = {get(k){try{return localStorage.getItem(k)}catch{return null}}, set(k,v){try{localStorage.setItem(k,v)}catch{}}};
 
-const state = {sessions: new Map(), current: null, chatHash: '', rendered: 0, prompt: null, idleOpen: store.get('idleOpen') === '1', busy: new Set(), live: false};
+const state = {sessions: new Map(), current: null, view: 0, chatHash: '', rendered: 0, prompt: null, idleOpen: store.get('idleOpen') === '1', busy: new Set(), live: false};
 
 // ---------- network ----------
 async function api(url, body, method) {
@@ -41,6 +41,7 @@ function setPaneActionsBusy(pane, busy) {
     ...(card ? card.querySelectorAll('[data-act]') : []),
     ...(state.current === pane ? $('#promptZone').querySelectorAll('button') : []),
     ...(state.current === pane ? $('#keybar').querySelectorAll('button') : []),
+    ...(state.current === pane ? $('#sheet').querySelectorAll('[data-confirm-approval]') : []),
   ];
   for (const button of buttons) {
     if (busy) {
@@ -101,11 +102,11 @@ const isPinned = s => pins.has(pinKey(s));
 function cardHtml(s) {
   const dup = [...state.sessions.values()].some(o => o !== s && o.project === s.project);
   const p = s.pending;
-  // one-tap approve only when the whole command is visible in the card (the preview box is ~3 lines); long ones open the session to read first
+  // Inline actions include the full command. Longer commands require opening the session.
   const shown = p ? (p.details || p.question || '') : '';
   const inline = p && p.kind === 'approval' && !p.destructive && !p.cut && p.roles.includes('approve') && shown.length <= 160 && shown.split('\n').length <= 3;
   const stateText = s.bucket === 'idle' && s.status === 'done' ? t('doneAgo', {t: ago(s.since)}) : `${statusText(s.status)}${s.status === 'unknown' ? '' : ' · ' + ago(s.since)}`;
-  const body = p ? `<pre class="c-cmd">${esc((p.destructive ? '⚠ ' : '') + (p.details || p.question))}</pre>` : (s.preview ? `<div class="c-prev">${esc(s.preview)}</div>` : '');
+  const body = p ? `<pre class="c-cmd${inline ? ' full-command' : ''}">${esc((p.destructive ? '⚠ ' : '') + (p.details || p.question))}</pre>` : (s.preview ? `<div class="c-prev">${esc(s.preview)}</div>` : '');
   const pinned = isPinned(s);
   return `<button class="card-open" type="button" aria-label="${esc(t('openSession', {project: s.project}))}"></button><div class="c-top"><span class="proj">${esc(s.project)}</span>${dup && s.workspace_label ? `<span class="ws">${esc(s.workspace_label)}</span>` : ''}<span class="chip ${esc(s.agent)}">${esc(TOOLNAME[s.agent] || s.agent)}</span><span class="model">${esc(s.model)}</span><button class="pin ${pinned ? 'on' : ''}" data-pin aria-label="${esc(t(pinned ? 'unpin' : 'pin'))}" aria-pressed="${pinned}">📌</button></div>
     <div class="state"><span class="d"></span>${esc(stateText)}</div>
@@ -140,7 +141,12 @@ function renderHome() {
   if (groups.querySelector('.empty')) groups.innerHTML = '';
   const pinned = all.filter(isPinned);
   const defs = [...(pinned.length ? [{id: 'pinned', title: t('g_pinned'), items: pinned}] : []), ...GROUPS.map(id => ({id, title: t('g_' + id), items: all.filter(s => !isPinned(s) && s.bucket === id)}))].filter(g => g.items.length);
-  patch(groups, defs, g => g.id, g => `<h2 class="${g.id === 'idle' ? 'tap' : ''}" data-toggle="${g.id === 'idle' ? 1 : ''}"><span>${g.title} · ${g.items.length}</span>${g.id === 'idle' ? `<span>${state.idleOpen ? t('hide') : t('show')}</span>` : ''}</h2><div class="cards"></div>`, g => {
+  patch(groups, defs, g => g.id, g => {
+    const label = `${g.title} · ${g.items.length}`;
+    return g.id === 'idle'
+      ? `<h2><button type="button" class="idle-toggle" data-toggle aria-controls="idleCards">${label}<span></span></button></h2><div class="cards" id="idleCards"></div>`
+      : `<h2>${label}</h2><div class="cards"></div>`;
+  }, g => {
     const el = document.createElement('div'); el._base = 'group'; return el;
   });
   for (const g of defs) {
@@ -148,13 +154,18 @@ function renderHome() {
     wrap.className = `group g-${g.id}`;
     const box = wrap.querySelector('.cards');
     box.hidden = g.id === 'idle' && !state.idleOpen;
+    if (g.id === 'idle') {
+      const toggle = wrap.querySelector('[data-toggle]');
+      toggle.setAttribute('aria-expanded', String(state.idleOpen));
+      toggle.querySelector('span').textContent = t(state.idleOpen ? 'hide' : 'show');
+    }
     patch(box, g.items, s => s.pane_id, cardHtml, s => { const b = document.createElement('div'); b._base = 'card'; return b; });
     for (const el of box.children) { const s = state.sessions.get(el.dataset.key); el.className = `card b-${s.bucket}`; }
   }
   for (const pane of state.busy) setPaneActionsBusy(pane, true);
 }
 $('#groups').addEventListener('click', e => {
-  if (e.target.closest('[data-toggle="1"]')) { state.idleOpen = !state.idleOpen; store.set('idleOpen', state.idleOpen ? '1' : '0'); renderHome(); return; }
+  if (e.target.closest('[data-toggle]')) { state.idleOpen = !state.idleOpen; store.set('idleOpen', state.idleOpen ? '1' : '0'); renderHome(); return; }
   const card = e.target.closest('.card'); if (!card) return;
   const pb = e.target.closest('[data-pin]');
   if (pb) { e.stopPropagation(); const s = state.sessions.get(card.dataset.key); if (s) { const pane = card.dataset.key, k = pinKey(s); pins.has(k) ? pins.delete(k) : pins.add(k); renderHome(); savePins(); requestAnimationFrame(() => [...document.querySelectorAll('.card')].find(el => el.dataset.key === pane)?.querySelector('[data-pin]')?.focus({preventScroll: true})); } return; }
@@ -216,15 +227,21 @@ function route() {
 window.addEventListener('popstate', route);
 $('#back').onclick = () => (history.length > 1 && history.state ? history.back() : (location.hash = '', route()));
 function showHome() {
-  state.current = null; $('#session').hidden = true; $('#home').hidden = false; $('#promptZone').innerHTML = ''; hideSheet();
+  state.view++;
+  state.current = null; state.prompt = null; $('#session').hidden = true; $('#home').hidden = false;
+  $('#promptZone').innerHTML = ''; $('#promptStatus').textContent = ''; hideSheet();
 }
 
 // ---------- session screen ----------
 function openSession(pane) {
   if (state.current === pane && !$('#session').hidden) return;
+  hideSheet();
+  state.view++;
   state.current = pane; state.chatHash = ''; state.rendered = 0; state.prompt = null;
   $('#home').hidden = true; $('#session').hidden = false;
   $('#messages').innerHTML = `<div class="empty">${t('loading')}</div>`; $('#promptZone').innerHTML = ''; $('#keybar').hidden = true;
+  delete $('#promptZone').dataset.sig;
+  $('#promptStatus').textContent = '';
   $('#message').value = store.get('draft:' + pane) || ''; autosize();
   updateSessionHeader(); loadChat(true);
 }
@@ -234,6 +251,10 @@ function updateSessionHeader() {
   $('#sSub').textContent = [TOOLNAME[s.agent] || s.agent, s.model, statusText(s.status), ago(s.since)].filter(Boolean).join(' · ');
 }
 function closedBanner() {
+  if ($('#sheet [data-confirm-approval]')) hideSheet();
+  state.prompt = null;
+  delete $('#promptZone').dataset.sig;
+  $('#promptStatus').textContent = '';
   $('#promptZone').innerHTML = `<div class="prompt"><p class="q">${esc(t('closedSession'))}</p><button class="primary" id="toList">${esc(t('backToList'))}</button></div>`;
   $('#toList').onclick = () => history.state ? history.back() : (location.hash = '', route());
 }
@@ -253,18 +274,22 @@ function msgNode(m) {
 }
 let loading = false, again = false;
 async function loadChat(first) {
-  const pane = state.current; if (!pane) return;
+  const pane = state.current, view = state.view; if (!pane) return;
   if (loading) { again = true; return; }  // an update arrived mid-request: run once more afterwards, never drop it
   loading = true;
   try {
     const r = await api(`/api/sessions/${encodeURIComponent(pane)}/chat`);
-    if (pane !== state.current) return;
+    if (view !== state.view) return;
     const key = JSON.stringify([r.messages.length, r.messages.at(-1), r.hint]);
     if (key !== state.chatHash) { state.chatHash = key; renderMessages(r, first); }
     renderPrompt(r.prompt, r.status);
     if (state.busy.has(pane)) setPaneActionsBusy(pane, true);
     if (r.session) { state.sessions.set(pane, {...state.sessions.get(pane), ...r.session}); updateSessionHeader(); }
-  } catch (e) { if (/404/.test(e.message) || e.message === errText('Session is closed or unknown')) closedBanner(); else setConn(false, e.message); }
+  } catch (e) {
+    if (view !== state.view) return;
+    if (/404/.test(e.message) || e.message === errText('Session is closed or unknown')) closedBanner();
+    else setConn(false, e.message);
+  }
   finally { loading = false; if (again) { again = false; loadChat(); } }
 }
 function renderMessages(r, first) {
@@ -291,8 +316,11 @@ $('#jump').onclick = () => { const b = $('#messages'); b.scrollTo({top: b.scroll
 function renderPrompt(p, status) {
   const zone = $('#promptZone');
   const sig = p ? p.fingerprint + (p.options || []).map(o => o.checked).join() : status === 'blocked' ? 'unknown' : '';
-  if (zone.dataset.sig === sig && !zone.querySelector('.loading')) return;
-  zone.dataset.sig = sig; state.prompt = p;
+  const confirmation = $('#sheet [data-confirm-approval]');
+  if (confirmation && confirmation.dataset.fingerprint !== p?.fingerprint) hideSheet();
+  state.prompt = p;
+  if (zone.dataset.sig === sig) return;
+  zone.dataset.sig = sig;
   const promptAnnouncement = !p
     ? status === 'blocked' ? t('unknownScreen') : ''
     : p.kind === 'approval' ? t('waitingApproval')
@@ -320,36 +348,63 @@ function renderPrompt(p, status) {
   zone.querySelectorAll('[data-n]').forEach(b => b.onclick = () => choose(+b.dataset.n, b));
   zone.querySelector('[data-k]')?.addEventListener('click', e => sendKeys(['right'], e.currentTarget));
 }
-function afterDecision(r) {
-  if (!r) return;
-  if (r.next && r.next !== state.current) { toast(t('nextBlocked'), ''); setTimeout(() => go(r.next), 350); }
-  else if (!r.next && location.hash.startsWith('#/s/')) setTimeout(() => (history.state ? history.back() : (location.hash = '', route())), 450);
+function afterDecision(r, view) {
+  if (!r || state.view !== view) return;
+  const next = r.next;
+  if (next === state.current) return;
+  if (next) toast(t('nextBlocked'), '');
+  setTimeout(() => {
+    if (state.view !== view) return;
+    if (next) go(next);
+    else if (history.state) history.back();
+    else { location.hash = ''; route(); }
+  }, next ? 350 : 450);
 }
-async function decide(decision, btn, token) {
-  const pane = state.current, p = state.prompt; if (!pane || !p) return;
+async function decide(decision, btn, confirmation) {
+  const pane = state.current, p = state.prompt, view = state.view;
+  if (confirmation && (pane !== confirmation.pane || p?.fingerprint !== confirmation.fingerprint)) {
+    hideSheet();
+    toast(errText('The approval screen changed; refresh'), 'err');
+    return;
+  }
+  if (!pane || !p) return;
   const unlock = beginPaneAction(pane); if (!unlock) return;
   try {
     const url = `/api/sessions/${encodeURIComponent(pane)}/approve`;
-    const body = {decision, fingerprint: p.fingerprint, confirm_token: token};
-    const okText = token || !p.destructive || decision === 'deny' ? t('replySent') : '';
-    const r = await act(btn, () => api(url, body), okText);
-    if (!r) { loadChat(); return; }
-    if (r.confirm_required) { confirmSheet(r, () => decide(decision, null, r.confirm_token)); return; }
-    hideSheet(); afterDecision(r);
+    const body = {decision, fingerprint: confirmation?.fingerprint ?? p.fingerprint, confirm_token: confirmation?.token};
+    const r = await act(btn, () => api(url, body));
+    if (r?.ok) toast(t('replySent'), 'ok');
+    if (state.view !== view) return;
+    if (!r) { if (confirmation) hideSheet(); loadChat(); return; }
+    if (r.confirm_required) {
+      if (state.prompt?.fingerprint !== p.fingerprint) {
+        toast(errText('The approval screen changed; refresh'), 'err');
+        return;
+      }
+      const context = {pane, fingerprint: p.fingerprint, token: r.confirm_token};
+      confirmSheet(r, context, button => decide(decision, button, context));
+      return;
+    }
+    hideSheet(); afterDecision(r, view);
   } finally { unlock(); }
 }
-function confirmSheet(r, onYes) {
+function confirmSheet(r, context, onYes) {
   showSheet(`<h3>${esc(t('irreversible'))}</h3><p>${esc(t('irreversibleP'))}</p><pre class="c-cmd" style="max-height:30dvh;overflow:auto">${esc(r.command)}</pre>
-    <div class="acts"><button class="ghost" data-x>${esc(t('cancel'))}</button><button class="warn" data-y>${esc(t('yesRun'))}</button></div>`);
+    <div class="acts"><button class="ghost" data-x>${esc(t('cancel'))}</button><button class="warn" data-y data-confirm-approval>${esc(t('yesRun'))}</button></div>`);
   $('#sheet [data-x]').onclick = hideSheet;
-  $('#sheet [data-y]').onclick = async e => { e.currentTarget.classList.add('loading'); await onYes(); };
+  const yes = $('#sheet [data-y]');
+  yes.dataset.fingerprint = context.fingerprint;
+  yes.onclick = e => {
+    if (e.currentTarget.closest('#sheet')?.inert === false) onYes(e.currentTarget);
+  };
 }
 async function choose(n, btn) {
-  const pane = state.current, p = state.prompt; if (!pane || !p) return;
+  const pane = state.current, p = state.prompt, view = state.view; if (!pane || !p) return;
   const unlock = beginPaneAction(pane); if (!unlock) return;
   try {
     const r = await act(btn, () => api(`/api/sessions/${encodeURIComponent(pane)}/choose`, {fingerprint: p.fingerprint, n}), p.multi ? '' : t('replySent'));
-    if (r) { if (p.multi) { await new Promise(resolve => setTimeout(resolve, 300)); await loadChat(); } else afterDecision(r); } else loadChat();
+    if (state.view !== view) return;
+    if (r) { if (p.multi) { await new Promise(resolve => setTimeout(resolve, 300)); await loadChat(); } else afterDecision(r, view); } else loadChat();
   } finally { unlock(); }
 }
 async function sendKeys(keys, btn) {
@@ -434,28 +489,32 @@ let sheetTimer = 0;
 let sheetOpener = null;
 function showSheet(html) {
   const s = $('#sheet');
-  if (s.hidden) sheetOpener = document.activeElement;
+  if (s.hidden) sheetOpener = document.activeElement === document.body ? null : document.activeElement;
   clearTimeout(sheetTimer); s.classList.remove('closing'); $('#sheetBack').classList.remove('closing');
   s.innerHTML = html;
   const title = s.querySelector('h3');
   if (title) { title.id = 'sheetTitle'; s.setAttribute('aria-labelledby', title.id); }
   else s.removeAttribute('aria-labelledby');
-  s.hidden = false; $('#sheetBack').hidden = false;
+  s.hidden = false; s.inert = false; $('#sheetBack').hidden = false;
   (s.querySelector('[autofocus],button:not(:disabled),input:not(:disabled),textarea:not(:disabled),select:not(:disabled)') || s).focus({preventScroll: true});
 }
 function hideSheet() {
   const s = $('#sheet'), b = $('#sheetBack');
-  if (s.hidden) return;
+  if (s.hidden || s.inert) return;
+  s.inert = true;
   clearTimeout(sheetTimer); s.classList.add('closing'); b.classList.add('closing');
   sheetTimer = setTimeout(() => {
     s.hidden = true; b.hidden = true; s.innerHTML = ''; s.classList.remove('closing'); b.classList.remove('closing');
-    if (sheetOpener?.isConnected && !sheetOpener.closest('[hidden]')) sheetOpener.focus({preventScroll: true});
+    if (document.activeElement === document.body) {
+      const opener = sheetOpener?.isConnected && !sheetOpener.closest('[hidden]') ? sheetOpener : $(state.current ? '#back' : '#newSession');
+      opener.focus({preventScroll: true});
+    }
     sheetOpener = null;
   }, 200);
 }
 document.addEventListener('keydown', e => {
   const s = $('#sheet');
-  if (s.hidden) return;
+  if (s.hidden || s.inert) return;
   if (e.key === 'Escape') { e.preventDefault(); hideSheet(); return; }
   if (e.key !== 'Tab') return;
   const focusable = [...s.querySelectorAll('a[href],button:not(:disabled),input:not(:disabled),textarea:not(:disabled),select:not(:disabled),[tabindex]:not([tabindex="-1"])')].filter(el => !el.hidden);

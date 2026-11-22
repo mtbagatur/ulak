@@ -1,10 +1,15 @@
 from datetime import datetime
+from pathlib import Path
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 from core import NotificationGate, is_destructive, quiet_hours, status_rank, bucket
 import asyncio, json
-from herdr_client import HerdrClient
+from herdr_client import HerdrClient, HerdrError
 from fastapi.testclient import TestClient
-import app as ulak
+from httpx import ASGITransport, AsyncClient
+with patch.object(Path, 'read_text', side_effect=FileNotFoundError):
+    # Import with default settings so tests never depend on the live configuration.
+    import app as ulak
 
 
 def test_rm_is_destructive(): assert is_destructive("rm -rf ./build", "/missing")
@@ -109,7 +114,6 @@ def test_closed_pane_drops_ephemeral_state(monkeypatch):
 
 
 # --- Review tests: real screens, fresh-read approval ---
-from pathlib import Path
 from core import parse_approval
 CLAUDE = (Path(__file__).parent / "fixtures/claude-bash-approval.txt").read_text()
 CODEX = """• I need to run a command outside the sandbox.
@@ -153,8 +157,9 @@ def _setup(monkeypatch, text):
     fake = FakeHerdr(text)
     monkeypatch.setattr(ulak, "client", fake)
     monkeypatch.setattr(ulak, "allowed_login", "user@example.test")
-    ulak.sessions.clear(); ulak.sessions["w9:p1"] = {"pane_id": "w9:p1", "status": "blocked"}
-    ulak.pane_ids.add("w9:p1"); ulak.pending_confirm.clear()
+    monkeypatch.setattr(ulak, "sessions", {"w9:p1": {"pane_id": "w9:p1", "status": "blocked"}})
+    monkeypatch.setattr(ulak, "pane_ids", {"w9:p1"})
+    monkeypatch.setattr(ulak, "pending_confirm", {})
     return fake, TestClient(ulak.app), {"Tailscale-User-Login": "user@example.test"}
 
 def test_stale_fingerprint_rejected(monkeypatch):
@@ -188,6 +193,138 @@ def test_destructive_confirmation_rejects_changed_prompt(monkeypatch):
         "decision": "approve", "fingerprint": fp, "confirm_token": first["confirm_token"]
     })
     assert changed.status_code == 409 and fake.sent == []
+
+def test_destructive_confirmation_cannot_be_replayed(monkeypatch):
+    fake, c, h = _setup(monkeypatch, CLAUDE)
+    path = "/api/sessions/w9:p1/approve"
+    action = {"decision": "approve", "fingerprint": parse_approval(CLAUDE)["fingerprint"]}
+    first = c.post(path, headers=h, json=action).json()
+    confirmed = {**action, "confirm_token": first["confirm_token"]}
+    for token in ("stale", "geçersiz"):
+        invalid = c.post(path, headers=h, json={**action, "confirm_token": token})
+        assert invalid.status_code == 409 and fake.sent == []
+    assert c.post(path, headers=h, json=confirmed).json()["ok"] is True
+
+    assert c.post(path, headers=h, json=confirmed).status_code == 409
+    assert fake.sent == [["1"]]
+
+def test_deny_invalidates_confirmation_if_command_is_asked_again(monkeypatch):
+    fake, client, headers = _setup(monkeypatch, CLAUDE)
+    path = "/api/sessions/w9:p1/approve"
+    action = {"decision": "approve", "fingerprint": parse_approval(CLAUDE)["fingerprint"]}
+    first = client.post(path, headers=headers, json=action).json()
+    assert client.post(path, headers=headers, json={**action, "decision": "deny"}).status_code == 200
+    assert client.post(path, headers=headers, json={**action, "confirm_token": first["confirm_token"]}).status_code == 409
+    assert fake.sent == [["4"]]
+
+
+def test_observed_replacement_invalidates_confirmation_if_command_returns(monkeypatch):
+    fake, client, headers = _setup(monkeypatch, CLAUDE)
+    monkeypatch.setattr(ulak, "read_cache", {})
+    path = "/api/sessions/w9:p1/approve"
+    action = {"decision": "approve", "fingerprint": parse_approval(CLAUDE)["fingerprint"]}
+    first = client.post(path, headers=headers, json=action).json()
+    fake.text = CODEX
+    assert client.get("/api/sessions/w9:p1/chat", headers=headers).status_code == 200
+    fake.text = CLAUDE
+    assert client.post(path, headers=headers, json={**action, "confirm_token": first["confirm_token"]}).status_code == 409
+    assert fake.sent == []
+
+
+def test_confirmation_does_not_apply_to_a_replacement_safe_prompt(monkeypatch):
+    fake, c, h = _setup(monkeypatch, CLAUDE)
+    path = "/api/sessions/w9:p1/approve"
+    request = {"decision": "approve", "fingerprint": parse_approval(CLAUDE)["fingerprint"]}
+    first = c.post(path, headers=h, json=request).json()
+
+    fake.text = CODEX
+    changed = c.post(path, headers=h, json={
+        **request, "fingerprint": parse_approval(CODEX)["fingerprint"], "confirm_token": first["confirm_token"]
+    })
+    assert changed.status_code == 409 and fake.sent == []
+
+def test_expired_confirmation_requires_a_fresh_request(monkeypatch):
+    fake, c, h = _setup(monkeypatch, CLAUDE)
+    path = "/api/sessions/w9:p1/approve"
+    action = {"decision": "approve", "fingerprint": parse_approval(CLAUDE)["fingerprint"]}
+    first = c.post(path, headers=h, json=action).json()
+    ulak.pending_confirm["w9:p1"]["expires"] = 0
+    assert c.post(path, headers=h, json={**action, "confirm_token": first["confirm_token"]}).status_code == 409
+    assert fake.sent == []
+    fresh = c.post(path, headers=h, json=action).json()
+    assert fresh["confirm_required"] and fresh["confirm_token"] != first["confirm_token"]
+    assert c.post(path, headers=h, json={**action, "confirm_token": fresh["confirm_token"]}).status_code == 200
+    assert fake.sent == [["1"]]
+
+def test_prompt_replies_are_exclusive_per_pane_while_in_flight(monkeypatch):
+    class PausedHerdr(FakeHerdr):
+        def __init__(self):
+            super().__init__(CODEX)
+            self.read_started = asyncio.Event()
+            self.read_release = asyncio.Event()
+            self.send_started = asyncio.Event()
+            self.send_release = asyncio.Event()
+
+        async def call(self, method, params=None):
+            if params["target"] == "w9:p1":
+                if method == "agent.read":
+                    self.read_started.set()
+                    await self.read_release.wait()
+                if method == "agent.send_keys":
+                    self.send_started.set()
+                    await self.send_release.wait()
+            return await super().call(method, params)
+
+    async def scenario():
+        _, _, headers = _setup(monkeypatch, CODEX)
+        fake = PausedHerdr()
+        monkeypatch.setattr(ulak, "client", fake)
+        ulak.sessions["w9:p2"] = {"pane_id": "w9:p2", "status": "idle"}
+        root = "/api/sessions/w9:p1"
+        action = {"decision": "approve", "fingerprint": parse_approval(CODEX)["fingerprint"]}
+        async with AsyncClient(transport=ASGITransport(ulak.app), base_url="http://testserver", headers=headers) as c:
+            first = asyncio.create_task(c.post(f"{root}/approve", json=action))
+            try:
+                await asyncio.wait_for(fake.read_started.wait(), 3)
+                assert (await asyncio.wait_for(c.post(f"{root}/approve", json=action), 3)).status_code == 409
+                fake.read_release.set()
+                await asyncio.wait_for(fake.send_started.wait(), 3)
+
+                keys = await asyncio.wait_for(c.post(f"{root}/keys", json={"keys": ["enter"]}), 3)
+                choice = await asyncio.wait_for(c.post(f"{root}/choose", json={"n": 1}), 3)
+                assert keys.status_code == 409 and "in progress" in keys.json()["detail"]
+                assert choice.status_code == 409 and "in progress" in choice.json()["detail"]
+
+                assert (await c.post("/api/sessions/w9:p2/keys", json={"keys": ["esc"]})).status_code == 200
+                assert fake.sent == [["esc"]]
+            finally:
+                fake.read_release.set()
+                fake.send_release.set()
+                response = await asyncio.wait_for(first, 3)
+            assert response.status_code == 200 and fake.sent == [["esc"], ["1"]]
+
+    asyncio.run(scenario())
+
+def test_prompt_reply_can_be_retried_after_a_failed_rpc(monkeypatch):
+    class FailingHerdr(FakeHerdr):
+        fail = True
+
+        async def call(self, method, params=None):
+            if method == "agent.send_keys" and self.fail:
+                self.fail = False
+                raise HerdrError("fake transport error before sending keys")
+            return await super().call(method, params)
+
+    _, _, headers = _setup(monkeypatch, CODEX)
+    fake = FailingHerdr(CODEX)
+    monkeypatch.setattr(ulak, "client", fake)
+    client = TestClient(ulak.app, raise_server_exceptions=False)
+    path = "/api/sessions/w9:p1/approve"
+    action = {"decision": "approve", "fingerprint": parse_approval(CODEX)["fingerprint"]}
+    assert client.post(path, headers=headers, json=action).status_code == 500
+    assert fake.sent == []
+    assert client.post(path, headers=headers, json=action).status_code == 200
+    assert fake.sent == [["1"]]
 
 def test_destructive_deny_is_one_step(monkeypatch):
     fake, c, h = _setup(monkeypatch, CLAUDE)
@@ -341,8 +478,10 @@ def _setup2(monkeypatch, text, agent="claude"):
     fake = FakeHerdr2(text)
     monkeypatch.setattr(ulak, "client", fake)
     monkeypatch.setattr(ulak, "allowed_login", "user@example.test")
-    ulak.sessions.clear(); ulak.sessions["w9:p1"] = {"pane_id": "w9:p1", "status": "blocked", "agent": agent, "project": "x", "since": 0, "bucket": "blocked"}
-    ulak.pane_ids.add("w9:p1"); ulak.pending_confirm.clear()
+    card = {"pane_id": "w9:p1", "status": "blocked", "agent": agent, "project": "x", "since": 0, "bucket": "blocked"}
+    monkeypatch.setattr(ulak, "sessions", {"w9:p1": card})
+    monkeypatch.setattr(ulak, "pane_ids", {"w9:p1"})
+    monkeypatch.setattr(ulak, "pending_confirm", {})
     return fake, TestClient(ulak.app), {"Tailscale-User-Login": "user@example.test"}
 
 def test_choose_sends_option_keys(monkeypatch):
@@ -357,6 +496,43 @@ def test_choose_rejects_stale_or_unknown(monkeypatch):
     assert c.post("/api/sessions/w9:p1/choose", headers=h, json={"fingerprint": "old", "n": 1}).status_code == 409
     assert c.post("/api/sessions/w9:p1/choose", headers=h, json={"fingerprint": fp, "n": 9}).status_code == 409
     assert fake.sent == []
+
+def test_choose_rechecks_the_question_even_if_options_are_unchanged(monkeypatch):
+    fake, c, h = _setup2(monkeypatch, ASK)
+    monkeypatch.setattr(ulak, "read_cache", {})
+    path = "/api/sessions/w9:p1"
+    before = c.get(f"{path}/chat", headers=h).json()["prompt"]
+    fake.text = ASK.replace("Which database should we use?", "Which database should we keep?")
+    changed = c.post(f"{path}/choose", headers=h, json={"fingerprint": before["fingerprint"], "n": 2})
+
+    assert changed.status_code == 409
+    assert fake.sent == []
+    assert [params["source"] for method, params in fake.calls if method == "agent.read"] == ["visible", "visible"]
+
+def test_unknown_status_remains_visible_and_rejects_old_approval(monkeypatch, tmp_path):
+    class SnapshotHerdr(FakeHerdr2):
+        async def call(self, method, params=None):
+            if method == "agent.list":
+                return {"agents": [
+                    {"pane_id": "w9:p2", "agent": "claude", "agent_status": "idle"},
+                    {"pane_id": "w9:p1", "agent": "codex", "agent_status": "unknown"},
+                ]}
+            return await super().call(method, params)
+
+    _, c, h = _setup2(monkeypatch, CODEX, "codex")
+    fake = SnapshotHerdr(CODEX)
+    monkeypatch.setattr(ulak, "client", fake)
+    monkeypatch.setattr(ulak, "STATE", tmp_path)
+    for name in ("raw_agents", "read_cache", "since"):
+        monkeypatch.setattr(ulak, name, {})
+    monkeypatch.setattr(ulak.refresh_pane, "labels", {}, raising=False)
+    fingerprint = parse_approval(CODEX)["fingerprint"]
+
+    cards = c.get("/api/sessions", headers=h).json()
+    assert [(card["pane_id"], card["bucket"]) for card in cards] == [("w9:p1", "unknown"), ("w9:p2", "idle")]
+    assert cards[0]["status"] == "unknown" and cards[0]["pending"] is None
+    answer = c.post("/api/sessions/w9:p1/approve", headers=h, json={"decision": "approve", "fingerprint": fingerprint})
+    assert answer.status_code == 409 and fake.sent == []
 
 def test_choose_refuses_approval_screens(monkeypatch):
     fake, c, h = _setup2(monkeypatch, CODEX, "codex")

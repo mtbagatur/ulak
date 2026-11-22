@@ -56,6 +56,7 @@ const ERR_TR = {
   'Session is closed or unknown': 'Oturum kapalı ya da bilinmiyor', 'Message is empty': 'Mesaj boş', 'Quick-send target not found': 'Hedef oturum bulunamadı',
   'Session is no longer waiting for approval': 'Oturum artık onay beklemiyor', 'No recognised approval on screen; use the terminal': 'Ekranda tanınan bir onay yok; terminali kullan',
   'The approval screen changed; refresh': 'Onay ekranı değişti; yenile', 'This prompt has no such option': 'Bu istemde böyle bir seçenek yok',
+  'A reply is already in progress': 'Bir yanıt zaten gönderiliyor', 'The confirmation is no longer valid; try again': 'İkinci onayın süresi doldu veya ekran değişti. Yeniden dene.',
   'The full command is not visible; it can only be denied': 'Komutun tamamı görünmüyor; yalnız reddedilebilir',
   'Session-wide allow is disabled for destructive commands': 'Yıkıcı komutta oturum boyu izin kapalı', 'Session is no longer waiting for anything': 'Oturum artık bir şey beklemiyor',
   'No menu to choose from on screen': 'Ekranda seçilecek bir menü yok', 'The screen changed; refresh': 'Ekran değişti; yenile', 'No such option': 'Böyle bir seçenek yok',
