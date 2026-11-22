@@ -17,6 +17,7 @@ button{font:inherit;color:inherit;background:var(--card2);border:0;border-radius
 button:active{transform:scale(.97)}
 button:focus-visible,summary:focus-visible,[role=button]:focus-visible{outline:2px solid var(--blue-t);outline-offset:3px}
 button:disabled{opacity:.5}
+button[aria-disabled="true"]{opacity:.5;cursor:wait}
 button.primary{background:var(--blue);color:#fff}
 button.warn{background:var(--orange);color:#1b1305;font-weight:650}
 button.danger{background:#5a2d35;color:#ffd5d5}

@@ -35,6 +35,33 @@ async function act(btn, fn, okText) {
   catch (e) { toast(e.message, 'err'); return null; }
   finally { if (btn) btn.classList.remove('loading'); }
 }
+function setPaneActionsBusy(pane, busy) {
+  const card = [...document.querySelectorAll('.card')].find(el => el.dataset.key === pane);
+  const buttons = [
+    ...(card ? card.querySelectorAll('[data-act]') : []),
+    ...(state.current === pane ? $('#promptZone').querySelectorAll('button') : []),
+    ...(state.current === pane ? $('#keybar').querySelectorAll('button') : []),
+  ];
+  for (const button of buttons) {
+    if (busy) {
+      if (!('actionWasAriaDisabled' in button.dataset)) button.dataset.actionWasAriaDisabled = button.getAttribute('aria-disabled') || '';
+      button.setAttribute('aria-disabled', 'true');
+    } else if ('actionWasAriaDisabled' in button.dataset) {
+      const previous = button.dataset.actionWasAriaDisabled;
+      previous ? button.setAttribute('aria-disabled', previous) : button.removeAttribute('aria-disabled');
+      delete button.dataset.actionWasAriaDisabled;
+    }
+  }
+  for (const root of [card, ...(state.current === pane ? [$('#promptZone'), $('#keybar')] : [])]) {
+    if (root) busy ? root.setAttribute('aria-busy', 'true') : root.removeAttribute('aria-busy');
+  }
+}
+function beginPaneAction(pane) {
+  if (!pane || state.busy.has(pane)) return null;
+  state.busy.add(pane);
+  setPaneActionsBusy(pane, true);
+  return () => { state.busy.delete(pane); setPaneActionsBusy(pane, false); };
+}
 
 // ---------- time ----------
 function ago(ts) {
@@ -123,6 +150,7 @@ function renderHome() {
     patch(box, g.items, s => s.pane_id, cardHtml, s => { const b = document.createElement('div'); b._base = 'card'; return b; });
     for (const el of box.children) { const s = state.sessions.get(el.dataset.key); el.className = `card b-${s.bucket}`; }
   }
+  for (const pane of state.busy) setPaneActionsBusy(pane, true);
 }
 $('#groups').addEventListener('click', e => {
   if (e.target.closest('[data-toggle="1"]')) { state.idleOpen = !state.idleOpen; store.set('idleOpen', state.idleOpen ? '1' : '0'); renderHome(); return; }
@@ -135,8 +163,11 @@ $('#groups').addEventListener('click', e => {
 });
 async function inlineDecide(pane, decision, btn) {
   const s = state.sessions.get(pane); if (!s || !s.pending) return;
-  const r = await act(btn, () => api(`/api/sessions/${encodeURIComponent(pane)}/approve`, {decision, fingerprint: s.pending.fingerprint}), decision === 'approve' ? t('approved') : t('denied'));
-  if (r) setTimeout(loadList, 700);
+  const unlock = beginPaneAction(pane); if (!unlock) return;
+  try {
+    const r = await act(btn, () => api(`/api/sessions/${encodeURIComponent(pane)}/approve`, {decision, fingerprint: s.pending.fingerprint}), t('replySent'));
+    if (r) setTimeout(loadList, 700);
+  } finally { unlock(); }
 }
 
 // ---------- data ----------
@@ -230,6 +261,7 @@ async function loadChat(first) {
     const key = JSON.stringify([r.messages.length, r.messages.at(-1), r.hint]);
     if (key !== state.chatHash) { state.chatHash = key; renderMessages(r, first); }
     renderPrompt(r.prompt, r.status);
+    if (state.busy.has(pane)) setPaneActionsBusy(pane, true);
     if (r.session) { state.sessions.set(pane, {...state.sessions.get(pane), ...r.session}); updateSessionHeader(); }
   } catch (e) { if (/404/.test(e.message) || e.message === errText('Session is closed or unknown')) closedBanner(); else setConn(false, e.message); }
   finally { loading = false; if (again) { again = false; loadChat(); } }
@@ -285,13 +317,17 @@ function afterDecision(r) {
   else if (!r.next && location.hash.startsWith('#/s/')) setTimeout(() => (history.state ? history.back() : (location.hash = '', route())), 450);
 }
 async function decide(decision, btn, token) {
-  const p = state.prompt; if (!p) return;
-  const url = `/api/sessions/${encodeURIComponent(state.current)}/approve`;
-  const body = {decision, fingerprint: p.fingerprint, confirm_token: token};
-  const r = await act(btn, () => api(url, body), token || !p.destructive || decision === 'deny' ? (decision === 'deny' ? t('denied') : t('approved')) : '');
-  if (!r) { loadChat(); return; }
-  if (r.confirm_required) { confirmSheet(r, () => decide(decision, null, r.confirm_token)); return; }
-  hideSheet(); afterDecision(r);
+  const pane = state.current, p = state.prompt; if (!pane || !p) return;
+  const unlock = beginPaneAction(pane); if (!unlock) return;
+  try {
+    const url = `/api/sessions/${encodeURIComponent(pane)}/approve`;
+    const body = {decision, fingerprint: p.fingerprint, confirm_token: token};
+    const okText = token || !p.destructive || decision === 'deny' ? t('replySent') : '';
+    const r = await act(btn, () => api(url, body), okText);
+    if (!r) { loadChat(); return; }
+    if (r.confirm_required) { confirmSheet(r, () => decide(decision, null, r.confirm_token)); return; }
+    hideSheet(); afterDecision(r);
+  } finally { unlock(); }
 }
 function confirmSheet(r, onYes) {
   showSheet(`<h3>${esc(t('irreversible'))}</h3><p>${esc(t('irreversibleP'))}</p><pre class="c-cmd" style="max-height:30dvh;overflow:auto">${esc(r.command)}</pre>
@@ -300,13 +336,20 @@ function confirmSheet(r, onYes) {
   $('#sheet [data-y]').onclick = async e => { e.currentTarget.classList.add('loading'); await onYes(); };
 }
 async function choose(n, btn) {
-  const p = state.prompt; if (!p) return;
-  const r = await act(btn, () => api(`/api/sessions/${encodeURIComponent(state.current)}/choose`, {fingerprint: p.fingerprint, n}), p.multi ? '' : t('sent'));
-  if (r) { if (p.multi) setTimeout(loadChat, 300); else afterDecision(r); } else loadChat();
+  const pane = state.current, p = state.prompt; if (!pane || !p) return;
+  const unlock = beginPaneAction(pane); if (!unlock) return;
+  try {
+    const r = await act(btn, () => api(`/api/sessions/${encodeURIComponent(pane)}/choose`, {fingerprint: p.fingerprint, n}), p.multi ? '' : t('replySent'));
+    if (r) { if (p.multi) { await new Promise(resolve => setTimeout(resolve, 300)); await loadChat(); } else afterDecision(r); } else loadChat();
+  } finally { unlock(); }
 }
 async function sendKeys(keys, btn) {
-  const r = await act(btn, () => api(`/api/sessions/${encodeURIComponent(state.current)}/keys`, {keys}));
-  if (r) setTimeout(loadChat, 250);
+  const pane = state.current; if (!pane) return;
+  const unlock = beginPaneAction(pane); if (!unlock) return;
+  try {
+    const r = await act(btn, () => api(`/api/sessions/${encodeURIComponent(pane)}/keys`, {keys}));
+    if (r) setTimeout(loadChat, 250);
+  } finally { unlock(); }
 }
 function buildKeybar() {
   const kb = $('#keybar');
