@@ -74,8 +74,8 @@ T3Code is a much broader multi-platform agent client. Its mobile app is an Expo 
 
 1. **One honest operator surface.** Keep Claude, Codex, agy, and terminal sessions visible together; preserve each tool's actual pending request and do not convert a parser guess into an approval action.
 2. **Safety that is visible at decision time.** Show the complete command, why a hook asked, destructive status, and a second confirmation token in the same flow. Prevent repeat answers while a request is pending and say when delivery could not be confirmed.
-3. **Privacy by deployment.** Keep the backend and session content on the user's machine behind Tailscale; send only the minimum routing/urgency fields needed for Web Push. Do not adopt Herdr's relay topology without an explicit privacy review.
-4. **the user's policies as product behavior.** Guard/guard and local approval rules can be first-class, understandable decision cues rather than another generic provider permission screen.
+3. **Privacy by deployment.** Keep the backend and session content on the user's own machine behind a private network; send only the minimum routing/urgency fields needed for Web Push. Do not adopt Herdr's relay topology without an explicit privacy review.
+4. **Local policies as product behavior.** Guard hooks and local approval rules can be first-class, understandable decision cues rather than another generic provider permission screen.
 5. **Turkish-first, small-screen speed.** Preserve the quick list and one-hand action model. Use targeted patterns from the competitors; do not copy their larger product surface or turn Ulak into an agent IDE.
 
 ## Skills and review method applied
@@ -93,7 +93,7 @@ The follow-up pass adds the page's main landmark, localized accessible names to 
 
 ## Recommended Ulak work, ordered by value
 
-1. **Finish verification for the current design pass.** Run project tests and static checks; the user still needs to verify the most recent contrast, keyboard focus, reduced-motion, horizontal safe-area, sheet scrolling/drag and live prompt announcement behavior on iPhone with Safari/VoiceOver. Desktop device emulation is not a substitute for that step.
+1. **Finish verification for the current design pass.** Run project tests and static checks; the most recent design pass still needs verification of contrast, keyboard focus, reduced-motion, horizontal safe-area, sheet scrolling/drag and live prompt announcement behavior on iPhone with Safari/VoiceOver. Desktop device emulation is not a substitute for that step.
 2. **Approval feedback state.** The synchronous per-pane guard now blocks duplicate approval, choice, and key actions while an HTTP request is in flight, marks controls `aria-disabled` without dropping keyboard focus, and reports “Reply sent” instead of claiming the agent accepted it. Still open: observe prompt change and report a bounded timeout if the agent does not react. Herdr's ref-based guard is directly relevant; T3's live/unavailable capability model is a good state vocabulary.
 3. **History resilience only when needed.** If Ulak begins limiting transcript history, add stable anchors and explicit older-history paging. Herdr demonstrates the approach; T3 shows row-level anchors. Avoid adding a full offline outbox until a real lost-send case justifies its complexity.
 4. **Accessibility semantics for every transient surface.** This review fixed dialog role, focus entry/return, Escape, and Tab containment for sheets. Next verify the interaction on Safari/VoiceOver and test its large-content scrolling on phone.
