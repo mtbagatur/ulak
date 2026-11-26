@@ -132,3 +132,31 @@ def test_demo_release_session_has_changes_to_show(site):
     chrome.wait("document.querySelector('#sheet .diff') !== null")
     shown = text(chrome, "#sheet")
     assert "release/2.4" in shown and "docs/releases/2.4.md" in shown and '"version": "2.4.0"' in shown
+
+
+def test_demo_agents_speak_turkish_on_the_turkish_demo(site):
+    chrome = site
+    chrome.cdp("Page.navigate", url=chrome.js("location.origin + '/demo/?speed=8&lang=tr'"))
+    chrome.wait("document.documentElement.lang === 'tr' && document.querySelectorAll('.card').length === 6")
+    cards = text(chrome, "#home")
+    assert "Kararsız senkron testini düzelt" in cards and "Doldurma bitti: 1,2 milyon satır" in cards
+    assert "Fix flaky" not in cards and "Backfill finished" not in cards
+    open_card(chrome, "d1:p1")
+    shown = text(chrome, "#messages")
+    assert "senkron testleri" in shown and "retry_with_backoff" in shown and "The sync test fails" not in shown
+    chrome.click(APPROVE)
+    chrome.wait("location.hash === '#/s/d2:p1' && document.querySelector('#messages').textContent.includes('Sürüm notları')")
+    chrome.js("history.back()")
+    chrome.wait("document.querySelector('.card[data-key=\"d1:p1\"]').textContent.includes('12 senkron testinin hepsi geçti')")
+    chrome.click("#history")
+    chrome.click("#sheet [data-tab=decisions]")
+    chrome.wait("document.querySelector('#sheet [data-panel=decisions]').textContent.includes('Doldurma hangi aydan başlasın?')")
+    assert "[object Object]" not in chrome.js("document.body.textContent")
+
+
+def test_switching_language_in_the_demo_switches_what_the_agents_say(site):
+    chrome = site
+    assert "Fix flaky sync test" in text(chrome, "#home")
+    chrome.js("toggleLang()")
+    chrome.wait("document.querySelector('#home').textContent.includes('Kararsız senkron testini düzelt')")
+    assert "[object Object]" not in chrome.js("document.body.textContent")
