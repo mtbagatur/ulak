@@ -115,6 +115,12 @@ async function savePins() {
 }
 const pinKey = s => `${s.workspace_label}|${s.project}`;
 const isPinned = s => pins.has(pinKey(s));
+// One stroke weight for every mark; the seal (a ring around the U) is the only one that carries meaning.
+const ICONS = {
+  seal: '<circle cx="12" cy="12" r="9"/><path d="M8.5 8.5v4a3.5 3.5 0 0 0 7 0v-4"/>',
+  pin: '<path d="M9 4h6l-1 6 3 3.5H7l3-3.5z"/><path d="M12 13.5V20"/>',
+};
+const icon = (name, size = 18) => `<svg class="ic" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
 function cardHtml(s) {
   const dup = [...state.sessions.values()].some(o => o !== s && o.project === s.project);
   const p = s.pending;
@@ -122,12 +128,12 @@ function cardHtml(s) {
   const shown = p ? (p.details || p.question || '') : '';
   const inline = p && p.kind === 'approval' && !p.destructive && !p.cut && p.roles.includes('approve') && shown.length <= 160 && shown.split('\n').length <= 3;
   const stateText = s.bucket === 'idle' && s.status === 'done' ? t('doneAgo', {t: ago(s.since)}) : `${statusText(s.status)}${s.status === 'unknown' ? '' : ' · ' + ago(s.since)}`;
-  const body = p ? `<pre class="c-cmd${inline ? ' full-command' : ''}">${esc((p.destructive ? '⚠ ' : '') + (p.details || p.question))}</pre>` : (s.preview ? `<div class="c-prev">${esc(s.preview)}</div>` : '');
+  const body = p ? `<pre class="c-cmd${inline ? ' full-command' : ''}">${esc(p.details || p.question)}</pre>` : (s.preview ? `<div class="c-prev">${esc(s.preview)}</div>` : '');
   const pinned = isPinned(s);
-  return `<button class="card-open" type="button" aria-label="${esc(t('openSession', {project: s.project}))}"></button><div class="c-top"><span class="proj">${esc(s.project)}</span>${dup && s.workspace_label ? `<span class="ws">${esc(s.workspace_label)}</span>` : ''}<span class="chip ${esc(s.agent)}">${esc(TOOLNAME[s.agent] || s.agent)}</span><span class="model">${esc(s.model)}</span><button class="pin ${pinned ? 'on' : ''}" data-pin aria-label="${esc(t(pinned ? 'unpin' : 'pin'))}" aria-pressed="${pinned}">📌</button></div>
+  return `<button class="card-open" type="button" aria-label="${esc(t('openSession', {project: s.project}))}"></button><div class="c-top"><span class="proj">${esc(s.project)}</span>${dup && s.workspace_label ? `<span class="ws">${esc(s.workspace_label)}</span>` : ''}<span class="chip ${esc(s.agent)}">${esc(TOOLNAME[s.agent] || s.agent)}</span><span class="model">${esc(s.model)}</span><button class="pin ${pinned ? 'on' : ''}" data-pin aria-label="${esc(t(pinned ? 'unpin' : 'pin'))}" aria-pressed="${pinned}">${icon('pin', 16)}</button></div>
     <div class="state"><span class="d"></span>${esc(stateText)}</div>
-    ${s.title ? `<div class="c-title">${esc(s.title)}</div>` : ''}${body}
-    ${inline ? `<div class="c-act"><button class="danger" data-act="deny">${esc(t('deny'))}</button><button class="warn" data-act="approve">${esc(t('approve'))}</button></div>` : ''}`;
+    ${s.title ? `<div class="c-title">${esc(s.title)}</div>` : ''}${p && p.destructive ? `<div class="seals">${icon('seal', 14)}${icon('seal', 14)}<span>${esc(t('destructive'))}</span></div>` : ''}${body}
+    ${inline ? `<div class="c-act"><button class="deny" data-act="deny">${esc(t('deny'))}</button><button class="seal" data-act="approve">${icon('seal', 17)}${esc(t('approve'))}</button></div>` : ''}`;
 }
 function patch(container, items, keyOf, htmlOf, make) {
   const existing = new Map([...container.children].map(el => [el.dataset.key, el]));
@@ -176,7 +182,7 @@ function renderHome() {
       toggle.querySelector('span').textContent = t(state.idleOpen ? 'hide' : 'show');
     }
     patch(box, g.items, s => s.pane_id, cardHtml, s => { const b = document.createElement('div'); b._base = 'card'; return b; });
-    for (const el of box.children) { const s = state.sessions.get(el.dataset.key); el.className = `card b-${s.bucket}`; }
+    for (const el of box.children) { const s = state.sessions.get(el.dataset.key); el.className = `card b-${s.bucket}${s.pending?.destructive ? ' two-seals' : ''}`; }
   }
   for (const pane of state.busy) setPaneActionsBusy(pane, true);
 }
@@ -505,12 +511,13 @@ function renderPrompt(p, status) {
   if (promptStatus.textContent !== promptAnnouncement) promptStatus.textContent = promptAnnouncement;
   if (!p && status !== 'blocked') { zone.innerHTML = ''; return; }
   if (!p) { zone.innerHTML = `<div class="prompt"><h3>${esc(t('unknownScreen'))}</h3><p class="q">${esc(t('unknownHelp'))}</p></div>`; $('#keybar').hidden = false; buildKeybar(); return; }
+  const two = p.destructive ? ' two-seals' : '';
   const tag = p.destructive ? `<span class="tag">${esc(t('destructive'))}</span>` : '';
   if (p.kind === 'approval') {
     const roles = Object.fromEntries(p.options.map(o => [o.role, o]));
     const denyOnly = p.cut;
-    zone.innerHTML = `<div class="prompt"><h3>${esc(t('waitingApproval'))} ${tag}</h3><pre>${esc(p.details)}</pre>${p.hook_note ? `<p class="hook-note">${esc(p.hook_note)}</p>` : ''}${denyOnly ? `<p class="q">${esc(t('cutNote'))}</p>` : ''}
-      <div class="acts"><button class="danger" data-d="deny">${esc(t('deny'))}</button>${denyOnly ? '' : `<button class="warn" data-d="approve">${esc(t('approve'))}</button>`}</div>
+    zone.innerHTML = `<div class="prompt${two}"><h3>${p.destructive ? `${icon('seal', 15)}${icon('seal', 15)}<span>${esc(t('destructive'))}</span>` : esc(t('waitingApproval'))}</h3><pre>${esc(p.details)}</pre>${p.hook_note ? `<p class="hook-note">${esc(p.hook_note)}</p>` : ''}${denyOnly ? `<p class="q">${esc(t('cutNote'))}</p>` : ''}${p.destructive && !denyOnly ? `<p class="hook-note two-note">${esc(t('twoSealsNote'))}</p>` : ''}
+      <div class="acts"><button class="deny" data-d="deny">${esc(t('deny'))}</button>${denyOnly ? '' : p.destructive ? `<button class="seal red" data-d="approve">${esc(t('review'))}</button>` : `<button class="seal" data-d="approve">${icon('seal', 18)}${esc(t('approve'))}</button>`}</div>
       ${!denyOnly && roles.always && !p.destructive ? `<button class="also" data-d="always">${esc(t('alwaysAllow'))}</button>` : ''}</div>`;
     zone.querySelectorAll('[data-d]').forEach(b => b.onclick = () => decide(b.dataset.d, b));
     return;
@@ -531,9 +538,14 @@ function renderReceipt(r) {
   const fresh = !!r && Date.now() / 1000 - r.ts < 600;  // a receipt is news for ten minutes, then it lives in Decisions
   el.hidden = !fresh;
   if (!fresh) return;
-  const text = `${t(DECIDED[r.decision] || 'sent')} ${clock(r.ts)} · ${arrival(r)}`;
-  if (el.textContent !== text) el.textContent = text;
-  el.className = 'receipt' + (r.delivered ? ' ok' : r.delivered === false ? ' unk' : '');
+  // The road: sent -> on its way -> the agent has it. The last stop is drawn as a seal once the prompt left the agent's screen.
+  const sent = `${t(DECIDED[r.decision] || 'sent')} ${clock(r.ts)}`;
+  const label = `${sent} · ${arrival(r)}`;
+  if (el.getAttribute('aria-label') === label) return;
+  el.setAttribute('aria-label', label);
+  const lost = r.delivered === false;
+  el.className = 'receipt' + (r.delivered ? ' ok' : lost ? ' unk' : '');
+  el.innerHTML = `<span class="leg on">${esc(sent)}</span><i class="on"></i><span class="leg on">${esc(r.delivered ? '' : arrival(r))}</span><i class="${r.delivered ? 'on' : ''}"></i><span class="leg${r.delivered ? ' on' : ''}">${r.delivered ? icon('seal', 14) + esc(arrival(r)) : ''}</span>`;
 }
 function afterDecision(r, view) {
   if (!r || state.view !== view) return;
@@ -607,7 +619,7 @@ async function decide(decision, btn, confirmation) {
 }
 function confirmSheet(r, context, onYes) {
   showSheet(`<h3>${esc(t('irreversible'))}</h3><p>${esc(t('irreversibleP'))}</p><pre class="c-cmd" style="max-height:30dvh;overflow:auto">${esc(r.command)}</pre>
-    <div class="acts"><button class="ghost" data-x>${esc(t('cancel'))}</button><button class="warn" data-y data-confirm-approval>${esc(t('yesRun'))}</button></div>`);
+    <div class="acts"><button class="ghost" data-x>${esc(t('cancel'))}</button><button class="seal red" data-y data-confirm-approval>${icon('seal', 18)}${esc(t('yesRun'))}</button></div>`);
   $('#sheet [data-x]').onclick = hideSheet;
   const yes = $('#sheet [data-y]');
   yes.dataset.fingerprint = context.fingerprint;
@@ -716,7 +728,7 @@ if (window.visualViewport) {
     baseH = Math.max(baseH, visualViewport.height);  // tallest viewport seen = keyboard closed (innerHeight also shrinks in a home-screen app)
     const kb = baseH - visualViewport.height > 120;
     document.documentElement.classList.toggle('kb', kb);
-    // Measured on iPhone (?debug=1, Safari tab): visualViewport already ends above the URL pill and ^ v ✓ bar, so no reserve is needed
+    // Measured on iPhone (?debug=1, Safari tab): visualViewport already ends above the URL pill and ^ v done bar, so no reserve is needed
     document.documentElement.style.setProperty('--vvh', visualViewport.height + 'px'); window.scrollTo(0, 0); const b = $('#messages'); if (!$('#session').hidden && document.activeElement === ta) b.scrollTop = b.scrollHeight; };
   let debugOn = false;
   const startDebug = () => { if (debugOn) return; debugOn = true;  // on-screen metrics for diagnosing keyboard gaps
@@ -908,7 +920,7 @@ $('#history').onclick = e => act(e.currentTarget, async () => {
 });
 
 function histTitle(n) { return n.project ? t(n.status === 'blocked' ? 'needsYouTitle' : 'doneTitle', {p: n.project}) : (n.title || ''); }
-function histBody(n) { const b = n.body || ''; return n.project ? ((n.destructive ? '⚠ ' : '') + (b || t(n.status === 'blocked' ? 'askBody' : 'finishedBody'))) : b; }
+function histBody(n) { const b = n.body || ''; return n.project ? (b || t(n.status === 'blocked' ? 'askBody' : 'finishedBody')) : b; }
 
 // ---------- limits ----------
 let limitData = null;

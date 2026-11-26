@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-  <meta name="theme-color" content="#21232E">
+  <meta name="theme-color" content="#1c1520">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Ulak">
@@ -20,10 +20,10 @@
   <section id="home" class="screen">
     <header class="top">
       <h1>Ulak</h1>
-      <button id="bell" class="icon" data-i18n-aria="enableBell" hidden>🔔</button>
+      <button id="bell" class="icon" data-i18n-aria="enableBell" hidden><svg class="ic" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg></button>
       <button id="lang" class="icon lang" data-i18n-aria="language">EN</button>
-      <button id="history" class="icon" data-i18n-aria="history">🕘</button>
-      <button id="refresh" class="icon" data-i18n-aria="refresh">⟳</button>
+      <button id="history" class="icon" data-i18n-aria="history"><svg class="ic" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4.5h14v15H5z"/><path d="M8.5 9h7M8.5 12h7M8.5 15h4"/></svg></button>
+      <button id="refresh" class="icon" data-i18n-aria="refresh"><svg class="ic" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12a7 7 0 1 1-2.05-4.95"/><path d="M19 4.5V8h-3.5"/></svg></button>
     </header>
     <div id="summary" class="summary"></div>
     <button id="limits" class="limits" hidden></button>
@@ -35,9 +35,9 @@
   </section>
   <section id="session" class="screen" hidden>
     <header class="top">
-      <button id="back" class="icon" data-i18n-aria="back">‹</button>
+      <button id="back" class="icon" data-i18n-aria="back"><svg class="ic" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg></button>
       <div class="s-title"><b id="sTitle"></b><span id="sSub"></span></div>
-      <button id="sMenu" class="icon" data-i18n-aria="menu">⋯</button>
+      <button id="sMenu" class="icon" data-i18n-aria="menu"><svg class="ic" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 12h.01M12 12h.01M18.5 12h.01"/></svg></button>
     </header>
     <div id="messages" class="scroll msgs"></div>
     <button id="jump" class="jump" hidden>↓ Yeni</button>
@@ -46,11 +46,11 @@
     <div id="keybar" class="keybar" hidden></div>
     <form id="composer" class="composer">
       <div id="slashOptions" class="slash-options" role="listbox" aria-label="Slash commands" hidden></div>
-      <button type="button" id="keysBtn" class="icon" data-i18n-aria="keys">⌨</button>
-      <button type="button" id="attachBtn" class="icon" data-i18n-aria="attach">📎</button>
+      <button type="button" id="keysBtn" class="icon" data-i18n-aria="keys"><svg class="ic" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 7h17v10h-17z"/><path d="M7 10.5h.01M10.5 10.5h.01M14 10.5h.01M17.5 10.5h.01M8 14h8"/></svg></button>
+      <button type="button" id="attachBtn" class="icon" data-i18n-aria="attach"><svg class="ic" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m19 11.5-7 7a4.5 4.5 0 0 1-6.4-6.4l7.6-7.6a3 3 0 0 1 4.3 4.3L10 16.3a1.5 1.5 0 0 1-2.2-2.1l6.7-6.7"/></svg></button>
       <input type="file" id="fileIn" accept="image/*,application/pdf,text/plain" multiple hidden>
       <textarea id="message" rows="1" data-i18n-ph="composerPh" data-i18n-aria="composerPh" enterkeyhint="send" autocomplete="off"></textarea>
-      <button type="submit" id="send" class="send" data-i18n-aria="sendAria">↑</button>
+      <button type="submit" id="send" class="send" data-i18n-aria="sendAria"><svg class="ic" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
     </form>
   </section>
 </main>

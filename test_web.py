@@ -1,5 +1,6 @@
 """Chrome smoke tests against the static PWA and a loopback-only fake API."""
 
+import re
 import json
 import shutil
 import subprocess
@@ -663,3 +664,47 @@ def test_decisions_tab_lists_sent_and_refused_answers(api_fixture):
     assert "Refused" in first and "The approval screen changed" in first and "user@example.test" in first
     assert "Denied" in second and "agent received it" in second and "<img src=x" in second
     assert chrome.js("window.pwned") is None
+
+
+def test_interface_uses_no_emoji_glyphs():
+    pictographs = re.compile("[\U0001F000-\U0001FAFF☀-➿⌚-⏿⬀-⯿]")
+    for name in ("index.html", "app.js", "i18n.js"):
+        found = pictographs.findall((WEB / name).read_text())
+        assert not found, f"{name} still draws {found}"
+
+
+def test_theme_colour_is_the_same_everywhere():
+    page = re.search(r'name="theme-color" content="(#[0-9a-fA-F]{6})"', (WEB / "index.html").read_text()).group(1)
+    manifest = json.loads((WEB / "manifest.webmanifest").read_text())
+    ground = re.search(r"--bg:(#[0-9a-fA-F]{6})", (WEB / "style.css").read_text()).group(1)
+    assert page.lower() == manifest["theme_color"].lower() == manifest["background_color"].lower() == ground.lower()
+
+
+def test_receipt_draws_the_road_from_sent_to_arrived(api_fixture):
+    chrome, api, url = api_fixture
+    open_first(chrome, url)
+    api.receipt = {"id": "r1", "ts": time.time(), "decision": "approve", "delivered": None, "destructive": False}
+    chrome.click(APPROVE)
+    chrome.wait("document.querySelectorAll('#receipt .leg').length === 3")
+    assert chrome.js("document.querySelectorAll('#receipt .leg.on').length") == 2
+    assert chrome.js("document.querySelector('#receipt').getAttribute('aria-label')").endswith("on its way")
+    api.receipt = {**api.receipt, "delivered": time.time()}
+    api.approval = None
+    api.cards = [card("working")]
+    api.events.append({"type": "receipt", "pane": PANE, "delivered": True})
+    chrome.wait("document.querySelectorAll('#receipt .leg.on').length === 3")
+    assert chrome.js("document.querySelector('#receipt .leg:last-child svg') !== null")
+
+
+def test_destructive_approval_asks_for_two_seals_before_the_first_tap(api_fixture):
+    chrome, api, url = api_fixture
+    open_first(chrome, url)
+    chrome.wait(f"document.querySelector({json.dumps(APPROVE)}) !== null")
+    assert chrome.js("document.querySelector('#promptZone .prompt').classList.contains('two-seals')") is False
+    assert chrome.js(f"document.querySelector({json.dumps(APPROVE)}).textContent.trim()") == "Approve"
+    api.publish_prompt(DESTRUCTIVE)
+    chrome.wait("document.querySelector('#promptZone .prompt.two-seals') !== null")
+    assert chrome.js("document.querySelector('#promptZone .prompt h3').textContent").startswith("Needs two seals")
+    assert chrome.js(f"document.querySelector({json.dumps(APPROVE)}).textContent.trim()") == "Review…"
+    chrome.click("#back")
+    chrome.wait("document.querySelector('.card.two-seals') !== null")
