@@ -238,7 +238,7 @@ async function inlineDecide(pane, decision, btn) {
 
 // ---------- data ----------
 let es = null, streamReady = false, retryTimer = null, retries = 0;
-let snapshotGeneration = 0, listReady = false, chatReadyView = -1, networkError = false;
+let snapshotGeneration = 0, listReady = false, chatReadyView = -1, networkError = false, failReason = '';
 let listRequest = null;
 function loadList() {
   const generation = snapshotGeneration;

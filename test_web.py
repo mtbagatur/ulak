@@ -1174,3 +1174,14 @@ def test_the_browser_bars_on_iphone_can_follow_the_theme():
     assert "position:fixed" not in body
     assert "overflow:hidden" in re.search(r"^#app\{([^}]*)\}", css, re.M).group(1)
     assert "background:var(--bg)}" in re.search(r"^\.conn\{[^}]*\}", css, re.M).group(0)
+
+
+def test_placeholder_text_is_as_readable_as_other_quiet_text(api_fixture):
+    chrome, _api, url = api_fixture
+    for scheme in ("dark", "light"):
+        chrome.cdp("Emulation.setEmulatedMedia", features=[{"name": "prefers-color-scheme", "value": scheme}])
+        open_first(chrome, url)
+        placeholder, muted = chrome.js(
+            "(() => { const el = document.createElement('i'); el.style.color = 'var(--muted)'; document.body.append(el);"
+            " return [getComputedStyle(document.querySelector('#message'), '::placeholder').color, getComputedStyle(el).color]; })()")
+        assert placeholder == muted, scheme
