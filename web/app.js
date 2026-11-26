@@ -3,6 +3,9 @@
 // chat messages are appended, the composer and its draft are never touched by updates.
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// The screens are repainted on a clock: write only what differs, so a quiet screen stays untouched.
+const put = (el, prop, value) => { if (el[prop] !== value) el[prop] = value; };
+const putHtml = (el, html) => { if (el._h !== html) { el.innerHTML = html; el._h = html; } };
 const statusText = s => t('st_' + (['blocked', 'working', 'done', 'idle'].includes(s) ? s : 'unknown'));
 const TOOLNAME = {claude: 'Claude', codex: 'Codex', agy: 'agy', terminal: 'Terminal'};
 const store = {get(k){try{return localStorage.getItem(k)}catch{return null}}, set(k,v){try{localStorage.setItem(k,v)}catch{}}};
@@ -180,11 +183,11 @@ function renderHome() {
   const all = sorted();
   const blocked = all.filter(s => s.bucket === 'blocked').length;
   const unknown = all.filter(s => s.bucket === 'unknown').length;
-  $('#summary').innerHTML = !all.length ? '' : blocked ? t('summaryBlocked', {n: blocked}) : unknown ? t('summaryUnknown', {n: unknown}) : t('summaryCalm', {n: all.filter(s => s.bucket === 'working').length});
+  putHtml($('#summary'), !all.length ? '' : blocked ? t('summaryBlocked', {n: blocked}) : unknown ? t('summaryUnknown', {n: unknown}) : t('summaryCalm', {n: all.filter(s => s.bucket === 'working').length}));
   if (navigator.setAppBadge) { blocked ? navigator.setAppBadge(blocked).catch(() => {}) : navigator.clearAppBadge?.().catch(() => {}); }
   const groups = $('#groups');
-  if (!all.length) { groups.innerHTML = `<div class="empty">${t('empty')}</div>`; return; }
-  if (groups.querySelector('.empty')) groups.innerHTML = '';
+  if (!all.length) { putHtml(groups, `<div class="empty">${t('empty')}</div>`); return; }
+  if (groups.querySelector('.empty')) { groups.innerHTML = ''; groups._h = ''; }
   const pinned = all.filter(isPinned);
   const defs = [...(pinned.length ? [{id: 'pinned', title: t('g_pinned'), items: pinned}] : []), ...GROUPS.map(id => ({id, title: t('g_' + id), items: all.filter(s => !isPinned(s) && s.bucket === id)}))].filter(g => g.items.length);
   patch(groups, defs, g => g.id, g => {
@@ -197,16 +200,16 @@ function renderHome() {
   });
   for (const g of defs) {
     const wrap = groups.querySelector(`[data-key="${g.id}"]`);
-    wrap.className = `group g-${g.id}`;
+    put(wrap, 'className', `group g-${g.id}`);
     const box = wrap.querySelector('.cards');
-    box.hidden = g.id === 'idle' && !state.idleOpen;
+    put(box, 'hidden', g.id === 'idle' && !state.idleOpen);
     if (g.id === 'idle') {
       const toggle = wrap.querySelector('[data-toggle]');
-      toggle.setAttribute('aria-expanded', String(state.idleOpen));
-      toggle.querySelector('span').textContent = t(state.idleOpen ? 'hide' : 'show');
+      if (toggle.getAttribute('aria-expanded') !== String(state.idleOpen)) toggle.setAttribute('aria-expanded', String(state.idleOpen));
+      put(toggle.querySelector('span'), 'textContent', t(state.idleOpen ? 'hide' : 'show'));
     }
     patch(box, g.items, s => s.pane_id, cardHtml, s => { const b = document.createElement('div'); b._base = 'card'; return b; });
-    for (const el of box.children) { const s = state.sessions.get(el.dataset.key); el.className = `card b-${s.bucket}${s.pending?.destructive ? ' two-seals' : ''}${isSealed(s.pane_id, s.pending) ? ' stamped' : ''}`; }
+    for (const el of box.children) { const s = state.sessions.get(el.dataset.key); put(el, 'className', `card b-${s.bucket}${s.pending?.destructive ? ' two-seals' : ''}${isSealed(s.pane_id, s.pending) ? ' stamped' : ''}`); }
   }
   for (const pane of state.busy) setPaneActionsBusy(pane, true);
 }
@@ -282,7 +285,7 @@ function updateConnection() {
   const banner = $('#conn');
   if (state.live || listReady) failReason = '';
   const text = state.live ? '' : offline ? t('offline') : failReason || t(streamReady ? 'syncing' : 'reconnecting');
-  banner.hidden = state.live;
+  put(banner, 'hidden', state.live);
   banner.classList.toggle('bad', offline || !!failReason);
   if (banner.textContent !== text) banner.textContent = text;
 }
@@ -419,11 +422,11 @@ function openSession(pane) {
 }
 function updateSessionHeader() {
   const s = state.sessions.get(state.current); if (!s) return;
-  $('#sTitle').textContent = s.project;
-  $('#sSub').textContent = [TOOLNAME[s.agent] || s.agent, s.model, statusText(s.status), ago(s.since)].filter(Boolean).join(' · ');
+  put($('#sTitle'), 'textContent', s.project);
+  put($('#sSub'), 'textContent', [TOOLNAME[s.agent] || s.agent, s.model, statusText(s.status), ago(s.since)].filter(Boolean).join(' · '));
   // A pane with no agent in it is a shell: it can be read, the server refuses to type into it.
   const plain = isPlain(s);
-  $('#composer').hidden = plain; $('#plainNote').hidden = !plain;
+  put($('#composer'), 'hidden', plain); put($('#plainNote'), 'hidden', !plain);
   if (plain) $('#keybar').hidden = true;
 }
 const isPlain = s => !!s && (s.agent || 'terminal') === 'terminal';
@@ -597,7 +600,7 @@ const arrival = r => r.delivered ? t('rcptArrived', {t: clock(r.delivered)}) : r
 function renderReceipt(r) {
   const el = $('#receipt');
   const fresh = !!r && Date.now() / 1000 - r.ts < 600;  // a receipt is news for ten minutes, then it lives in Decisions
-  el.hidden = !fresh;
+  put(el, 'hidden', !fresh);
   if (!fresh) return;
   // The road: sent -> on its way -> the agent has it. The last stop is drawn as a seal once the prompt left the agent's screen.
   const sent = `${t(DECIDED[r.decision] || 'sent')} ${clock(r.ts)}`;

@@ -1265,3 +1265,34 @@ def test_a_command_too_long_for_its_card_fades_out_instead_of_being_sliced(api_f
     api.publish_prompt(APPROVAL)
     chrome.wait("document.querySelector('.c-cmd.full-command') !== null")
     assert chrome.js("getComputedStyle(document.querySelector('.c-cmd')).maskImage") == "none"
+
+
+def test_a_quiet_screen_is_not_redrawn(api_fixture):
+    # The clock ticks every 1.5 s; with nothing new to show, nothing on screen may be written again (it costs battery and drops selections).
+    chrome, _api, url = api_fixture
+    watch = ("window.__changed = []; new MutationObserver(list => list.forEach(r => { const el = r.target.nodeType === 3 ? r.target.parentElement : r.target;"
+             " __changed.push(`${r.type} ${el.id || el.getAttribute('class')} ${r.attributeName || ''}`); }))"
+             ".observe(document.body, {subtree: true, childList: true, attributes: true, characterData: true})")
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelector('.card') !== null && document.querySelector('#conn').hidden")
+    for screen in ("home", "session"):
+        if screen == "session":
+            chrome.click(".card-open")
+            chrome.wait("document.querySelector('#messages .msg') !== null")
+        time.sleep(1.8)  # the first tick and the entrance are over
+        chrome.js(watch)
+        time.sleep(3.2)
+        assert chrome.js("__changed") == [], screen
+
+
+@pytest.mark.parametrize("cards", [[], [card("idle")]], ids=["no sessions", "folded idle group"])
+def test_a_quiet_list_without_active_sessions_is_not_redrawn_either(api_fixture, cards):
+    chrome, api, url = api_fixture
+    api.cards = cards
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelector('#groups')?.children.length > 0 && document.querySelector('#conn')?.hidden")
+    time.sleep(1.8)
+    chrome.js("window.__changed = 0; new MutationObserver(list => { __changed += list.length; })"
+              ".observe(document.querySelector('#home'), {subtree: true, childList: true, attributes: true, characterData: true})")
+    time.sleep(3.2)
+    assert chrome.js("__changed") == 0
