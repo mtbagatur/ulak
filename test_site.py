@@ -207,3 +207,11 @@ def test_every_stylesheet_and_script_address_changes_with_its_content(out):
             path, _, stamp = ref.partition("?v=")
             target = out / path.lstrip("/") if path.startswith("/") else (out / page).parent / path
             assert stamp == hashlib.sha256(target.read_bytes()).hexdigest()[:8], f"{page}: {ref}"
+
+
+def test_each_page_plays_the_recording_in_its_own_language(out):
+    recordings = {page: re.search(r'<a class="phone".*?<img src="([^"]+)"', (out / page).read_text(), re.S).group(1) for page in PAGES}
+    assert recordings == {"index.html": "demo.gif", "tr/index.html": "../demo-tr.gif"}
+    for page, ref in recordings.items():
+        assert ((out / page).parent / ref).read_bytes()[:6] == b"GIF89a", page
+    assert (out / "demo.gif").read_bytes() != (out / "demo-tr.gif").read_bytes()

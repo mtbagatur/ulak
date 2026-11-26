@@ -1,6 +1,6 @@
 """Retake the README screenshots and the demo GIF from the scripted demo.
 
-    python tools/shots.py            # docs/screenshots/{en,tr}/*.png and docs/demo.gif
+    python tools/shots.py            # docs/screenshots/{en,tr}/*.png, docs/demo.gif and docs/demo-tr.gif
 
 Needs Chrome or Chromium, the dev requirements, and ffmpeg for the GIF.
 """
@@ -25,6 +25,9 @@ from tools import demo_server as demo  # noqa: E402
 DOCS = ROOT / "docs"
 WIDTH, HEIGHT = 390, 780
 FPS = 10
+# What the fake agent says once the push is through, per language (tools/demo/demo.js).
+PUSHED = {"en": "Pushed. CI is running", "tr": "Gönderildi."}
+GIFS = {"en": "demo.gif", "tr": "demo-tr.gif"}
 TAP = """(() => {
   const el = document.querySelector(%s), r = el.getBoundingClientRect(), dot = document.createElement('i');
   dot.style.cssText = `position:fixed;z-index:99;left:${r.left + r.width / 2 - 17}px;top:${r.top + r.height / 2 - 17}px;width:34px;height:34px;border-radius:50%%;`
@@ -100,6 +103,10 @@ class Phone:
         self.until("!document.querySelector('#home').hidden")
 
 
+def pushed(lang):
+    return f"document.querySelector('#messages').textContent.includes({json.dumps(PUSHED[lang])})"
+
+
 def stills(phone, lang):
     out = DOCS / "screenshots" / lang
     phone.start(lang, speed=1)
@@ -120,7 +127,7 @@ def stills(phone, lang):
     phone.tap("#sheet [data-y]")
     phone.until("document.querySelector('#receipt.ok') !== null && document.querySelector('#messages .hint') !== null")
     phone.shot(out / "delivered.png")
-    phone.until("document.querySelector('#messages').textContent.includes('Pushed. CI is running')")
+    phone.until(pushed(lang))
     phone.home()
     phone.until("document.querySelector('.card[data-key=\"d3:p1\"] [data-act=approve]') !== null")
     phone.open("d3:p1")
@@ -136,10 +143,10 @@ def stills(phone, lang):
     phone.shot(out / "light.png")
 
 
-def gif(phone, work):
-    frames = work / "frames"
+def gif(phone, work, lang):
+    frames = work / f"frames-{lang}"
     frames.mkdir()
-    phone.start("en", speed=1.6, scale=1)
+    phone.start(lang, speed=1.6, scale=1)
     phone.frames = frames
     phone.hold(1.6)
     phone.open("d1:p1")
@@ -151,7 +158,7 @@ def gif(phone, work):
     phone.until("document.querySelector('#sheet [data-y]') !== null")
     phone.hold(1.8)
     phone.tap("#sheet [data-y]")
-    phone.until("document.querySelector('#messages').textContent.includes('Pushed. CI is running')")
+    phone.until(pushed(lang))
     phone.hold(1.6)
     phone.home()
     phone.until("document.querySelector('.card[data-key=\"d3:p1\"] [data-act=approve]') !== null")
@@ -163,8 +170,8 @@ def gif(phone, work):
     phone.hold(3.2)
     phone.frames = None
     palette = "split[a][b];[a]palettegen=max_colors=96:stats_mode=diff[p];[b][p]paletteuse=dither=none:diff_mode=rectangle"
-    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-framerate", str(FPS), "-i", str(frames / "%05d.png"), "-vf", palette, str(DOCS / "demo.gif")], check=True)
-    print(f"docs/demo.gif  {len(list(frames.iterdir())) / FPS:.0f}s  {(DOCS / 'demo.gif').stat().st_size // 1024} KB")
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-framerate", str(FPS), "-i", str(frames / "%05d.png"), "-vf", palette, str(DOCS / GIFS[lang])], check=True)
+    print(f"docs/{GIFS[lang]}  {len(list(frames.iterdir())) / FPS:.0f}s  {(DOCS / GIFS[lang]).stat().st_size // 1024} KB")
 
 
 def main():
@@ -179,7 +186,8 @@ def main():
                 for lang in ("en", "tr"):
                     stills(phone, lang)
                 if shutil.which("ffmpeg"):
-                    gif(phone, work)
+                    for lang in GIFS:
+                        gif(phone, work, lang)
         finally:
             server.shutdown()
 
