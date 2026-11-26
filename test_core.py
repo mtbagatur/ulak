@@ -958,3 +958,79 @@ def test_screen_endpoint_returns_plain_text_and_never_sends_keys(monkeypatch):
     assert fake.sent == [] and all(method == "agent.read" for method, _ in fake.calls)
     assert c.get("/api/sessions/w9:p1/screen").status_code == 403
     assert c.get("/api/sessions/nope/screen", headers=h).status_code == 404
+
+
+# --- what the session changed, read-only ---
+
+def _git(cwd, *args):
+    import subprocess
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.test", "-c", "commit.gpgsign=false", *args],
+                   cwd=cwd, check=True, capture_output=True)
+
+
+def _repo(tmp_path):
+    _git(tmp_path, "init", "-q", "-b", "main")
+    (tmp_path / "a.txt").write_text("one\ntwo\n")
+    _git(tmp_path, "add", "a.txt")
+    _git(tmp_path, "commit", "-q", "-m", "first")
+    return tmp_path
+
+
+def test_changes_lists_files_and_the_diff_against_the_last_commit(tmp_path):
+    from core import changes
+    repo = _repo(tmp_path)
+    assert changes(str(repo)) == {"repo": True, "branch": "main", "files": [], "more_files": 0, "diff": "", "truncated": False}
+    (repo / "a.txt").write_text("one\nthree\n")
+    (repo / "staged.txt").write_text("kept\n")
+    _git(repo, "add", "staged.txt")
+    (repo / "new file.txt").write_text("x\n")
+    out = changes(str(repo))
+    assert out["files"] == [{"code": "M", "path": "a.txt"}, {"code": "A", "path": "staged.txt"}, {"code": "?", "path": "new file.txt"}]
+    assert "-two" in out["diff"] and "+three" in out["diff"] and "+kept" in out["diff"]  # staged and unstaged
+    assert not out["truncated"]
+
+
+def test_changes_is_bounded_and_says_so(tmp_path):
+    from core import changes
+    repo = _repo(tmp_path)
+    (repo / "a.txt").write_text("".join(f"line {i}\n" for i in range(5000)))
+    for i in range(5):
+        (repo / f"n{i}.txt").write_text("x")
+    out = changes(str(repo), max_chars=2000, max_files=3)
+    assert len(out["diff"]) <= 2000 and out["truncated"]
+    assert out["diff"].endswith("\n") or out["diff"].count("\n") > 3  # cut on a line, not mid-line
+    assert len(out["files"]) == 3 and out["more_files"] == 3
+
+
+def test_changes_outside_a_repository_is_an_empty_state_not_an_error(tmp_path):
+    from core import changes
+    empty = {"repo": False, "branch": "", "files": [], "more_files": 0, "diff": "", "truncated": False}
+    assert changes(str(tmp_path)) == empty
+    assert changes(str(tmp_path / "gone")) == empty
+    assert changes("") == empty
+
+
+def test_changes_never_writes_and_never_runs_what_the_repository_configures(tmp_path):
+    from core import changes
+    repo = _repo(tmp_path)
+    marker = tmp_path / "ran"
+    _git(repo, "config", "diff.external", f"touch {marker}")
+    _git(repo, "config", "core.fsmonitor", f"touch {marker}")
+    (repo / "a.txt").write_text("one\nthree\n")
+    before = (repo / ".git" / "index").stat().st_mtime_ns
+    out = changes(str(repo))
+    assert "+three" in out["diff"] and not marker.exists()
+    assert (repo / ".git" / "index").stat().st_mtime_ns == before
+
+
+def test_changes_endpoint_reads_only_the_sessions_own_folder(monkeypatch, tmp_path):
+    fake, c, h = _setup2(monkeypatch, "idle")
+    repo = _repo(tmp_path)
+    (repo / "a.txt").write_text("one\nthree\n")
+    monkeypatch.setattr(api, "raw_agents", {"w9:p1": {"cwd": str(repo)}})
+    body = c.get("/api/sessions/w9:p1/changes", headers=h).json()
+    assert body["repo"] and body["files"] == [{"code": "M", "path": "a.txt"}] and "+three" in body["diff"]
+    assert c.get("/api/sessions/w9:p1/changes?cwd=/etc", headers=h).json()["files"] == body["files"]  # no path from the phone
+    assert fake.sent == []
+    assert c.get("/api/sessions/w9:p1/changes").status_code == 403
+    assert c.get("/api/sessions/nope/changes", headers=h).status_code == 404

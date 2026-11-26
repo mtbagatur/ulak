@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from chat import claude_chat, claude_path, detect_model, preview_from_screen, screen_chat, SPINNER, strip_ansi
-from core import NotificationGate, tidy_details, bucket, build_push, is_destructive, parse_approval, parse_codex_limits, parse_limits, parse_prompt, project_name, status_rank, slash_commands
+from core import NotificationGate, tidy_details, bucket, build_push, is_destructive, parse_approval, parse_codex_limits, parse_limits, parse_prompt, project_name, status_rank, slash_commands, changes
 from herdr_client import HerdrClient, HerdrError
 
 ROOT = Path(__file__).parent
@@ -631,6 +631,14 @@ async def screen(pane: str):
     while lines and not lines[-1]:
         lines.pop()
     return {"text": "\n".join(lines[-200:])[-20000:], "ts": time.time()}
+
+
+@app.get("/api/sessions/{pane}/changes")
+async def session_changes(pane: str):
+    """Files and diff against the last commit in the session's own folder. Read-only; the phone names no path."""
+    item = must_exist(pane)
+    cwd = raw_agents.get(pane, {}).get("cwd") or item.get("cwd") or ""
+    return {**await asyncio.to_thread(changes, cwd), "ts": time.time()}
 
 
 @app.get("/api/sessions/{pane}/commands")

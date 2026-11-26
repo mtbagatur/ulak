@@ -1,6 +1,9 @@
 import hashlib
 import json
+import os
 import re
+import subprocess
+import threading
 from datetime import datetime, time
 
 from chat import RULE, strip_ansi
@@ -496,3 +499,66 @@ def slash_commands(agent, cwd, home):
             found.pop(item["name"], None)
             found[item["name"]] = item
     return list(found.values())[:SLASH_LIMIT]
+
+
+# Looking at a working tree must not change it or run anything the repository configures.
+GIT_READ = ["git", "--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.quotepath=false", "-c", "color.ui=false"]
+
+
+def _git_read(cwd, args, limit, timeout=6):
+    """Run a read-only git command and return at most `limit` bytes of output, or None when it fails."""
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0", "LC_ALL": "C"}
+    try:
+        proc = subprocess.Popen(GIT_READ + args, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    except OSError:
+        return None
+    timer = threading.Timer(timeout, proc.kill)
+    timer.start()
+    try:
+        data = proc.stdout.read(limit + 1)
+        full = len(data) <= limit
+        if not full:
+            proc.kill()  # enough to show; do not buffer the rest of a huge diff
+        proc.stdout.close()
+        code = proc.wait()
+    finally:
+        timer.cancel()
+    if full and code != 0:
+        return None
+    return data[:limit].decode("utf-8", "replace"), not full
+
+
+def changes(cwd, max_chars=60000, max_files=200):
+    """What differs from the last commit in `cwd`: changed files and one bounded diff. Read-only."""
+    out = {"repo": False, "branch": "", "files": [], "more_files": 0, "diff": "", "truncated": False}
+    if not cwd or not os.path.isdir(cwd):
+        return out
+    status = _git_read(cwd, ["status", "--porcelain=v1", "-z", "--branch", "--untracked-files=normal"], 400000)
+    if status is None:
+        return out
+    out["repo"] = True
+    entries = status[0].split("\0")
+    files, skip = [], False
+    for entry in entries:
+        if skip:
+            skip = False
+            continue
+        if entry.startswith("## "):
+            head = entry[3:]
+            out["branch"] = "" if head.startswith("HEAD (no branch)") else head.removeprefix("No commits yet on ").split("...")[0]
+            continue
+        if len(entry) < 4:
+            continue
+        x, y, path = entry[0], entry[1], entry[3:]
+        skip = x in "RC"  # a rename is followed by the old path
+        files.append({"code": "?" if x == "?" else (x if x != " " else y), "path": path})
+    out["files"], out["more_files"] = files[:max_files], max(0, len(files) - max_files)
+    flags = ["--no-ext-diff", "--no-textconv", "--no-color"]
+    diff = _git_read(cwd, ["diff", "HEAD", *flags], max_chars) or _git_read(cwd, ["diff", "--cached", *flags], max_chars)
+    if diff:
+        text, cut = diff
+        if cut:
+            text = text[:text.rfind("\n") + 1]
+        out["diff"], out["truncated"] = text, cut
+    return out

@@ -899,12 +899,43 @@ function screenSheet() {
   };
   clearInterval(screenTimer); screenTimer = setInterval(tick, 2000); tick();
 }
+// What this session changed since the last commit. Looking only: one GET, no path sent from the phone.
+function diffHtml(diff) {
+  let head = true;
+  return diff.replace(/\n+$/, '').split('\n').map(line => {
+    if (line.startsWith('diff --git ')) head = true;
+    let c = '';
+    if (line.startsWith('@@')) { head = false; c = 'at'; }
+    else if (head) c = 'h';
+    else if (line[0] === '+') c = 'add';
+    else if (line[0] === '-') c = 'del';
+    return `<span class="${c}">${esc(line)}</span>`;
+  }).join('\n');
+}
+async function changesSheet() {
+  const pane = state.current;
+  showSheet(`<h3>${esc(t('changes'))}</h3><p class="note">${esc(t('changesNote'))}</p><div class="chg"><p class="empty">${esc(t('loading'))}</p></div>`);
+  const box = $('#sheet .chg');
+  let c;
+  try { c = await api(`/api/sessions/${encodeURIComponent(pane)}/changes`); }
+  catch { if (box.isConnected) box.innerHTML = `<p class="empty">${esc(t('changesFailed'))}</p>`; return; }
+  if (!box.isConnected || state.current !== pane) return;
+  if (c.branch) $('#sheet .note').textContent = t('changesBranch', {b: c.branch});
+  const files = c.files || [];
+  let html = '';
+  if (files.length) html += `<ul class="files">${files.map(f => `<li><b>${esc(f.code)}</b><span>${esc(f.path)}</span></li>`).join('')}</ul>`;
+  if (c.more_files) html += `<p class="note files-more">${esc(t('moreFiles', {n: c.more_files}))}</p>`;
+  if (c.diff) html += `<pre class="term diff" tabindex="0">${diffHtml(c.diff)}</pre><p class="note cut"${c.truncated ? '' : ' hidden'}>${esc(t('diffCut'))}</p>`;
+  else html += `<p class="empty">${esc(t(!c.repo ? 'notRepo' : files.length ? 'onlyNew' : 'nothingChanged'))}</p>`;
+  box.innerHTML = html;
+}
 $('#sMenu').onclick = () => {
   const s = state.sessions.get(state.current) || {};
-  showSheet(`<h3>${esc(s.project || t('pane'))}</h3><p>${esc(s.cwd || '')}</p><div class="acts" style="flex-direction:column"><button data-s>${esc(t('agentScreen'))}</button><button data-r>${esc(t('refreshSession'))}</button><button class="danger" data-c>${esc(t('closeSession'))}</button><button class="ghost" data-x>${esc(t('cancel'))}</button></div>`);
+  showSheet(`<h3>${esc(s.project || t('pane'))}</h3><p>${esc(s.cwd || '')}</p><div class="acts" style="flex-direction:column"><button data-s>${esc(t('agentScreen'))}</button><button data-d>${esc(t('changes'))}</button><button data-r>${esc(t('refreshSession'))}</button><button class="danger" data-c>${esc(t('closeSession'))}</button><button class="ghost" data-x>${esc(t('cancel'))}</button></div>`);
   $('#sheet [data-x]').onclick = hideSheet;
   $('#sheet [data-r]').onclick = () => { hideSheet(); state.chatHash = ''; loadChat(true); };
   $('#sheet [data-s]').onclick = screenSheet;
+  $('#sheet [data-d]').onclick = changesSheet;
   $('#sheet [data-c]').onclick = async e => {
     const r = await act(e.currentTarget, () => api(`/api/sessions/${encodeURIComponent(state.current)}/close`, {}));
     if (!r || !r.confirm_required) return;

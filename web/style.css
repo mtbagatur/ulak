@@ -196,6 +196,13 @@ details.tool pre{margin:6px 0 0;padding:8px 10px;background:var(--bg2);border-ra
 .sheet .acts{margin-top:6px}
 .sheet .note{font-size:13px;color:var(--muted)}
 .term{margin:0;padding:10px 12px;background:var(--bg2);border:1px solid var(--line);border-radius:10px;font:11.5px/1.4 ui-monospace,"SF Mono",Menlo,monospace;color:var(--strong);white-space:pre;overflow:auto;max-height:62dvh;min-height:30dvh;user-select:text;-webkit-user-select:text;overscroll-behavior:contain}
+.sheet .empty{padding:18px 8px}
+.files{list-style:none;margin:0 0 10px;padding:0;font:12.5px/1.4 ui-monospace,"SF Mono",Menlo,monospace;max-height:26dvh;overflow:auto;overscroll-behavior:contain}
+.files li{display:flex;gap:10px;padding:5px 0;border-bottom:1px solid var(--line)}.files li:last-child{border-bottom:0}
+.files b{flex:none;width:1.2em;text-align:center;color:var(--muted);font-weight:600}
+.files span{min-width:0;overflow-wrap:anywhere;color:var(--strong);user-select:text;-webkit-user-select:text}
+.term.diff{min-height:0;max-height:46dvh;color:var(--text)}
+.diff .h{color:var(--muted)}.diff .at{color:var(--strong);font-weight:600}.diff .add{color:var(--ok)}.diff .del{color:var(--muted)}
 #toasts{position:fixed;left:0;right:0;top:calc(var(--safe-t) + 8px);z-index:40;display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none}
 .toast{background:var(--card2);color:var(--strong);padding:10px 16px;border-radius:999px;font-size:14px;box-shadow:0 6px 20px rgba(0,0,0,.45);animation:drop .2s var(--ease-out);max-width:90%}
 .toast{border:1px solid var(--line)}

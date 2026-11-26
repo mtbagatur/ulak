@@ -123,6 +123,34 @@ async def commands(pane: str):
     ]}
 
 
+@app.get("/api/sessions/{pane}/changes")
+async def changes(pane: str):
+    return {"repo": True, "branch": "retry-backoff", "more_files": 0, "truncated": False, "ts": time.time(), "files": [
+        {"code": "M", "path": "billing/retry.py"}, {"code": "M", "path": "tests/test_retry.py"}, {"code": "?", "path": "docs/backoff.md"}],
+        "diff": """diff --git a/billing/retry.py b/billing/retry.py
+--- a/billing/retry.py
++++ b/billing/retry.py
+@@ -12,7 +12,8 @@ def backoff(attempt, base=0.5, cap=30.0):
+     \"\"\"Seconds to wait before the next attempt.\"\"\"
+-    return min(cap, base * 2 ** attempt)
++    delay = min(cap, base * 2 ** attempt)
++    return random.uniform(delay / 2, delay)
+\x20
+\x20
+ def retry(call, attempts=5):
+diff --git a/tests/test_retry.py b/tests/test_retry.py
+--- a/tests/test_retry.py
++++ b/tests/test_retry.py
+@@ -20,3 +20,8 @@ def test_backoff_is_capped():
+     assert backoff(20) <= 30.0
++
++
++def test_backoff_has_jitter():
++    waits = {backoff(3) for _ in range(50)}
++    assert len(waits) > 1 and all(2.0 <= w <= 4.0 for w in waits)
+"""}
+
+
 @app.get("/api/sessions/{pane}/screen")
 async def screen(pane: str):
     item = next((s for s in SESSIONS if s["pane_id"] == pane), None)

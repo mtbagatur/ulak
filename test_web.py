@@ -52,6 +52,7 @@ class FakeAPI:
         self.audit = []
         self.commands = None
         self.screen = "idle"
+        self.changes = {"repo": False, "branch": "", "files": [], "more_files": 0, "diff": "", "truncated": False}
         self.presence = []
         self.respond = threading.Event()
         self.respond.set()
@@ -120,6 +121,8 @@ class Handler(SimpleHTTPRequestHandler):
             self.json({"commands": self.api.commands})
         elif self.path == "/api/sessions/fake%3Ap1/screen":
             self.json({"text": self.api.screen, "ts": time.time()})
+        elif self.path == "/api/sessions/fake%3Ap1/changes":
+            self.json(self.api.changes)
         elif self.path == "/api/audit":
             self.json({"items": self.api.audit})
         elif self.path == "/api/notifications":
@@ -805,6 +808,57 @@ def test_agent_screen_is_shown_read_only_and_follows_the_terminal(api_fixture):
     api.screen = "$ pytest -q\n13 passed"
     chrome.wait("document.querySelector('#sheet pre.term')?.textContent.endsWith('13 passed')")
     assert not api.replies
+
+
+def test_changes_sheet_shows_files_and_a_coloured_diff_without_any_input(api_fixture):
+    chrome, api, url = api_fixture
+    long_path = "packages/billing/src/retries/" + "very_long_directory_name/" * 4 + "backoff_with_jitter.py"
+    api.changes = {
+        "repo": True, "branch": "retry-backoff", "more_files": 4, "truncated": True,
+        "files": [{"code": "M", "path": long_path}, {"code": "?", "path": "<img src=x onerror=window.pwned=1>.txt"}],
+        "diff": "diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n@@ -1,2 +1,2 @@\n one\n-two\n+<b onclick=window.pwned=1>three</b>" + " and a very long line" * 30 + "\n",
+    }
+    chrome.resize(320, 700)
+    open_first(chrome, url)
+    chrome.click("#sMenu")
+    chrome.click("#sheet [data-d]")
+    chrome.wait("document.querySelectorAll('#sheet .files li').length === 2")
+    assert chrome.js("document.querySelector('#sheet h3').textContent") == "Changes"
+    assert "retry-backoff" in chrome.js("document.querySelector('#sheet .note').textContent")
+    assert chrome.js("[...document.querySelectorAll('#sheet .files li b')].map(b => b.textContent)") == ["M", "?"]
+    assert chrome.js("document.querySelector('#sheet .files li:last-child span').textContent") == "<img src=x onerror=window.pwned=1>.txt"
+    assert "4" in chrome.js("document.querySelector('#sheet .files-more').textContent")
+    assert chrome.js("[...document.querySelectorAll('#sheet pre.diff span')].map(e => e.className)") == ["h", "h", "h", "at", "", "del", "add"]
+    assert chrome.js("document.querySelector('#sheet pre.diff').textContent") == api.changes["diff"].rstrip("\n")
+    assert chrome.js("document.querySelector('#sheet pre.diff b') === null") and chrome.js("window.pwned") is None
+    assert chrome.js("!document.querySelector('#sheet .cut').hidden")
+    assert chrome.js("document.querySelectorAll('#sheet input, #sheet textarea, #sheet [data-k]').length") == 0
+    # Long paths and long lines stay inside the sheet at 320 px: the path wraps, the diff scrolls on its own.
+    assert chrome.js("document.documentElement.scrollWidth") <= 320
+    assert chrome.js("(() => { const edge=document.querySelector('#sheet').getBoundingClientRect().right; return [...document.querySelectorAll('#sheet .files li, #sheet pre.diff')].every(e => e.getBoundingClientRect().right <= edge); })()")
+    assert chrome.js("(() => { const p=document.querySelector('#sheet pre.diff'); return p.scrollWidth > p.clientWidth; })()")
+    assert not api.replies
+
+
+def test_changes_sheet_has_plain_empty_states(api_fixture):
+    chrome, api, url = api_fixture
+    open_first(chrome, url)
+    chrome.click("#sMenu")
+    chrome.click("#sheet [data-d]")
+    chrome.wait("document.querySelector('#sheet .empty')?.textContent === 'This folder is not a git repository.'")
+    assert chrome.js("document.querySelector('#sheet pre.diff') === null")
+    api.changes = dict(api.changes, repo=True, branch="main")
+    chrome.click("#sheet [data-close]")
+    chrome.click("#sMenu")
+    chrome.click("#sheet [data-d]")
+    chrome.wait("document.querySelector('#sheet .empty')?.textContent === 'Nothing has changed since the last commit.'")
+    # Only new, untracked files: the list shows them and says why there is no diff.
+    api.changes = dict(api.changes, files=[{"code": "?", "path": "notes.md"}])
+    chrome.click("#sheet [data-close]")
+    chrome.click("#sMenu")
+    chrome.click("#sheet [data-d]")
+    chrome.wait("document.querySelectorAll('#sheet .files li').length === 1")
+    assert chrome.js("document.querySelector('#sheet .empty').textContent") == "New files are listed above; their contents are not shown."
 
 
 def test_subagents_show_as_cards_with_their_state(api_fixture):
