@@ -1207,3 +1207,25 @@ def test_banner_says_why_the_session_list_could_not_be_read(api_fixture):
     chrome.wait("document.querySelector('#conn')?.textContent === 'Fixture snapshot unavailable'")
     api.fail_list = False
     chrome.wait("document.querySelector('#conn').hidden && document.querySelector('.card') !== null")
+
+
+
+def test_keyboard_focus_follows_into_a_session_and_back_to_its_card(api_fixture):
+    chrome, _api, url = api_fixture
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelector('.card-open') !== null")
+    chrome.js("document.querySelector('.card-open').focus()")
+    chrome.key("Enter", "Enter", 13)
+    chrome.wait("!document.querySelector('#session').hidden")
+    assert chrome.js("document.activeElement.id") == "back"
+    chrome.key("Enter", "Enter", 13)
+    chrome.wait("!document.querySelector('#home').hidden")
+    assert chrome.js("document.activeElement.className") == "card-open"
+
+
+
+def test_opening_a_session_by_address_does_not_move_focus(api_fixture):
+    chrome, _api, url = api_fixture
+    chrome.cdp("Page.navigate", url=f"{url}/#/s/{PANE}")
+    chrome.wait("document.querySelector('#messages .msg') !== null")
+    assert chrome.js("document.activeElement === document.body")

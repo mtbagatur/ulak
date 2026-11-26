@@ -389,21 +389,27 @@ function route() {
 }
 window.addEventListener('popstate', route);
 $('#back').onclick = () => (history.length > 1 && history.state ? history.back() : (location.hash = '', route()));
+// A keyboard user's focus must not stay behind on a screen that just went away. Nothing is focused for someone who was not already focused there.
+const focusIsIn = sel => !!document.activeElement?.closest(sel);
 function showHome() {
   state.view++;
+  const from = focusIsIn('#session') && state.current;
   state.current = null; state.prompt = null; $('#session').hidden = true; $('#home').hidden = false;
   $('#promptZone').innerHTML = ''; $('#promptStatus').textContent = ''; hideSheet();
   updateConnection();
+  if (from) ([...document.querySelectorAll('.card')].find(el => el.dataset.key === from)?.querySelector('.card-open') || $('#newSession')).focus({preventScroll: true});
 }
 
 // ---------- session screen ----------
 function openSession(pane) {
   if (state.current === pane && !$('#session').hidden) return;
   hideSheet();
+  const carry = focusIsIn('#home');
   state.view++;
   state.current = pane; state.chatHash = ''; state.rendered = 0; state.prompt = null;
   loadSlash(pane);
   $('#home').hidden = true; $('#session').hidden = false;
+  if (carry) $('#back').focus({preventScroll: true});
   $('#messages').innerHTML = `<div class="empty">${t('loading')}</div>`; $('#promptZone').innerHTML = ''; $('#keybar').hidden = true;
   delete $('#promptZone').dataset.sig;
   $('#receipt').hidden = true;
