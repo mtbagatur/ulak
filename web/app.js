@@ -304,6 +304,7 @@ function connect() {
   source.onmessage = ev => {
     if (es !== source || !streamReady) return;
     const m = JSON.parse(ev.data);
+    if (m.type === 'receipt') { if (m.pane === state.current) loadChat(); return; }
     if (m.type !== 'session' && m.type !== 'removed') return;
     const session = m.type === 'session' ? m.session : null;
     const pane = session ? session.pane_id : m.pane;
@@ -367,6 +368,7 @@ function openSession(pane) {
   $('#home').hidden = true; $('#session').hidden = false;
   $('#messages').innerHTML = `<div class="empty">${t('loading')}</div>`; $('#promptZone').innerHTML = ''; $('#keybar').hidden = true;
   delete $('#promptZone').dataset.sig;
+  $('#receipt').hidden = true;
   $('#promptStatus').textContent = '';
   $('#message').value = store.get('draft:' + pane) || ''; autosize();
   updateSessionHeader(); loadChat(true);
@@ -444,6 +446,7 @@ async function loadChat(first = false) {
     const key = JSON.stringify([r.messages.length, r.messages.at(-1), r.hint]);
     if (key !== state.chatHash) { state.chatHash = key; renderMessages(r, first); }
     renderPrompt(r.prompt, r.status);
+    renderReceipt(r.receipt);
     if (state.busy.has(pane)) setPaneActionsBusy(pane, true);
     if (r.session) { state.sessions.set(pane, {...state.sessions.get(pane), ...r.session}); updateSessionHeader(); }
     chatReadyView = view;
@@ -518,6 +521,19 @@ function renderPrompt(p, status) {
     ${p.multi ? `<button class="also" data-k="right">${esc(t('cont'))}</button>` : ''}</div>`;
   zone.querySelectorAll('[data-n]').forEach(b => b.onclick = () => choose(+b.dataset.n, b));
   zone.querySelector('[data-k]')?.addEventListener('click', e => sendKeys(['right'], e.currentTarget));
+}
+// ---------- receipt: sent -> the agent has it ----------
+const clock = ts => new Date(ts * 1000).toLocaleTimeString(LANG === 'tr' ? 'tr-TR' : 'en-GB', {hour: '2-digit', minute: '2-digit'});
+const DECIDED = {approve: 'approved', deny: 'denied', always: 'allowedSession'};
+const arrival = r => r.delivered ? t('rcptArrived', {t: clock(r.delivered)}) : r.delivered === false ? t('rcptUnknown') : t('rcptPending');
+function renderReceipt(r) {
+  const el = $('#receipt');
+  const fresh = !!r && Date.now() / 1000 - r.ts < 600;  // a receipt is news for ten minutes, then it lives in Decisions
+  el.hidden = !fresh;
+  if (!fresh) return;
+  const text = `${t(DECIDED[r.decision] || 'sent')} ${clock(r.ts)} · ${arrival(r)}`;
+  if (el.textContent !== text) el.textContent = text;
+  el.className = 'receipt' + (r.delivered ? ' ok' : r.delivered === false ? ' unk' : '');
 }
 function afterDecision(r, view) {
   if (!r || state.view !== view) return;
@@ -878,9 +894,16 @@ if ('serviceWorker' in navigator) {
 
 // ---------- notification history ----------
 $('#history').onclick = e => act(e.currentTarget, async () => {
-  const {items} = await api('/api/notifications');
+  const [{items}, audit] = await Promise.all([api('/api/notifications'), api('/api/audit')]);
   const rows = items.length ? items.map(n => `<button class="card b-${n.status === 'blocked' ? 'blocked' : 'done'}" data-pane="${esc(n.pane || '')}"><b>${esc(histTitle(n))}</b><div>${esc(histBody(n))}</div><small>${ago(n.ts)}</small></button>`).join('') : `<div class="empty">${t('noNotifs')}</div>`;
-  showSheet(`<h3>${esc(t('notifications'))}</h3><div class="scroll" style="max-height:65vh">${rows}</div>`);
+  const outcome = a => a.outcome === 'refused' ? `${t('outRefused')}: ${errText(a.reason)}` : a.outcome === 'confirm_requested' ? t('outConfirm') : `${t(DECIDED[a.decision] || 'sent')} · ${arrival(a)}`;
+  const decisions = audit.items.length ? audit.items.map(a => `<div class="audit ${a.outcome === 'refused' ? 'no' : ''}"><b>${esc(a.project || a.pane)}</b><span>${esc(outcome(a))}</span>${a.command ? `<pre>${esc(a.command)}</pre>` : ''}<small>${esc(a.login || '')} · ${esc(new Date(a.ts * 1000).toLocaleString(LANG === 'tr' ? 'tr-TR' : 'en-GB', {dateStyle: 'medium', timeStyle: 'short'}))}</small></div>`).join('') : `<div class="empty">${t('noDecisions')}</div>`;
+  showSheet(`<h3 class="sr-only">${esc(t('history'))}</h3><div class="tabs" role="tablist"><button role="tab" data-tab="notifications" aria-selected="true">${esc(t('notifications'))}</button><button role="tab" data-tab="decisions" aria-selected="false">${esc(t('decisions'))}</button></div>
+    <div class="scroll" style="max-height:65vh" data-panel="notifications">${rows}</div><div class="scroll" style="max-height:65vh" data-panel="decisions" hidden>${decisions}</div>`);
+  $('#sheet').querySelectorAll('[data-tab]').forEach(tab => tab.onclick = () => {
+    $('#sheet').querySelectorAll('[data-tab]').forEach(x => x.setAttribute('aria-selected', String(x === tab)));
+    $('#sheet').querySelectorAll('[data-panel]').forEach(x => { x.hidden = x.dataset.panel !== tab.dataset.tab; });
+  });
   $('#sheet').querySelectorAll('[data-pane]').forEach(b => b.onclick = () => { const p = b.dataset.pane; hideSheet(); if (p && state.sessions.has(p)) go(p); });
 });
 

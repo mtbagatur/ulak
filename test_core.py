@@ -3,7 +3,7 @@ from pathlib import Path
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 from core import NotificationGate, is_destructive, quiet_hours, status_rank, bucket
-import asyncio, json
+import asyncio, json, tempfile
 from herdr_client import HerdrClient, HerdrError
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
@@ -228,6 +228,8 @@ def _setup(monkeypatch, text):
     monkeypatch.setattr(api, "sessions", {"w9:p1": {"pane_id": "w9:p1", "status": "blocked"}})
     monkeypatch.setattr(api, "pane_ids", {"w9:p1"})
     monkeypatch.setattr(api, "pending_confirm", {})
+    monkeypatch.setattr(api, "STATE", Path(tempfile.mkdtemp()))
+    monkeypatch.setattr(api, "track_delivery", lambda *a: None)  # tests drive confirm_delivery themselves
     return fake, TestClient(api.app), {"Tailscale-User-Login": "user@example.test"}
 
 def test_stale_fingerprint_rejected(monkeypatch):
@@ -579,6 +581,8 @@ def _setup2(monkeypatch, text, agent="claude"):
     monkeypatch.setattr(api, "sessions", {"w9:p1": card})
     monkeypatch.setattr(api, "pane_ids", {"w9:p1"})
     monkeypatch.setattr(api, "pending_confirm", {})
+    monkeypatch.setattr(api, "STATE", Path(tempfile.mkdtemp()))
+    monkeypatch.setattr(api, "track_delivery", lambda *a: None)  # tests drive confirm_delivery themselves
     return fake, TestClient(api.app), {"Tailscale-User-Login": "user@example.test"}
 
 def test_choose_sends_option_keys(monkeypatch):
@@ -785,3 +789,64 @@ def test_hook_explanation_is_extracted_as_single_line():
     from core import hook_note
     block = "Bash command\n  git push origin main\nHook PreToolUse:Bash requires confirmation for this command:\n[x] This sends changes to the remote repository.\nMore explanation"
     assert hook_note(block) == "This sends changes to the remote repository."
+
+
+# --- decision record and delivery receipt ---
+
+def test_sent_decision_is_recorded_with_who_what_and_when(monkeypatch):
+    fake, c, h = _setup(monkeypatch, CODEX)
+    fp = parse_approval(CODEX)["fingerprint"]
+    assert c.post("/api/sessions/w9:p1/approve", headers=h, json={"decision": "approve", "fingerprint": fp}).status_code == 200
+    items = c.get("/api/audit", headers=h).json()["items"]
+    assert len(items) == 1
+    e = items[0]
+    assert (e["decision"], e["outcome"], e["login"], e["pane"]) == ("approve", "sent", "user@example.test", "w9:p1")
+    assert "touch api-probe2.txt" in e["command"] and e["ts"] > 0 and not e["destructive"]
+
+def test_refused_decision_is_recorded_with_its_reason(monkeypatch):
+    fake, c, h = _setup(monkeypatch, CODEX)
+    assert c.post("/api/sessions/w9:p1/approve", headers=h, json={"decision": "approve", "fingerprint": "old"}).status_code == 409
+    e = c.get("/api/audit", headers=h).json()["items"][0]
+    assert e["outcome"] == "refused" and "changed" in e["reason"] and fake.sent == []
+
+def test_destructive_record_shows_both_steps_newest_first(monkeypatch):
+    fake, c, h = _setup(monkeypatch, CLAUDE)
+    fp = parse_approval(CLAUDE)["fingerprint"]
+    r = c.post("/api/sessions/w9:p1/approve", headers=h, json={"decision": "approve", "fingerprint": fp}).json()
+    c.post("/api/sessions/w9:p1/approve", headers=h, json={"decision": "approve", "fingerprint": fp, "confirm_token": r["confirm_token"]})
+    items = c.get("/api/audit", headers=h).json()["items"]
+    assert [e["outcome"] for e in items] == ["sent", "confirm_requested"]
+    assert all(e["destructive"] for e in items)
+    assert "confirm_token" not in json.dumps(items) and r["confirm_token"] not in json.dumps(items)
+
+def test_audit_requires_identity(monkeypatch):
+    fake, c, h = _setup(monkeypatch, CODEX)
+    assert c.get("/api/audit").status_code == 403
+
+def test_receipt_is_delivered_once_the_prompt_leaves_the_screen(monkeypatch):
+    fake, c, h = _setup(monkeypatch, CODEX)
+    fp = parse_approval(CODEX)["fingerprint"]
+    c.post("/api/sessions/w9:p1/approve", headers=h, json={"decision": "approve", "fingerprint": fp})
+    entry = c.get("/api/audit", headers=h).json()["items"][0]
+    assert entry["delivered"] is None
+    monkeypatch.setattr(api, "DELIVERY_DELAYS", (0, 0))
+    asyncio.run(api.confirm_delivery("w9:p1", fp, entry["id"]))
+    assert c.get("/api/audit", headers=h).json()["items"][0]["delivered"] is False  # same prompt still on screen
+    fake.text = "Running the command now"
+    asyncio.run(api.confirm_delivery("w9:p1", fp, entry["id"]))
+    assert c.get("/api/audit", headers=h).json()["items"][0]["delivered"] > 0
+
+def test_chat_carries_the_latest_receipt_for_its_pane(monkeypatch):
+    fake, c, h = _setup(monkeypatch, CODEX)
+    fp = parse_approval(CODEX)["fingerprint"]
+    assert c.get("/api/sessions/w9:p1/chat", headers=h).json()["receipt"] is None
+    c.post("/api/sessions/w9:p1/approve", headers=h, json={"decision": "deny", "fingerprint": fp})
+    receipt = c.get("/api/sessions/w9:p1/chat", headers=h).json()["receipt"]
+    assert receipt["decision"] == "deny" and receipt["delivered"] is None and "login" not in receipt
+
+def test_audit_keeps_a_bounded_history(monkeypatch):
+    fake, c, h = _setup(monkeypatch, CODEX)
+    monkeypatch.setattr(api, "AUDIT_KEEP", 3)
+    for _ in range(5):
+        api.audit("w9:p1", "approve", "refused", reason="x")
+    assert len(api.read_audit()) == 3

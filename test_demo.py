@@ -13,5 +13,8 @@ def test_demo_approval_resolves_the_fake_session():
         assert response.status_code == 200 and response.json()["ok"]
         chat = client.get("/api/sessions/d1:p1/chat").json()
         assert chat["status"] == "done" and chat["prompt"] is None
+        assert chat["receipt"]["decision"] == "approve" and chat["receipt"]["delivered"]
+        assert client.get("/api/audit").json()["items"][0]["outcome"] == "sent"
     finally:
         demo.SESSIONS[:] = original
+        demo.AUDIT.clear()

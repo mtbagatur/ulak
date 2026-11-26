@@ -98,7 +98,8 @@ async def chat(pane: str):
         p = item["pending"]
         prompt = {**p, "options": [{"n": i + 1, "label": l, "role": r} for i, (l, r) in enumerate(
             [("Yes", "approve"), ("Yes, and don't ask again", "always"), ("No", "deny")] if p["roles"].count("always") else [("Yes", "approve"), ("No", "deny")])]}
-    return {"messages": CHAT, "source": "transcript", "prompt": prompt, "status": item["status"], "hint": "", "session": item}
+    return {"messages": CHAT, "source": "transcript", "prompt": prompt, "status": item["status"], "hint": "", "session": item,
+            "receipt": next((a for a in AUDIT if a["pane"] == pane and a["outcome"] == "sent"), None)}
 
 
 @app.get("/api/config")
@@ -115,6 +116,14 @@ async def get_pins():
 async def put_pins(request: Request):
     pins[:] = (await request.json()).get("pins", [])
     return {"pins": pins}
+
+
+AUDIT = []  # newest first, like the real /api/audit
+
+
+@app.get("/api/audit")
+async def audit():
+    return {"items": AUDIT}
 
 
 @app.get("/api/notifications")
@@ -160,6 +169,10 @@ async def approve(pane: str, request: Request):
     if pending.get("destructive") and action.get("decision") == "approve":
         if action.get("confirm_token") != "demo-confirmation":
             return {"confirm_required": True, "confirm_token": "demo-confirmation", "command": pending["details"]}
+    now = time.time()
+    AUDIT.insert(0, {"id": f"demo-{len(AUDIT)}", "ts": now, "pane": pane, "project": item.get("project", ""), "decision": action.get("decision"),
+                     "outcome": "sent", "reason": "", "command": pending["details"], "destructive": bool(pending.get("destructive")),
+                     "login": "you@example.test", "delivered": now})
     item["pending"] = None
     item["status"] = "done"
     item["bucket"] = "done"

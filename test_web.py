@@ -47,6 +47,8 @@ class FakeAPI:
         self.events = []
         self.requests = []
         self.replies = []
+        self.receipt = None
+        self.audit = []
         self.presence = []
         self.respond = threading.Event()
         self.respond.set()
@@ -109,8 +111,12 @@ class Handler(SimpleHTTPRequestHandler):
             item = self.api.cards[0]
             self.json({
                 "messages": self.api.messages, "source": "transcript", "prompt": self.api.approval,
-                "status": item["status"], "session": item,
+                "status": item["status"], "session": item, "receipt": self.api.receipt,
             })
+        elif self.path == "/api/audit":
+            self.json({"items": self.api.audit})
+        elif self.path == "/api/notifications":
+            self.json({"items": []})
         elif self.path == "/api/pins":
             self.json({"pins": []})
         elif self.path == "/api/limits":
@@ -614,3 +620,46 @@ def test_dock_button_stays_tappable_over_scrolled_cards(api_fixture):
         return [0.1, 0.5, 0.9].every(x => [0.2, 0.5, 0.8].every(y =>
             document.elementFromPoint(box.left + box.width * x, box.top + box.height * y) === button));
     })()""")
+
+
+def test_receipt_line_follows_the_reply_until_the_agent_has_it(api_fixture):
+    chrome, api, url = api_fixture
+    open_first(chrome, url)
+    assert chrome.js("document.querySelector('#receipt').hidden") is True
+    api.receipt = {"id": "r1", "ts": time.time(), "decision": "approve", "delivered": None, "destructive": False}
+    chrome.click(APPROVE)
+    chrome.wait("document.querySelector('#receipt')?.textContent.includes('on its way')")
+    api.receipt = {**api.receipt, "delivered": time.time()}
+    api.approval = None
+    api.cards = [card("working")]
+    api.events.append({"type": "receipt", "pane": PANE, "delivered": True})
+    chrome.wait("document.querySelector('#receipt')?.textContent.includes('agent received it')")
+    assert chrome.js("document.querySelector('#receipt').textContent.startsWith('Approved')")
+
+
+def test_old_receipt_is_not_shown(api_fixture):
+    chrome, api, url = api_fixture
+    api.receipt = {"id": "r0", "ts": time.time() - 3600, "decision": "deny", "delivered": time.time() - 3599, "destructive": False}
+    open_first(chrome, url)
+    assert chrome.js("document.querySelector('#receipt').hidden") is True
+
+
+def test_decisions_tab_lists_sent_and_refused_answers(api_fixture):
+    chrome, api, url = api_fixture
+    now = time.time()
+    api.audit = [
+        {"id": "a2", "ts": now, "pane": PANE, "project": "fixture", "decision": "approve", "outcome": "refused", "reason": "The approval screen changed; refresh",
+         "command": "git push origin example", "destructive": True, "login": "user@example.test", "delivered": None},
+        {"id": "a1", "ts": now - 60, "pane": PANE, "project": "fixture", "decision": "deny", "outcome": "sent", "reason": "",
+         "command": "<img src=x onerror=window.pwned=1>", "destructive": False, "login": "user@example.test", "delivered": now - 59},
+    ]
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelector('#history') !== null && document.querySelector('.card') !== null")
+    chrome.click("#history")
+    chrome.wait("document.querySelector('#sheet [data-tab=decisions]') !== null")
+    chrome.click("#sheet [data-tab=decisions]")
+    chrome.wait("document.querySelectorAll('#sheet .audit').length === 2")
+    first, second = chrome.js("[...document.querySelectorAll('#sheet .audit')].map(e => e.textContent)")
+    assert "Refused" in first and "The approval screen changed" in first and "user@example.test" in first
+    assert "Denied" in second and "agent received it" in second and "<img src=x" in second
+    assert chrome.js("window.pwned") is None

@@ -90,6 +90,15 @@ details.tool summary b{color:var(--text);font-weight:600;flex:none}
 details.tool summary span{font:12px ui-monospace,Menlo,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 details.tool pre{margin:6px 0 0;padding:8px 10px;background:var(--bg2);border-radius:10px;font:12px/1.4 ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-all;max-height:200px;overflow:auto}
 .hint{align-self:flex-start;color:var(--blue-t);font-size:13px;padding:2px 6px;animation:pulse 1.6s infinite}
+.receipt{flex:none;align-self:flex-end;margin:0 14px 8px;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.receipt.ok{color:var(--green)}.receipt.unk{color:var(--orange)}
+.tabs{display:flex;gap:6px;margin:2px 0 12px}
+.tabs button{flex:1;min-height:40px;padding:8px 10px;background:transparent;color:var(--muted);border:1px solid var(--line)}
+.tabs button[aria-selected=true]{background:var(--card2);color:var(--strong);border-color:transparent}
+.audit{display:grid;gap:4px;padding:11px 2px;border-bottom:1px solid var(--line)}
+.audit b{color:var(--strong)}.audit span{font-size:14px}.audit.no span{color:var(--orange)}
+.audit pre{margin:2px 0;padding:8px 10px;background:var(--bg2);border-radius:8px;font:12.5px ui-monospace,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere;max-height:96px;overflow:auto}
+.audit small{color:var(--muted);font-variant-numeric:tabular-nums}
 .jump{position:absolute;right:14px;bottom:150px;z-index:5;border-radius:999px;background:var(--blue);color:#fff;min-height:36px;padding:6px 14px;box-shadow:0 4px 14px rgba(0,0,0,.4)}
 #promptZone{min-height:0;max-height:55%;overflow-y:auto;overscroll-behavior-y:contain}
 #promptZone:empty{display:none}

@@ -48,8 +48,11 @@ pane_ids = set()
 read_cache = {}     # pane -> (time, screen text, status, read source)
 pushed = {}         # pane -> last pushed prompt fingerprint
 work_started = {}   # pane -> when the current working stretch began (kept while blocked)
+delivery_tasks = set()
 client_presence = {} # opaque browser UUID -> last visible heartbeat timestamp
 PRESENCE_TTL = 10
+AUDIT_KEEP = 500
+DELIVERY_DELAYS = (0.4, 0.8, 1.5, 2.5, 3.0)  # when to look for the answered prompt leaving the screen
 gate = NotificationGate()
 client = HerdrClient()
 allowed_login = os.environ.get("ULAK_ALLOWED_LOGIN", "")
@@ -492,6 +495,71 @@ async def send_push(item, prompt=None, destructive=False):
         print(f"Push delivery failed: {exc}", flush=True)
 
 
+def read_audit():
+    try:
+        items = json.loads((STATE / "audit.json").read_text())
+        return items if isinstance(items, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def write_audit(items):
+    try:
+        STATE.mkdir(exist_ok=True)
+        path = STATE / "audit.json"
+        path.write_text(json.dumps(items[-AUDIT_KEEP:], ensure_ascii=False))
+        path.chmod(0o600)
+    except OSError:
+        pass
+
+
+def audit(pane, decision, outcome, *, login="", command="", destructive=False, reason=""):
+    """Record who answered what and when. Refusals are kept too: they are the proof the checks ran."""
+    item = sessions.get(pane) or {}
+    entry = {"id": secrets.token_hex(6), "ts": time.time(), "pane": pane, "project": item.get("project", ""), "agent": item.get("agent", ""),
+             "decision": decision, "outcome": outcome, "reason": reason, "command": tidy_details(command or "")[:600],
+             "destructive": bool(destructive), "login": login, "delivered": None}
+    write_audit(read_audit() + [entry])
+    return entry
+
+
+async def confirm_delivery(pane, fingerprint, entry_id):
+    """A reply has arrived once the prompt it answered is gone from the agent's screen."""
+    delivered = False
+    for delay in DELIVERY_DELAYS:
+        await asyncio.sleep(delay)
+        try:
+            now = await fresh_prompt(pane, (sessions.get(pane) or {}).get("agent") or "claude")
+        except Exception:
+            continue
+        if not now or now["fingerprint"] != fingerprint:
+            delivered = time.time()
+            break
+    items = read_audit()
+    for entry in items:
+        if entry.get("id") == entry_id:
+            entry["delivered"] = delivered
+    write_audit(items)
+    await broadcast({"type": "receipt", "pane": pane, "delivered": bool(delivered)})
+
+
+def track_delivery(pane, fingerprint, entry):
+    task = asyncio.create_task(confirm_delivery(pane, fingerprint, entry["id"]))
+    delivery_tasks.add(task)
+    task.add_done_callback(delivery_tasks.discard)
+
+
+def latest_receipt(pane):
+    for entry in reversed(read_audit()):
+        if entry.get("pane") == pane and entry.get("outcome") == "sent":
+            return {k: entry.get(k) for k in ("id", "ts", "decision", "delivered", "destructive")}
+    return None
+
+
+def who(request):
+    return request.headers.get("tailscale-user-login", "")
+
+
 @asynccontextmanager
 async def lifespan(app):
     await initialize()
@@ -579,7 +647,7 @@ async def chat(pane: str, limit: int = 60):
     if messages is None:
         messages = screen_chat(screen, max(10, min(limit, 200)))
     hint = next((l.strip() for l in reversed(strip_ansi(screen).splitlines()[-12:]) if SPINNER.match(l)), "") if status == "working" else ""
-    return {"messages": messages, "source": source, "prompt": prompt, "status": status, "hint": hint, "session": item}
+    return {"messages": messages, "source": source, "prompt": prompt, "status": status, "hint": hint, "session": item, "receipt": latest_receipt(pane)}
 
 
 @app.post("/api/sessions/{pane}/prompt")
@@ -607,7 +675,7 @@ async def to_quick(action: Action):
 
 
 @app.post("/api/sessions/{pane}/approve")
-async def approve(pane: str, action: Action):
+async def approve(pane: str, action: Action, request: Request):
     item = sessions.get(pane)
     if not item or pane not in pane_ids:
         raise HTTPException(404, "Session is closed or unknown")
@@ -617,40 +685,53 @@ async def approve(pane: str, action: Action):
     if action.decision not in ("approve", "deny", "always"):
         raise HTTPException(400, "decision must be approve, deny, or always")
     with exclusive_prompt_reply(pane):
+        seen = {}  # what was on screen, so a refusal is recorded with its command
         try:
-            pending = await fresh_pending(pane)
-        except Exception:
-            pending = None
-        discard_changed_confirmation(pane, (pending or {}).get("fingerprint"))
-        if not pending:
-            raise HTTPException(409, "No recognised approval on screen; use the terminal")
-        if not action.fingerprint or not secrets.compare_digest(action.fingerprint, pending["fingerprint"]):
-            raise HTTPException(409, "The approval screen changed; refresh")
-        if action.decision not in pending["keys"]:
-            raise HTTPException(409, "This prompt has no such option")
-        if pending.get("cut") and item.get("agent") == "claude" and action.decision != "deny":
-            raise HTTPException(409, "The full command is not visible; it can only be denied")
-        if action.decision == "always" and pending["destructive"]:
-            raise HTTPException(400, "Session-wide allow is disabled for destructive commands")
-        needs_confirmation = pending["destructive"] and action.decision == "approve"
-        if action.confirm_token is not None:
-            confirmation = pending_confirm.get(pane)
-            valid = (
-                needs_confirmation and confirmation
-                and confirmation["expires"] > time.time()
-                and confirmation["decision"] == action.decision
-                and confirmation["fingerprint"] == pending["fingerprint"]
-                and action.confirm_token.isascii()
-                and secrets.compare_digest(action.confirm_token, confirmation["token"])
-            )
-            if not valid:
-                raise HTTPException(409, "The confirmation is no longer valid; try again")
-        elif needs_confirmation:
-            token = secrets.token_urlsafe(24)
-            pending_confirm[pane] = {"token": token, "decision": action.decision, "fingerprint": pending["fingerprint"], "expires": time.time() + 120}
-            return {"confirm_required": True, "confirm_token": token, "command": tidy_details(pending["command"])}
-        pending_confirm.pop(pane, None)
-        await client.call("agent.send_keys", {"target": pane, "keys": [pending["keys"][action.decision]]})
+            return await _approve(pane, item, action, request, seen)
+        except HTTPException as exc:
+            audit(pane, action.decision, "refused", login=who(request), reason=str(exc.detail), **seen)
+            raise
+
+
+async def _approve(pane, item, action, request, seen):
+    try:
+        pending = await fresh_pending(pane)
+    except Exception:
+        pending = None
+    discard_changed_confirmation(pane, (pending or {}).get("fingerprint"))
+    seen.update(command=(pending or {}).get("command", ""), destructive=bool((pending or {}).get("destructive")))
+    if not pending:
+        raise HTTPException(409, "No recognised approval on screen; use the terminal")
+    if not action.fingerprint or not secrets.compare_digest(action.fingerprint, pending["fingerprint"]):
+        raise HTTPException(409, "The approval screen changed; refresh")
+    if action.decision not in pending["keys"]:
+        raise HTTPException(409, "This prompt has no such option")
+    if pending.get("cut") and item.get("agent") == "claude" and action.decision != "deny":
+        raise HTTPException(409, "The full command is not visible; it can only be denied")
+    if action.decision == "always" and pending["destructive"]:
+        raise HTTPException(400, "Session-wide allow is disabled for destructive commands")
+    needs_confirmation = pending["destructive"] and action.decision == "approve"
+    if action.confirm_token is not None:
+        confirmation = pending_confirm.get(pane)
+        valid = (
+            needs_confirmation and confirmation
+            and confirmation["expires"] > time.time()
+            and confirmation["decision"] == action.decision
+            and confirmation["fingerprint"] == pending["fingerprint"]
+            and action.confirm_token.isascii()
+            and secrets.compare_digest(action.confirm_token, confirmation["token"])
+        )
+        if not valid:
+            raise HTTPException(409, "The confirmation is no longer valid; try again")
+    elif needs_confirmation:
+        token = secrets.token_urlsafe(24)
+        pending_confirm[pane] = {"token": token, "decision": action.decision, "fingerprint": pending["fingerprint"], "expires": time.time() + 120}
+        audit(pane, action.decision, "confirm_requested", login=who(request), command=pending["command"], destructive=True)
+        return {"confirm_required": True, "confirm_token": token, "command": tidy_details(pending["command"])}
+    pending_confirm.pop(pane, None)
+    await client.call("agent.send_keys", {"target": pane, "keys": [pending["keys"][action.decision]]})
+    entry = audit(pane, action.decision, "sent", login=who(request), command=pending["command"], destructive=pending["destructive"])
+    track_delivery(pane, pending["fingerprint"], entry)
     return {"ok": True, "next": next_blocked(pane)}
 
 
@@ -783,6 +864,11 @@ async def update_presence(presence: Presence):
     else:
         client_presence.pop(presence.client_id, None)
     return {"ok": True}
+
+
+@app.get("/api/audit")
+async def audit_log():
+    return {"items": list(reversed(read_audit()))}
 
 
 @app.get("/api/notifications")
