@@ -226,8 +226,8 @@ async def read_screen(pane, status, max_age=3.0, force=False, history=False):
     return text
 
 
-def pending_from_read(text):
-    parsed = parse_approval(text)
+def pending_from_read(text, agent=None):
+    parsed = parse_approval(text, agent)
     if not parsed:
         return None
     parsed["destructive"] = is_destructive(parsed["command"], RULES)
@@ -238,7 +238,7 @@ def pending_from_read(text):
 async def fresh_pending(pane):
     # A blocked pane only exposes its visible screen (no scrollback).
     output = await client.call("agent.read", {"target": pane, "source": "visible"})
-    return pending_from_read(output.get("read", {}).get("text", ""))
+    return pending_from_read(output.get("read", {}).get("text", ""), (sessions.get(pane) or {}).get("agent"))
 
 
 async def fresh_prompt(pane, agent):
@@ -964,11 +964,14 @@ async def send_keys(pane: str, action: Action, request: Request):
                 waiting = pending
             asked = (pending or {}).get("command") or (waiting or {}).get("question", "")
             typed = f"{asked}\n> {' '.join(keys)}".strip()
-            if pending and pending["destructive"]:
-                danger = {"Enter", pending["keys"].get("approve"), pending["keys"].get("always"), "y"}
-                if any(k in danger for k in keys):
-                    reason = "Destructive command: approve from the approval card (two steps)"
-                    audit(pane, "keys", "refused", login=who(request), command=typed, destructive=True, reason=reason, plain=True)
+            cut = bool(pending and pending["cut"] and item.get("agent") == "claude")
+            if pending and (pending["destructive"] or cut):
+                # Only keys that cannot say yes: a list of the dangerous ones would miss an option the prompt adds.
+                harmless = {"esc", "Up", "Down", "Left", "Right", "Tab", "n", pending["keys"]["deny"]}
+                if any(k not in harmless for k in keys):
+                    reason = ("The full command is not visible; it can only be denied" if cut
+                              else "Destructive command: approve from the approval card (two steps)")
+                    audit(pane, "keys", "refused", login=who(request), command=typed, destructive=pending["destructive"], reason=reason, plain=True)
                     raise HTTPException(409, reason)
         pending_confirm.pop(pane, None)
         await client.call("agent.send_keys", {"target": pane, "keys": keys})

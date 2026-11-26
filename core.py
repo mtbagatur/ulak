@@ -10,7 +10,7 @@ from chat import RULE, strip_ansi
 
 
 DESTRUCTIVE = [
-    r"\brm\b", r"\bgit\s+push\b", r"\bgh\b", r"\bcurl\b[^\n]*\s-X\s*(POST|PUT|DELETE)\b",
+    r"\brm\b", r"\bgit\s+push\b", r"\bgh\b", r"\bcurl\b[^\n]*\s(?:-X\s*|--request[\s=]+)(POST|PUT|PATCH|DELETE)\b",
     r"\bssh\b", r"\bscp\b", r"\brsync\b[^\n]*(?:\S+@\S+:|\S+:\S+)",
     r"\bterraform\s+(?:apply|destroy)\b", r"\bkubectl\s+(?:delete|apply)\b", r"\baws\b",
     r"\b(?:telegram|mail|email)\b[^\n]*(?:send|message|post|gönder)",
@@ -19,8 +19,9 @@ DESTRUCTIVE = [
 
 def is_destructive(command, rules_path=None):
     text = str(command or "")
+    texts = (text, re.sub(r"\s*\n\s*", " ", text))  # a narrow terminal wraps a long command over several lines
     for pattern in DESTRUCTIVE:
-        if re.search(pattern, text, re.I):
+        if any(re.search(pattern, t, re.I) for t in texts):
             return True
     try:
         rules = open(rules_path, encoding="utf-8").read() if rules_path else ""
@@ -33,7 +34,7 @@ def is_destructive(command, rules_path=None):
         markdown = re.fullmatch(r"-\s*(?:pattern|desen):\s*`([^`]+)`\s*", line)
         pattern = markdown.group(1) if markdown else line
         try:
-            if re.search(pattern, text, re.I):
+            if any(re.search(pattern, t, re.I) for t in texts):
                 return True
         except re.error:
             continue
@@ -79,13 +80,13 @@ class NotificationGate:
 
 
 # --- Approval screen parsing  ---
-QUESTION = re.compile(r"(do you want to proceed\?|would you like to|allow .*\?|do you want to (make|create|run|allow)|accept this file edit\?)", re.I)
+QUESTION = re.compile(r"(do you want to proceed\?|would you like to|allow .*\?|do you want to (make|create|run|allow|overwrite)|accept this file edit\?)", re.I)
 OPTION = re.compile(r"^\s*(?:[❯›>]\s*)?(\d)\.\s+(.+?)\s*$")
 DIVIDER = re.compile(r"^[\s─━╌┄—-]{10,}$")
 ALWAYS = re.compile(r"don['’]t ask again|always", re.I)
 
 
-def parse_approval(text):
+def parse_approval(text, agent=None):
     """Return the pending approval on screen, or None.
 
     Keys are taken from the numbered options themselves, never assumed:
@@ -116,11 +117,15 @@ def parse_approval(text):
     if "approve" not in options or "deny" not in options:
         return None
     start, found_divider = q, False
-    for i in range(q - 1, max(-1, q - 25), -1):
+    # Claude draws a rule above every request, so its command is read up to that rule however tall it is.
+    floor = -1 if agent == "claude" else max(-1, q - 25)
+    for i in range(q - 1, floor, -1):
         start = i
         if lines[i].startswith("─") and DIVIDER.match(lines[i]):
             start, found_divider = i + 1, True
             break
+    if agent == "claude" and not found_divider:
+        start = max(0, q - 24)
     shown = lines[start:q] + between
     block = "\n".join(l.rstrip() for l in shown if l.strip() and not DIVIDER.match(l)).strip()
     if not block:
@@ -134,7 +139,7 @@ def parse_approval(text):
         "keys": {d: k for d, (k, _) in options.items()},
         "labels": {d: l for d, (_, l) in options.items()},
         "fingerprint": fingerprint,
-        "cut": start == 0 and not found_divider,
+        "cut": not found_divider and (agent == "claude" or start == 0),
     }
 
 
@@ -183,7 +188,7 @@ def parse_prompt(text, agent="claude"):
     text = strip_ansi(text)
     if mention_popup(text):
         return _finish({"kind": "dismiss", "question": "", "header": "", "details": "", "options": [], "multi": False})
-    approval = parse_approval(text)
+    approval = parse_approval(text, agent)
     enter = [] if agent == "claude" else ["Enter"]
     if approval:
         order = [("approve", "approve"), ("always", "always"), ("deny", "deny")]

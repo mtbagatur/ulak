@@ -1488,3 +1488,80 @@ def test_an_extra_host_name_can_be_configured(monkeypatch):
     fake, c, h = _setup2(monkeypatch, "")
     monkeypatch.setattr(api, "ALLOWED_HOSTS", {"ulak.home.example"})
     assert c.get("/api/config", headers={**h, "Host": "ulak.home.example"}).status_code == 200
+
+
+# --- a command taller than the approval window ---------------------------------
+
+def _tall_claude(lines, divider=True):
+    top = ["─" * 60, " Bash command", ""] if divider else []
+    body = ["   rm -rf ./build"] + [f"   echo step {i}" for i in range(lines)]
+    return "\n".join(["● Running it", ""] + top + body + [
+        "", " Do you want to proceed?", " ❯ 1. Yes", "   2. Yes, and don't ask again for: echo *", "   3. No", ""])
+
+
+def test_a_long_command_under_its_divider_is_read_whole():
+    p = parse_approval(_tall_claude(60), "claude")
+    assert "rm -rf ./build" in p["command"] and not p["cut"]
+    assert "Running it" not in p["command"]
+    assert parse_prompt(_tall_claude(60), "claude")["details"].startswith("rm -rf ./build")
+
+
+def test_a_claude_command_whose_top_left_the_screen_is_cut():
+    p = parse_approval(_tall_claude(60, divider=False), "claude")
+    assert p["cut"]
+    assert parse_prompt(_tall_claude(60, divider=False), "claude")["cut"]
+
+
+def test_a_command_starting_far_above_the_question_needs_two_steps(monkeypatch):
+    fake, c, h = _setup2(monkeypatch, _tall_claude(60))
+    p = parse_prompt(_tall_claude(60), "claude")
+    r = c.post("/api/sessions/w9:p1/approve", headers=h, json={"decision": "approve", "fingerprint": p["fingerprint"]})
+    assert r.status_code == 200 and r.json().get("confirm_required") and fake.sent == []
+
+
+def test_a_command_that_left_the_screen_can_only_be_denied(monkeypatch):
+    screen = _tall_claude(60, divider=False)
+    fake, c, h = _setup2(monkeypatch, screen)
+    p = parse_prompt(screen, "claude")
+    body = {"decision": "approve", "fingerprint": p["fingerprint"]}
+    assert c.post("/api/sessions/w9:p1/approve", headers=h, json=body).status_code == 409
+    assert c.post("/api/sessions/w9:p1/approve", headers=h, json={**body, "decision": "deny"}).status_code == 200
+
+
+def test_a_codex_prompt_without_a_divider_keeps_its_buttons():
+    long = "\n".join(f"line {i}" for i in range(40)) + "\n" + CODEX
+    assert not parse_approval(long, "codex")["cut"]
+
+
+@pytest.mark.parametrize("command", [
+    "curl -s https://example.test/very/long/path\n -X POST", "curl -XDELETE https://example.test",
+    "curl --request PUT https://example.test", "git\n push origin main",
+])
+def test_a_destructive_command_is_found_when_wrapped_or_spelled_otherwise(command):
+    assert is_destructive(command, "/missing")
+
+
+# --- the key bar on a prompt that needs the card -------------------------------
+
+@pytest.mark.parametrize("keys", [["3"], ["space"], ["2"], ["down", "enter"], ["y"]])
+def test_keybar_refuses_every_key_that_could_say_yes(monkeypatch, keys):
+    fake, c, h = _setup2(monkeypatch, CLAUDE)  # 1 yes, 2 always, 3 yes and switch to auto mode, 4 no
+    assert c.post("/api/sessions/w9:p1/keys", headers=h, json={"keys": keys}).status_code == 409
+    assert fake.sent == []
+
+
+@pytest.mark.parametrize("keys", [["esc"], ["4"], ["n"], ["up"], ["down"], ["left"], ["right"], ["tab"]])
+def test_keybar_still_lets_you_look_around_and_say_no(monkeypatch, keys):
+    fake, c, h = _setup2(monkeypatch, CLAUDE)
+    assert c.post("/api/sessions/w9:p1/keys", headers=h, json={"keys": keys}).status_code == 200
+
+
+def test_keybar_cannot_approve_a_command_that_is_not_shown_whole(monkeypatch):
+    fake, c, h = _setup2(monkeypatch, _tall_claude(60, divider=False).replace("rm -rf ./build", "echo go"))
+    assert c.post("/api/sessions/w9:p1/keys", headers=h, json={"keys": ["1"]}).status_code == 409
+    assert c.post("/api/sessions/w9:p1/keys", headers=h, json={"keys": ["3"]}).status_code == 200  # "3. No"
+
+
+def test_an_overwrite_question_is_an_approval():
+    screen = "─" * 40 + "\n Create file\n notes.md\n Do you want to overwrite notes.md?\n ❯ 1. Yes\n   2. No\n"
+    assert parse_prompt(screen, "claude")["kind"] == "approval"

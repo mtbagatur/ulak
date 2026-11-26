@@ -12,11 +12,12 @@ Ulak listens on `127.0.0.1:8765` and nowhere else. The phone reaches it through 
 
 **The fingerprint: your yes goes to the question you read.** When Ulak shows an approval it also sends a hash of that prompt. The phone returns the hash with the decision. Before any key is sent, the server reads the agent's screen again and compares. If the prompt changed (the agent moved on, someone answered at the keyboard, a second question replaced the first) the request is refused with 409 and nothing is typed. One answer at a time is allowed per pane, so two taps cannot race each other.
 
-**Two seals: destructive commands take two requests.** A command is treated as destructive when it matches the built-in list (among them `rm`, `git push`, `gh`, `ssh`, `scp`, remote `rsync`, `curl -X POST/PUT/DELETE`, `terraform apply/destroy`, `kubectl delete/apply`, `aws`) or a pattern in your own `rules_file`. The first request returns the full command and a one-time token; only a second request with that token, for the same prompt, within two minutes, sends the key. For these commands:
+**Two seals: destructive commands take two requests.** A command is treated as destructive when it matches the built-in list (among them `rm`, `git push`, `gh`, `ssh`, `scp`, remote `rsync`, `curl -X POST/PUT/PATCH/DELETE`, `terraform apply/destroy`, `kubectl delete/apply`, `aws`) or a pattern in your own `rules_file`. The first request returns the full command and a one-time token; only a second request with that token, for the same prompt, within two minutes, sends the key. For these commands:
 
 - "always allow" is refused;
-- the key bar refuses Enter, `y` and the prompt's own approve keys;
-- if the command is too long to be shown in full, it can only be denied.
+- the key bar lets through only keys that cannot say yes: Esc, the arrows, Tab, `n` and the number of the prompt's "No".
+
+**A command that is not all there can only be denied.** Ulak reads a Claude request from the rule drawn above it down to the question. When that rule has left the screen, the beginning of the command cannot be read, so approving is refused, on the card and on the key bar, whether or not the visible part looks destructive. For Codex and agy, which draw no such rule, Ulak reads the 24 lines above the question and cannot tell whether a longer command began earlier.
 
 **The receipt: sent is not the same as arrived.** After a decision Ulak watches the agent's screen for a few seconds. When the answered prompt is gone it records the time and shows "agent received it". If the prompt is still there it says "not seen on the agent's screen" rather than reporting success.
 
@@ -32,7 +33,7 @@ Ulak listens on `127.0.0.1:8765` and nowhere else. The phone reaches it through 
 - **Programs on the computer itself.** The header check assumes requests arrive through Tailscale Serve. A process already running on the same machine can call `127.0.0.1:8765` and write the header itself. Ulak adds no barrier there; anything running as you could type into your panes without it.
 - **Any exposure other than Tailscale Serve.** Do not use `tailscale funnel`, a reverse proxy, or a public bind. Behind anything that forwards a client's own `Tailscale-User-Login` header, the check is worth nothing.
 - **What you write.** A message is typed into the pane it is addressed to. To an agent that is an instruction, and what the agent then does is governed by the agent's own permission mode, not by Ulak. An agent started with permission prompts switched off never asks, so there is nothing for Ulak to guard. A pane with no agent in it is a plain shell: Ulak shows its screen and refuses to send it a message or a key. That check rests on Herdr's own detection of what runs in the pane.
-- **Prompts it does not recognise.** The two seals apply to approval prompts Ulak can parse. If a prompt is not recognised, no approve button is offered, but the key bar (arrows, Esc, Enter, Tab, Space, `y`, `n`, digits) still works on that pane.
+- **Prompts it does not recognise.** The two seals apply to approval prompts Ulak can parse. A prompt it does not recognise as an approval gets no approve button. If it has numbered options they are shown as a menu, where one tap picks one, and the key bar (arrows, Esc, Enter, Tab, Space, `y`, `n`, digits) works on that pane. Neither is checked against the destructive list.
 - **Commands that hide what they do.** The destructive list is pattern matching on the text of the command. `./deploy.sh` or `make release` will not match unless you add a pattern. It is a speed bump for the obvious cases, not a sandbox.
 - **A command that lies.** The fingerprint proves the prompt did not change between your reading and your answer. It says nothing about whether the command does what it appears to.
 - **A tampered log.** The decision log is a plain file owned by your user. It is a record for you, not evidence against someone with access to your account.
