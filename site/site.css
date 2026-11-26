@@ -64,7 +64,7 @@ code,pre{font-family:var(--mono);font-size:.86em}
 .route i::after{content:"";position:absolute;inset:0;background:var(--ok);transform-origin:0 50%;animation:leg .7s .5s both cubic-bezier(.4,0,.2,1)}
 .route i+span+i::after{animation-delay:1.3s}
 .route .mid{animation:show .3s 1.2s both}
-.route .end{color:var(--ok);animation:press .4s 2s both var(--ease-out)}
+.route .end{color:var(--ok);transform-origin:100% 50%;animation:press .4s 2s both var(--ease-out)}
 @keyframes leg{from{transform:scaleX(0)}}
 @keyframes show{from{opacity:.35}}
 @keyframes press{from{transform:scale(1.5);opacity:0}}

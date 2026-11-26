@@ -80,7 +80,7 @@ def test_phone_page_fits_and_keeps_the_recording(served):
         chrome.resize(390, 780)
         chrome.cdp("Page.navigate", url=url + path)
         chrome.wait("document.readyState === 'complete' && document.querySelector('.phone img').complete")
-        assert chrome.js("document.documentElement.scrollWidth <= innerWidth"), path
+        assert chrome.js("document.documentElement.scrollWidth") <= 390, path
         assert chrome.js("document.querySelector('.phone iframe') === null")
         assert chrome.js("[...document.querySelectorAll('.btn')].every(b => b.getBoundingClientRect().height >= 44)")
         assert chrome.js("document.querySelector('.phone img').naturalWidth") > 0
@@ -92,7 +92,7 @@ def test_wide_page_runs_the_demo_under_the_hosts_own_policy(served):
     chrome.cdp("Page.navigate", url=url + "/")
     chrome.wait("document.querySelector('.phone.live iframe') !== null")
     chrome.wait("document.querySelector('.phone iframe').contentDocument.querySelectorAll('.card').length === 6")
-    assert chrome.js("document.documentElement.scrollWidth <= innerWidth")
+    assert chrome.js("document.documentElement.scrollWidth") <= 1280
     assert not [path for path in seen if "/api" in path]
 
 
@@ -131,7 +131,7 @@ def test_the_mark_note_stays_small(served):
             mark, run = (chrome.js(f"document.querySelector('{s}').getBoundingClientRect().height") for s in ("#mark", "#run"))
             assert mark <= most and mark < run, (path, width, mark, run)
             assert chrome.js("document.querySelector('#mark .sign').getBoundingClientRect().width") <= 32, path
-            assert chrome.js("document.documentElement.scrollWidth <= innerWidth"), path
+            assert chrome.js("document.documentElement.scrollWidth") <= width, path
 
 
 def test_both_pages_say_what_the_mark_means(out):
@@ -162,9 +162,13 @@ def test_small_phones_do_not_scroll_sideways(served):
             chrome.resize(width, 700)
             chrome.cdp("Page.navigate", url=url + path)
             chrome.wait("document.readyState === 'complete' && document.querySelector('.route .end') !== null")
-            assert chrome.js("document.documentElement.scrollWidth <= innerWidth"), (path, width)
+            # measured against the phone, not innerWidth: a phone browser widens innerWidth to fit whatever sticks out
+            assert chrome.js("document.documentElement.scrollWidth") <= width, (path, width)
             # the road line under the heading ends inside the page gutter (layout box: the opening animation scales it)
             assert chrome.js("(() => { const e = document.querySelector('.route .end'); return e.offsetLeft + e.offsetWidth <= document.documentElement.clientWidth - 16; })()"), (path, width)
+            # nor while the page opens: the last stop waits two seconds enlarged and unseen, and that must not widen the page
+            chrome.js("document.querySelector('.route .end').getAnimations().forEach(a => { a.pause(); a.currentTime = 0; })")
+            assert chrome.js("document.documentElement.scrollWidth") <= width, (path, width, "opening")
 
 
 def test_no_marker_keeps_a_sharp_corner(out):
