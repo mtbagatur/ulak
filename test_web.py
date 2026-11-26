@@ -467,12 +467,13 @@ def test_last_line_of_long_reply_is_reachable_above_composer(ulak):
 
 def test_chat_urls_render_as_safe_clickable_links(ulak):
     chrome, api, url = ulak
-    api.messages = [{"role": "assistant", "text": "Read [the guide](https://example.test/guide), https://example.test/docs and [the PDF](/home/user/project/notes.pdf)."}]
+    api.messages = [{"role": "assistant", "text": "Read [the guide](https://example.test/guide), https://example.test/docs, [the PDF](/home/user/project/notes.pdf) and /home/user/project/attached.pdf."}]
     open_first(chrome, url)
     chrome.wait("document.querySelector('#messages a[href*=example]') !== null")
     assert chrome.js("document.querySelector('#messages a')?.getAttribute('href')") == "https://example.test/guide"
     assert chrome.js("document.querySelector('#messages a')?.rel") == "noopener noreferrer"
     assert chrome.js("new URL(document.querySelectorAll('#messages a')[2].href).searchParams.get('path')") == "/home/user/project/notes.pdf"
+    assert chrome.js("new URL(document.querySelectorAll('#messages a')[3].href).searchParams.get('path')") == "/home/user/project/attached.pdf"
 
 
 def test_slash_command_suggestions_filter_and_fill_composer(ulak):

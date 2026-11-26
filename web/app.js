@@ -397,6 +397,12 @@ const md = value => {
     const html = link(label, href);
     return html ? hold(html) : whole;
   });
+  source = source.replace(/(?:\/|\.\.?\/)[^\s<>"'`]+/g, raw => {
+    let path = raw, trailing = '';
+    while (/[),.!?;:]$/.test(path)) { trailing = path.slice(-1) + trailing; path = path.slice(0, -1); }
+    const html = link(path, path);
+    return html ? hold(html) + trailing : raw;
+  });
   let html = esc(source).replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
   html = html.replace(/https?:\/\/[^\s<>"']+/gi, raw => {
     let url = raw, trailing = '';
