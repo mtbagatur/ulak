@@ -613,9 +613,45 @@ $('#keysBtn').onclick = () => { buildKeybar(); const kb = $('#keybar'); kb.hidde
 
 // ---------- composer ----------
 const ta = $('#message');
+const slashMenu = $('#slashOptions');
+let slashIndex = 0;
+function slashCommands() {
+  const agent = state.sessions.get(state.current)?.agent;
+  if (agent === 'claude') return ['/clear', '/compact', '/help', '/model', '/config'];
+  if (agent === 'codex') return ['/clear', '/compact', '/help', '/model', '/status'];
+  if (agent === 'agy') return ['/clear', '/help'];
+  return [];
+}
+function updateSlashOptions() {
+  const match = ta.value.match(/^\/([^\s]*)$/);
+  const commands = match ? slashCommands().filter(command => command.slice(1).startsWith(match[1].toLowerCase())) : [];
+  if (!commands.length) { slashMenu.hidden = true; slashMenu.replaceChildren(); return; }
+  slashIndex = Math.min(slashIndex, commands.length - 1);
+  slashMenu.innerHTML = commands.map((command, i) => `<button type="button" role="option" aria-selected="${i === slashIndex}" data-slash-cmd="${command}">${command}</button>`).join('');
+  slashMenu.hidden = false;
+}
+function chooseSlash(command) {
+  ta.value = command + ' ';
+  store.set('draft:' + state.current, ta.value);
+  slashMenu.hidden = true;
+  autosize();
+  ta.focus();
+}
+slashMenu.addEventListener('pointerdown', e => { if (e.target.closest('[data-slash-cmd]')) e.preventDefault(); });
+slashMenu.addEventListener('click', e => { const button = e.target.closest('[data-slash-cmd]'); if (button) chooseSlash(button.dataset.slashCmd); });
 function autosize() { ta.style.height = 'auto'; const h = Math.min(ta.scrollHeight, window.innerHeight * 0.38); ta.style.height = h + 'px'; ta.style.overflowY = ta.scrollHeight > h ? 'auto' : 'hidden'; $('#send').disabled = !ta.value.trim(); }
-ta.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('#composer').requestSubmit(); } });
-ta.addEventListener('input', () => { autosize(); store.set('draft:' + state.current, ta.value); });
+ta.addEventListener('keydown', e => {
+  const options = [...slashMenu.querySelectorAll('[data-slash-cmd]')];
+  if (!slashMenu.hidden && options.length && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+    e.preventDefault(); slashIndex = (slashIndex + (e.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length; updateSlashOptions(); return;
+  }
+  if (!slashMenu.hidden && options.length && (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey && !e.isComposing))) {
+    e.preventDefault(); chooseSlash(options[slashIndex].dataset.slashCmd); return;
+  }
+  if (e.key === 'Escape' && !slashMenu.hidden) { e.preventDefault(); slashMenu.hidden = true; return; }
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('#composer').requestSubmit(); }
+});
+ta.addEventListener('input', () => { slashIndex = 0; updateSlashOptions(); autosize(); store.set('draft:' + state.current, ta.value); });
 $('#composer').addEventListener('submit', async e => {
   e.preventDefault();
   const text = ta.value.trim(); if (!text) return;

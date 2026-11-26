@@ -475,6 +475,18 @@ def test_chat_urls_render_as_safe_clickable_links(ulak):
     assert chrome.js("new URL(document.querySelectorAll('#messages a')[2].href).searchParams.get('path')") == "/home/user/project/notes.pdf"
 
 
+def test_slash_command_suggestions_filter_and_fill_composer(ulak):
+    chrome, api, url = ulak
+    open_first(chrome, url)
+    chrome.js("(() => { const input=document.querySelector('#message'); input.value='/'; input.dispatchEvent(new Event('input',{bubbles:true})); })()")
+    chrome.wait("!document.querySelector('#slashOptions').hidden")
+    assert chrome.js("[...document.querySelectorAll('#slashOptions [data-slash-cmd]')].some(b => b.dataset.slashCmd === '/clear')")
+    chrome.js("(() => { const input=document.querySelector('#message'); input.value='/com'; input.dispatchEvent(new Event('input',{bubbles:true})); })()")
+    assert chrome.js("[...document.querySelectorAll('#slashOptions [data-slash-cmd]')].every(b => b.dataset.slashCmd.startsWith('/com'))")
+    chrome.click("#slashOptions [data-slash-cmd='/compact']")
+    assert chrome.js("document.querySelector('#message').value") == "/compact "
+
+
 def test_offline_refresh_retains_cards_and_sse_reconnect_loads_snapshot(ulak):
     chrome, api, url = ulak
     api.cards = [card("working")]
