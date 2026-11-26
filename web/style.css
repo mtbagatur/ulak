@@ -180,6 +180,8 @@ details.tool pre{margin:6px 0 0;padding:8px 10px;background:var(--bg2);border-ra
 .plist button small{color:var(--muted)}.plist button.on{outline:2px solid var(--zer)}
 .seg{display:flex;gap:6px;margin-bottom:10px}.seg button{flex:1;background:var(--card)}.seg button.on{background:var(--zer);color:var(--zer-ink)}
 .sheet .acts{margin-top:6px}
+.sheet .note{font-size:13px;color:var(--muted)}
+.term{margin:0;padding:10px 12px;background:var(--bg2);border:1px solid var(--line);border-radius:10px;font:11.5px/1.4 ui-monospace,"SF Mono",Menlo,monospace;color:var(--strong);white-space:pre;overflow:auto;max-height:62dvh;min-height:30dvh;user-select:text;-webkit-user-select:text;overscroll-behavior:contain}
 #toasts{position:fixed;left:0;right:0;top:calc(var(--safe-t) + 8px);z-index:40;display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none}
 .toast{background:var(--card2);color:var(--strong);padding:10px 16px;border-radius:999px;font-size:14px;box-shadow:0 6px 20px rgba(0,0,0,.45);animation:drop .2s var(--ease-out);max-width:90%}
 .toast{border:1px solid var(--line)}

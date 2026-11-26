@@ -867,11 +867,33 @@ $('#newSession').onclick = async () => {
     if (r) { hideSheet(); for (let i = 0; i < 20 && !state.sessions.has(r.pane); i++) { await new Promise(ok => setTimeout(ok, 300)); await loadList(); } go(r.pane); }
   };
 };
+// The agent's terminal as text. Looking only: there is no input here and the request cannot send a key.
+let screenTimer = 0;
+function screenSheet() {
+  const pane = state.current;
+  showSheet(`<h3>${esc(t('agentScreen'))}</h3><p class="note">${esc(t('agentScreenNote'))}</p><pre class="term" tabindex="0">${esc(t('loading'))}</pre>`);
+  const pre = $('#sheet pre.term');
+  let first = true;
+  const tick = async () => {
+    if (!pre.isConnected || state.current !== pane) { clearInterval(screenTimer); return; }
+    if (document.hidden) return;
+    try {
+      const {text} = await api(`/api/sessions/${encodeURIComponent(pane)}/screen`);
+      if (!pre.isConnected || pre.textContent === text) return;
+      const pinned = first || pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 24;
+      pre.textContent = text;
+      if (pinned) pre.scrollTop = pre.scrollHeight;
+      first = false;
+    } catch {}
+  };
+  clearInterval(screenTimer); screenTimer = setInterval(tick, 2000); tick();
+}
 $('#sMenu').onclick = () => {
   const s = state.sessions.get(state.current) || {};
-  showSheet(`<h3>${esc(s.project || t('pane'))}</h3><p>${esc(s.cwd || '')}</p><div class="acts" style="flex-direction:column"><button data-r>${esc(t('refreshSession'))}</button><button class="danger" data-c>${esc(t('closeSession'))}</button><button class="ghost" data-x>${esc(t('cancel'))}</button></div>`);
+  showSheet(`<h3>${esc(s.project || t('pane'))}</h3><p>${esc(s.cwd || '')}</p><div class="acts" style="flex-direction:column"><button data-s>${esc(t('agentScreen'))}</button><button data-r>${esc(t('refreshSession'))}</button><button class="danger" data-c>${esc(t('closeSession'))}</button><button class="ghost" data-x>${esc(t('cancel'))}</button></div>`);
   $('#sheet [data-x]').onclick = hideSheet;
   $('#sheet [data-r]').onclick = () => { hideSheet(); state.chatHash = ''; loadChat(true); };
+  $('#sheet [data-s]').onclick = screenSheet;
   $('#sheet [data-c]').onclick = async e => {
     const r = await act(e.currentTarget, () => api(`/api/sessions/${encodeURIComponent(state.current)}/close`, {}));
     if (!r || !r.confirm_required) return;

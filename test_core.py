@@ -904,3 +904,18 @@ def test_commands_endpoint_reads_the_session_folder_and_needs_identity(monkeypat
     assert {"name": "/ship", "description": "Ship it", "source": "project"} in items
     assert c.get("/api/sessions/w9:p1/commands").status_code == 403
     assert c.get("/api/sessions/nope/commands", headers=h).status_code == 404
+
+
+# --- the agent's screen, read-only ---
+
+def test_screen_endpoint_returns_plain_text_and_never_sends_keys(monkeypatch):
+    fake, c, h = _setup2(monkeypatch, "\x1b[31mBash command\x1b[0m\n  git status\n" + "\n".join(f"line {i}" for i in range(400)))
+    api.read_cache.clear()
+    r = c.get("/api/sessions/w9:p1/screen", headers=h)
+    assert r.status_code == 200
+    body = r.json()
+    assert "\x1b" not in body["text"] and body["text"].endswith("line 399")
+    assert len(body["text"].splitlines()) <= 200 and body["ts"] > 0
+    assert fake.sent == [] and all(method == "agent.read" for method, _ in fake.calls)
+    assert c.get("/api/sessions/w9:p1/screen").status_code == 403
+    assert c.get("/api/sessions/nope/screen", headers=h).status_code == 404

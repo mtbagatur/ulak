@@ -622,6 +622,17 @@ async def list_sessions():
         raise HTTPException(503, str(exc))
 
 
+@app.get("/api/sessions/{pane}/screen")
+async def screen(pane: str):
+    """What the agent's terminal shows right now, as text. Read-only: this path never sends a key."""
+    item = must_exist(pane)
+    text = strip_ansi(await read_screen(pane, item.get("status", "unknown"), max_age=1.0))
+    lines = [line.rstrip() for line in text.splitlines()]
+    while lines and not lines[-1]:
+        lines.pop()
+    return {"text": "\n".join(lines[-200:])[-20000:], "ts": time.time()}
+
+
 @app.get("/api/sessions/{pane}/commands")
 async def commands(pane: str):
     item = must_exist(pane)

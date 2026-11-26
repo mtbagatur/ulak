@@ -112,6 +112,15 @@ async def commands(pane: str):
     ]}
 
 
+@app.get("/api/sessions/{pane}/screen")
+async def screen(pane: str):
+    item = next((s for s in SESSIONS if s["pane_id"] == pane), None)
+    command = (item or {}).get("pending") or {}
+    lines = ["● I added jitter to the backoff. Let me run the billing tests to confirm.", ""]
+    lines += ["Bash command", "", "  " + command["details"], "", "Do you want to proceed?", "❯ 1. Yes", "  2. No"] if command.get("details") else ["✻ Working… (esc to interrupt)"]
+    return {"text": "\n".join(lines), "ts": time.time()}
+
+
 @app.get("/api/config")
 async def config():
     return {"quick_label": ""}

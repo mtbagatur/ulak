@@ -51,6 +51,7 @@ class FakeAPI:
         self.receipt = None
         self.audit = []
         self.commands = None
+        self.screen = "idle"
         self.presence = []
         self.respond = threading.Event()
         self.respond.set()
@@ -117,6 +118,8 @@ class Handler(SimpleHTTPRequestHandler):
             })
         elif self.path == "/api/sessions/fake%3Ap1/commands" and self.api.commands is not None:
             self.json({"commands": self.api.commands})
+        elif self.path == "/api/sessions/fake%3Ap1/screen":
+            self.json({"text": self.api.screen, "ts": time.time()})
         elif self.path == "/api/audit":
             self.json({"items": self.api.audit})
         elif self.path == "/api/notifications":
@@ -787,3 +790,18 @@ def test_slash_menu_offers_commands_installed_on_the_machine(api_fixture):
     assert chrome.js("window.pwned") is None
     chrome.click("#slashOptions [data-slash-cmd='/ship']")
     assert chrome.js("document.querySelector('#message').value") == "/ship "
+
+
+def test_agent_screen_is_shown_read_only_and_follows_the_terminal(api_fixture):
+    chrome, api, url = api_fixture
+    api.screen = "$ pytest -q\n<b onclick=window.pwned=1>12 passed</b>"
+    open_first(chrome, url)
+    chrome.click("#sMenu")
+    chrome.click("#sheet [data-s]")
+    chrome.wait("document.querySelector('#sheet pre.term')?.textContent.includes('12 passed')")
+    assert chrome.js("document.querySelector('#sheet pre.term').textContent") == api.screen
+    assert chrome.js("document.querySelector('#sheet pre.term b') === null")
+    assert chrome.js("document.querySelectorAll('#sheet input, #sheet textarea, #sheet [data-k]').length") == 0
+    api.screen = "$ pytest -q\n13 passed"
+    chrome.wait("document.querySelector('#sheet pre.term')?.textContent.endsWith('13 passed')")
+    assert not api.replies
