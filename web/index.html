@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="color-scheme" content="dark light">
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1c1520">
-  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f2ecf0">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f0eee8">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Ulak">
@@ -19,11 +19,12 @@
   <script src="/static/theme.js"></script>
 </head>
 <body>
+<svg class="defs" width="0" height="0" aria-hidden="true"><defs><path id="wax" d="M28.99 16.00L29.52 17.18L29.59 18.40L29.08 19.50L28.16 20.42L27.15 21.20L26.36 21.98L25.88 22.92L25.57 24.03L25.15 25.15L24.43 26.04L23.39 26.55L22.19 26.73L21.04 26.81L20.04 27.10L19.15 27.74L18.22 28.61L17.17 29.39L16.00 29.74L14.82 29.52L13.73 28.85L12.77 28.06L11.83 27.45L10.80 27.15L9.64 27.01L8.47 26.75L7.49 26.14L6.85 25.15L6.53 23.94L6.32 22.78L5.92 21.82L5.19 21.04L4.19 20.30L3.24 19.42L2.65 18.35L2.61 17.17L3.01 16.00L3.54 14.91L3.89 13.86L3.94 12.77L3.84 11.58L3.89 10.35L4.34 9.27L5.25 8.47L6.43 7.97L7.60 7.60L8.54 7.11L9.22 6.32L9.81 5.27L10.51 4.22L11.45 3.49L12.58 3.24L13.78 3.39L14.92 3.67L16.00 3.76L17.09 3.54L18.27 3.15L19.50 2.92L20.68 3.14L21.65 3.89L22.36 4.99L22.92 6.12L23.54 7.01L24.40 7.60L25.47 8.06L26.55 8.61L27.38 9.43L27.78 10.51L27.81 11.70L27.74 12.85L27.87 13.91L28.33 14.92z"/></defs></svg>
 <main id="app">
   <div id="conn" class="conn" role="status" aria-live="polite" hidden></div>
   <section id="home" class="screen">
     <header class="top">
-      <h1><svg class="mark draw" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 4h12v12A12 12 0 1 1 16 4z" fill="currentColor"/><path pathLength="1" d="M11.5 11.5v5.4a4.2 4.2 0 0 0 8.4 0v-3l4.6-4.6" fill="none" stroke-width="2.9" stroke-linecap="round" stroke-linejoin="round"/></svg>Ulak</h1>
+      <h1><svg class="mark draw" viewBox="0 0 32 32" aria-hidden="true"><use class="w" href="#wax"/><circle class="r" cx="16" cy="16" r="9.6"/><path class="u" pathLength="1" d="M12 11.2v5.2a4 4 0 0 0 8 0v-5.2"/></svg>Ulak</h1>
       <button id="theme" class="icon" data-theme-toggle data-i18n-aria="darkTheme" aria-pressed="true"><svg class="moon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><defs><mask id="hilal"><rect x="-4" y="-4" width="32" height="32" fill="#fff"/><circle class="bite" cx="16.4" cy="8.6" r="7.2" fill="#000"/></mask></defs><circle class="halo" cx="12" cy="12" r="9.5"/><circle class="disc" cx="12" cy="12" r="8.2" fill="currentColor" mask="url(#hilal)"/></svg></button>
       <button id="history" class="icon" data-i18n-aria="history"><svg class="ic" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4.5h14v15H5z"/><path d="M8.5 9h7M8.5 12h7M8.5 15h4"/></svg></button>
       <button id="settings" class="icon" data-i18n-aria="settings"><svg class="ic" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7.5h9M17 7.5h3M4 16.5h3M11 16.5h9"/><circle cx="15" cy="7.5" r="2"/><circle cx="9" cy="16.5" r="2"/></svg></button>

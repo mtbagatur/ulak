@@ -1,6 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <rect width="512" height="512" fill="#1c1520"/>
-  <!-- the seal: round where it was pressed, one sharp corner where the answer leaves. The U ends in the stroke of a yes, on its way out through that corner. -->
-  <path d="M256 96h160v160a160 160 0 1 1-160-160z" fill="#d4ad62"/>
-  <path d="M196 196v72a56 56 0 0 0 112 0v-40l64-64" fill="none" stroke="#1c1520" stroke-width="38" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- a wax seal: the edge is uneven because it was pressed by hand, the ring is what the press left, the U is Ulak. -->
+  <g transform="translate(256 256) scale(13.3) translate(-16 -16)">
+    <path d="M28.99 16.00L29.52 17.18L29.59 18.40L29.08 19.50L28.16 20.42L27.15 21.20L26.36 21.98L25.88 22.92L25.57 24.03L25.15 25.15L24.43 26.04L23.39 26.55L22.19 26.73L21.04 26.81L20.04 27.10L19.15 27.74L18.22 28.61L17.17 29.39L16.00 29.74L14.82 29.52L13.73 28.85L12.77 28.06L11.83 27.45L10.80 27.15L9.64 27.01L8.47 26.75L7.49 26.14L6.85 25.15L6.53 23.94L6.32 22.78L5.92 21.82L5.19 21.04L4.19 20.30L3.24 19.42L2.65 18.35L2.61 17.17L3.01 16.00L3.54 14.91L3.89 13.86L3.94 12.77L3.84 11.58L3.89 10.35L4.34 9.27L5.25 8.47L6.43 7.97L7.60 7.60L8.54 7.11L9.22 6.32L9.81 5.27L10.51 4.22L11.45 3.49L12.58 3.24L13.78 3.39L14.92 3.67L16.00 3.76L17.09 3.54L18.27 3.15L19.50 2.92L20.68 3.14L21.65 3.89L22.36 4.99L22.92 6.12L23.54 7.01L24.40 7.60L25.47 8.06L26.55 8.61L27.38 9.43L27.78 10.51L27.81 11.70L27.74 12.85L27.87 13.91L28.33 14.92z" fill="#d4ad62" stroke="#d4ad62" stroke-width=".6" stroke-linejoin="round"/>
+    <circle cx="16" cy="16" r="9.6" fill="none" stroke="#1c1520" stroke-opacity=".28"/>
+    <path d="M12 11.2v5.2a4 4 0 0 0 8 0v-5.2" fill="none" stroke="#1c1520" stroke-width="2.8" stroke-linecap="round"/>
+  </g>
 </svg>

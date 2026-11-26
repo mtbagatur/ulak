@@ -118,7 +118,7 @@ const pinKey = s => `${s.workspace_label}|${s.project}`;
 const isPinned = s => pins.has(pinKey(s));
 // One stroke weight for every mark; the seal (a ring around the U) is the only one that carries meaning.
 const ICONS = {
-  seal: '<path d="M12 3.5h8.5V12A8.5 8.5 0 1 1 12 3.5z"/><path d="M8.8 9v3.6a3 3 0 0 0 6 0v-2l2.9-2.9"/>',
+  seal: '<circle cx="12" cy="12" r="8.7"/><path d="M9.2 8.6v3.6a2.8 2.8 0 0 0 5.6 0V8.6"/>',
   pin: '<path d="M9 4h6l-1 6 3 3.5H7l3-3.5z"/><path d="M12 13.5V20"/>',
   close: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
   bell: '<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
@@ -126,7 +126,7 @@ const ICONS = {
   timer: '<circle cx="12" cy="13" r="7.5"/><path d="M12 9v4l2.5 2M9.5 2.5h5"/>',
 };
 // The seal you pressed, left on the question it answered. `fresh` plays the press once; a redraw of the same question keeps the mark still.
-const sealMark = '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 4h12v12A12 12 0 1 1 16 4z"/><path d="M11.5 11.5v5.4a4.2 4.2 0 0 0 8.4 0v-3l4.6-4.6"/></svg>';
+const sealMark = '<svg viewBox="0 0 32 32" aria-hidden="true"><use class="w" href="#wax"/><circle class="r" cx="16" cy="16" r="9.6"/><path class="u" d="M12 11.2v5.2a4 4 0 0 0 8 0v-5.2"/></svg>';
 const isSealed = (pane, p) => !!p && state.sealed?.pane === pane && state.sealed.fingerprint === p.fingerprint;
 const stampHtml = p => `<span class="stamp">${sealMark}${p.destructive ? sealMark : ''}</span>`;
 function pressSeal(pane, p, el) {

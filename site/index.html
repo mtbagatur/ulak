@@ -6,7 +6,7 @@
 <title>Ulak: a courier for your coding agents</title>
 <meta name="description" content="Answer your coding agents from your phone. Every yes is bound to the question you read. Served from your own computer over Tailscale: no terminal, no account, no relay.">
 <meta name="theme-color" content="#1c1520" media="(prefers-color-scheme: dark)">
-<meta name="theme-color" content="#f2ecf0" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#f0eee8" media="(prefers-color-scheme: light)">
 <link rel="canonical" href="https://ulak.tahabagatur.com/">
 <link rel="alternate" hreflang="en" href="https://ulak.tahabagatur.com/">
 <link rel="alternate" hreflang="tr" href="https://ulak.tahabagatur.com/tr/">
@@ -22,8 +22,9 @@
 <script src="theme.js"></script>
 </head>
 <body>
+<svg class="defs" width="0" height="0" aria-hidden="true"><defs><path id="wax" d="M28.99 16.00L29.52 17.18L29.59 18.40L29.08 19.50L28.16 20.42L27.15 21.20L26.36 21.98L25.88 22.92L25.57 24.03L25.15 25.15L24.43 26.04L23.39 26.55L22.19 26.73L21.04 26.81L20.04 27.10L19.15 27.74L18.22 28.61L17.17 29.39L16.00 29.74L14.82 29.52L13.73 28.85L12.77 28.06L11.83 27.45L10.80 27.15L9.64 27.01L8.47 26.75L7.49 26.14L6.85 25.15L6.53 23.94L6.32 22.78L5.92 21.82L5.19 21.04L4.19 20.30L3.24 19.42L2.65 18.35L2.61 17.17L3.01 16.00L3.54 14.91L3.89 13.86L3.94 12.77L3.84 11.58L3.89 10.35L4.34 9.27L5.25 8.47L6.43 7.97L7.60 7.60L8.54 7.11L9.22 6.32L9.81 5.27L10.51 4.22L11.45 3.49L12.58 3.24L13.78 3.39L14.92 3.67L16.00 3.76L17.09 3.54L18.27 3.15L19.50 2.92L20.68 3.14L21.65 3.89L22.36 4.99L22.92 6.12L23.54 7.01L24.40 7.60L25.47 8.06L26.55 8.61L27.38 9.43L27.78 10.51L27.81 11.70L27.74 12.85L27.87 13.91L28.33 14.92z"/></defs></svg>
 <header class="wrap top">
-  <a class="brand" href="./"><svg class="mark draw" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 4h12v12A12 12 0 1 1 16 4z" fill="currentColor"/><path pathLength="1" d="M11.5 11.5v5.4a4.2 4.2 0 0 0 8.4 0v-3l4.6-4.6" fill="none" stroke-width="2.9" stroke-linecap="round" stroke-linejoin="round"/></svg>Ulak</a>
+  <a class="brand" href="./"><svg class="mark draw" viewBox="0 0 32 32" aria-hidden="true"><use class="w" href="#wax"/><circle class="r" cx="16" cy="16" r="9.6"/><path class="u" pathLength="1" d="M12 11.2v5.2a4 4 0 0 0 8 0v-5.2"/></svg>Ulak</a>
   <a href="tr/" lang="tr" hreflang="tr">Türkçe</a>
   <a href="https://github.com/mtbagatur/ulak">GitHub</a>
   <button class="theme" type="button" data-theme-toggle aria-pressed="true" aria-label="Dark theme"><svg class="moon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><defs><mask id="hilal"><rect x="-4" y="-4" width="32" height="32" fill="#fff"/><circle class="bite" cx="16.4" cy="8.6" r="7.2" fill="#000"/></mask></defs><circle class="halo" cx="12" cy="12" r="9.5"/><circle class="disc" cx="12" cy="12" r="8.2" fill="currentColor" mask="url(#hilal)"/></svg></button>
@@ -33,10 +34,10 @@
   <div>
     <h1>A courier for your coding agents, not a key to your machine.</h1>
     <p class="sub">The yes goes to the question you read.</p>
-    <p class="route" role="img" aria-label="An answer on its way: approved, on its way, the agent received it"><span>Approved</span><i></i><span class="mid">on its way</span><i></i><span class="end"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5h8.5V12A8.5 8.5 0 1 1 12 3.5z"/><path d="M8.8 9v3.6a3 3 0 0 0 6 0v-2l2.9-2.9"/></svg>agent received it</span></p>
+    <p class="route" role="img" aria-label="An answer on its way: approved, on its way, the agent received it"><span>Approved</span><i></i><span class="mid">on its way</span><i></i><span class="end"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.7"/><path d="M9.2 8.6v3.6a2.8 2.8 0 0 0 5.6 0V8.6"/></svg>agent received it</span></p>
     <p class="lead">An agent stops and asks: <em>run this?</em> You are not at your desk. The usual fix is a terminal on your phone, which puts the whole machine on your phone. Ulak carries one thing between you and your agents: the answer.</p>
     <div class="cta">
-      <a class="btn seal" href="demo/"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5h8.5V12A8.5 8.5 0 1 1 12 3.5z"/><path d="M8.8 9v3.6a3 3 0 0 0 6 0v-2l2.9-2.9"/></svg>Try it in your browser</a>
+      <a class="btn seal" href="demo/"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.7"/><path d="M9.2 8.6v3.6a2.8 2.8 0 0 0 5.6 0V8.6"/></svg>Try it in your browser</a>
       <a class="btn" href="https://github.com/mtbagatur/ulak">Read the source</a>
     </div>
     <ul class="facts"><li>Served from your own computer</li><li>Reached only over your Tailscale network</li><li>No account, no relay, no telemetry</li><li>For Claude Code, Codex and Antigravity in Herdr</li></ul>
@@ -83,24 +84,24 @@
 
 <section id="mark">
   <div class="wrap">
-    <svg class="sign" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 4h12v12A12 12 0 1 1 16 4z"/><path d="M11.5 11.5v5.4a4.2 4.2 0 0 0 8.4 0v-3l4.6-4.6"/></svg>
+    <svg class="sign" viewBox="0 0 32 32" aria-hidden="true"><use class="w" href="#wax"/><circle class="r" cx="16" cy="16" r="9.6"/><path class="u" d="M12 11.2v5.2a4 4 0 0 0 8 0v-5.2"/></svg>
     <h2>What the mark says</h2>
-    <p class="intro">The mark is a seal with a U cut into it. Each of its three parts is something the app does, and you meet each one again inside it.</p>
+    <p class="intro">The mark is a wax seal with a U pressed into it. Each of its three parts is something the app does, and you meet each one again inside it.</p>
     <ol class="parts">
       <li>
-        <svg viewBox="0 0 32 32" aria-hidden="true"><path class="g" d="M16 4h12v12A12 12 0 1 1 16 4z"/><path class="h" d="M28 16A12 12 0 1 1 16 4"/></svg>
-        <h3>Round, where it was pressed.</h3>
-        <p>A seal is a deliberate act. In the app, Approve is a seal: when you press it, the mark lands on the question you answered. A command that leaves a mark takes two.</p>
+        <svg viewBox="0 0 32 32" aria-hidden="true"><use class="e" href="#wax"/></svg>
+        <h3>Wax, pressed by hand.</h3>
+        <p>No two edges come out the same, because a seal is a deliberate act. In the app, Approve is a seal: when you press it, the mark lands on the question you answered. A command that leaves a mark takes two.</p>
       </li>
       <li>
-        <svg viewBox="0 0 32 32" aria-hidden="true"><path class="g" d="M16 4h12v12A12 12 0 1 1 16 4z"/><path class="h" d="M16 4h12v12"/></svg>
-        <h3>One sharp corner, where the answer leaves.</h3>
-        <p>Whatever is waiting on you carries that corner: the card that needs you, the Approve button, the frames on this page. It is the way out.</p>
+        <svg viewBox="0 0 32 32" aria-hidden="true"><use class="g" href="#wax"/><circle class="h t" cx="16" cy="16" r="9.6"/></svg>
+        <h3>The ring the press leaves.</h3>
+        <p>A seal belongs to the page it was pressed on. Your yes is bound to the question you read: if the agent has moved on to a different one, the answer is refused, and the refusal goes on the record.</p>
       </li>
       <li>
-        <svg viewBox="0 0 32 32" aria-hidden="true"><path class="g" d="M16 4h12v12A12 12 0 1 1 16 4z"/><path class="f" d="M11.5 11.5v5.4a4.2 4.2 0 0 0 8.4 0v-3"/><path class="h" d="M19.9 13.9l4.6-4.6"/></svg>
-        <h3>The stroke of a yes.</h3>
-        <p>The U of Ulak does not close. Its last stroke heads out through the corner, towards the agent. That is all a courier carries: your word, to the one who asked.</p>
+        <svg viewBox="0 0 32 32" aria-hidden="true"><use class="g" href="#wax"/><path class="h" d="M12 11.2v5.2a4 4 0 0 0 8 0v-5.2"/></svg>
+        <h3>A U, and nothing else.</h3>
+        <p>U for Ulak, the courier. It carries your word to the one who asked and tells you when it arrived. It does not open a terminal, and it does not type into a plain shell.</p>
       </li>
     </ol>
   </div>

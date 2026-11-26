@@ -125,3 +125,5 @@ def test_both_pages_say_what_the_mark_means(out):
         html = (out / page).read_text()
         part = html.split('<section id="mark">')[1].split("</section>")[0]
         assert part.count("<li") == 3 and part.count("<svg") == 4, page
+        # pressed wax, the ring the press leaves, the U: nothing about a corner any more
+        assert part.count('href="#wax"') == 4 and "corner" not in part and "köşe" not in part, page

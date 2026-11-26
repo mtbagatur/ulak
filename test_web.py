@@ -1115,3 +1115,33 @@ def test_three_providers_fit_the_limit_strip_on_a_phone(api_fixture):
     chrome.wait("document.querySelectorAll('#limits .lim').length === 3")
     assert chrome.js("(() => { const b = document.querySelector('#limits'); return b.scrollWidth <= b.clientWidth; })()")
     assert chrome.js("[...document.querySelectorAll('#limits .lim')].map(e => e.textContent)") == ["Claude12%", "Codex74%", "agy100%"]
+
+
+def test_the_mark_is_one_wax_seal_everywhere_and_no_shape_keeps_a_sharp_corner():
+    root = WEB.parent
+    icon = (WEB / "icon.svg").read_text()
+    wax = re.search(r'<path id="wax" d="(M[^"]+z)"', (WEB / "index.html").read_text()).group(1)
+    assert wax.count("L") == 71  # an uneven edge, pressed by hand, not a circle
+    for path in ("site/index.html", "site/tr/index.html"):
+        assert f'<path id="wax" d="{wax}"' in (root / path).read_text(), path
+    assert wax in icon
+    for path in ("web/index.html", "web/app.js", "web/icon.svg", "site/index.html", "site/tr/index.html"):
+        text = (root / path).read_text()
+        assert "M16 4h12" not in text and "M12 3.5h8.5" not in text and "h160v160" not in text, path
+    for path in ("web/style.css", "site/site.css"):
+        css = (root / path).read_text()
+        assert not re.search(r"border-radius:\d+px \d+px \d+px \d+px", css), path
+        assert "corner" not in css, path
+
+
+def test_daylight_is_warm_paper_without_pink_and_the_site_wears_the_same_colours():
+    dark, light = _palettes()
+    r, g, b = (int(light["bg"][i:i + 2], 16) for i in (1, 3, 5))
+    assert r >= g >= b and r - g <= 4, light["bg"]  # pink and mauve both push green below red and blue
+    site = (WEB.parent / "site" / "site.css").read_text()
+    site_dark = dict(re.findall(r"--([a-z0-9-]+):(#[0-9a-fA-F]{6})\b", site.split(":root{", 1)[1].split("}", 1)[0]))
+    site_light = dict(re.findall(r"--([a-z0-9-]+):(#[0-9a-fA-F]{6})\b", re.search(r":root\[data-theme=light\]\{([^}]*)\}", site).group(1)))
+    for mine, theirs in ((site_dark, dark), (site_light, light)):
+        assert mine and all(theirs[k] == v for k, v in mine.items())
+    for page in ("index.html", "tr/index.html"):
+        assert f'content="{light["bg"]}" media="(prefers-color-scheme: light)"' in (WEB.parent / "site" / page).read_text()
