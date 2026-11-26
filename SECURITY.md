@@ -18,7 +18,7 @@ Ulak listens on `127.0.0.1:8765` and nowhere else. The phone reaches it through 
 
 **The receipt: sent is not the same as arrived.** After a decision Ulak watches the agent's screen for a few seconds. When the answered prompt is gone it records the time and shows "agent received it". If the prompt is still there it says "not seen on the agent's screen" rather than reporting success.
 
-**The decision log: what was answered, by whom, when.** Every decision is appended to `.state/audit.json` (mode 600, last 500 entries): the pane, the command, the decision, the login, the outcome and the delivery time. Refusals are logged with their reason, and so are timeouts. The log is on your machine and is shown in the app under the ledger icon.
+**The decision log: what was answered, by whom, when.** Every decision is appended to `.state/audit.json` (mode 600, last 500 entries): the pane, the command, the decision, the login, the outcome and the delivery time. Refusals are logged with their reason, and so are timeouts. A choice from an agent's menu and keys typed at a waiting agent are decisions too and are logged the same way; text you write to an agent is not. The log is on your machine and is shown in the app under the ledger icon.
 
 **The timeout: off unless you turn it on.** With `approval_timeout_minutes` set, an approval nobody answered in that time is denied. The timeout can only deny, only the exact prompt it has been timing, and it writes a log entry. It never approves.
 

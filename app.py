@@ -527,11 +527,11 @@ def write_audit(items):
         pass
 
 
-def audit(pane, decision, outcome, *, login="", command="", destructive=False, reason=""):
+def audit(pane, decision, outcome, *, login="", command="", destructive=False, reason="", plain=False):
     """Record who answered what and when. Refusals are kept too: they are the proof the checks ran."""
     item = sessions.get(pane) or {}
     entry = {"id": secrets.token_hex(6), "ts": time.time(), "pane": pane, "project": item.get("project", ""), "agent": item.get("agent", ""),
-             "decision": decision, "outcome": outcome, "reason": reason, "command": tidy_details(command or "")[:600],
+             "decision": decision, "outcome": outcome, "reason": reason, "command": (command or "" if plain else tidy_details(command or ""))[:600],
              "destructive": bool(destructive), "login": login, "delivered": None}
     write_audit(read_audit() + [entry])
     return entry
@@ -839,42 +839,63 @@ async def _approve(pane, item, action, request, seen):
 
 
 @app.post("/api/sessions/{pane}/choose")
-async def choose(pane: str, action: Action):
+async def choose(pane: str, action: Action, request: Request):
     item = sessions.get(pane)
     if not item or pane not in pane_ids:
         raise HTTPException(404, "Session is closed or unknown")
     if item.get("status") != "blocked":
         raise HTTPException(409, "Session is no longer waiting for anything")
     with exclusive_prompt_reply(pane):
-        p = await fresh_prompt(pane, item.get("agent", "claude"))
-        if not p or p["kind"] in ("approval", "dismiss"):
-            raise HTTPException(409, "No menu to choose from on screen")
-        if not action.fingerprint or not secrets.compare_digest(action.fingerprint, p["fingerprint"]):
-            raise HTTPException(409, "The screen changed; refresh")
-        option = next((o for o in p["options"] if o["n"] == action.n), None)
-        if not option:
-            raise HTTPException(409, "No such option")
+        seen = {}  # the question on screen, so a refused choice is recorded with it
+        try:
+            p = await fresh_prompt(pane, item.get("agent", "claude"))
+            if not p or p["kind"] in ("approval", "dismiss"):
+                raise HTTPException(409, "No menu to choose from on screen")
+            seen["command"] = p.get("question", "")
+            if not action.fingerprint or not secrets.compare_digest(action.fingerprint, p["fingerprint"]):
+                raise HTTPException(409, "The screen changed; refresh")
+            option = next((o for o in p["options"] if o["n"] == action.n), None)
+            if not option:
+                raise HTTPException(409, "No such option")
+        except HTTPException as exc:
+            audit(pane, "choose", "refused", login=who(request), reason=str(exc.detail), plain=True, **seen)
+            raise
         pending_confirm.pop(pane, None)
         await client.call("agent.send_keys", {"target": pane, "keys": option["keys"]})
+        entry = audit(pane, "choose", "sent", login=who(request), command=f"{p.get('question', '')}\n> {option['label']}".strip(), plain=True)
+        track_delivery(pane, p["fingerprint"], entry)
     return {"ok": True, "next": next_blocked(pane)}
 
 
 @app.post("/api/sessions/{pane}/keys")
-async def send_keys(pane: str, action: Action):
+async def send_keys(pane: str, action: Action, request: Request):
     item = must_exist(pane)
     keys = [ALLOWED_KEYS.get(str(k).lower()) for k in (action.keys or [])]
     if not keys or len(keys) > 4 or None in keys:
         raise HTTPException(400, "Invalid key")
     item = await must_be_agent(pane)
     with exclusive_prompt_reply(pane):
+        waiting = None  # keys typed at a waiting agent answer it, so they go on the record like any decision
         if item.get("status") == "blocked":
             pending = await fresh_pending(pane)
+            try:
+                waiting = pending or await fresh_prompt(pane, item.get("agent") or "claude")
+            except Exception:
+                waiting = pending
+            asked = (pending or {}).get("command") or (waiting or {}).get("question", "")
+            typed = f"{asked}\n> {' '.join(keys)}".strip()
             if pending and pending["destructive"]:
                 danger = {"Enter", pending["keys"].get("approve"), pending["keys"].get("always"), "y"}
                 if any(k in danger for k in keys):
-                    raise HTTPException(409, "Destructive command: approve from the approval card (two steps)")
+                    reason = "Destructive command: approve from the approval card (two steps)"
+                    audit(pane, "keys", "refused", login=who(request), command=typed, destructive=True, reason=reason, plain=True)
+                    raise HTTPException(409, reason)
         pending_confirm.pop(pane, None)
         await client.call("agent.send_keys", {"target": pane, "keys": keys})
+        if item.get("status") == "blocked":
+            entry = audit(pane, "keys", "sent", login=who(request), command=typed, destructive=bool((pending or {}).get("destructive")), plain=True)
+            if waiting and waiting.get("fingerprint"):
+                track_delivery(pane, waiting["fingerprint"], entry)
     return {"ok": True}
 
 

@@ -582,7 +582,7 @@ function renderPrompt(p, status) {
 }
 // ---------- receipt: sent -> the agent has it ----------
 const clock = ts => new Date(ts * 1000).toLocaleTimeString(LANG === 'tr' ? 'tr-TR' : 'en-GB', {hour: '2-digit', minute: '2-digit'});
-const DECIDED = {approve: 'approved', deny: 'denied', always: 'allowedSession'};
+const DECIDED = {approve: 'approved', deny: 'denied', always: 'allowedSession', choose: 'chose', keys: 'keysSent'};
 const arrival = r => r.delivered ? t('rcptArrived', {t: clock(r.delivered)}) : r.delivered === false ? t('rcptUnknown') : t('rcptPending');
 function renderReceipt(r) {
   const el = $('#receipt');

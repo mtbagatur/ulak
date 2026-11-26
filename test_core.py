@@ -859,6 +859,40 @@ def test_destructive_record_shows_both_steps_newest_first(monkeypatch):
     assert all(e["destructive"] for e in items)
     assert "confirm_token" not in json.dumps(items) and r["confirm_token"] not in json.dumps(items)
 
+def test_a_menu_choice_is_recorded_with_the_question_and_the_option(monkeypatch):
+    fake, c, h = _setup2(monkeypatch, ASK)
+    p = parse_prompt(ASK)
+    assert c.post("/api/sessions/w9:p1/choose", headers=h, json={"fingerprint": p["fingerprint"], "n": 2}).status_code == 200
+    e = c.get("/api/audit", headers=h).json()["items"][0]
+    label = next(o["label"] for o in p["options"] if o["n"] == 2)
+    assert (e["decision"], e["outcome"], e["login"]) == ("choose", "sent", "user@example.test")
+    assert p["question"] in e["command"] and label in e["command"]
+
+def test_a_refused_menu_choice_is_recorded_with_its_reason(monkeypatch):
+    fake, c, h = _setup2(monkeypatch, ASK)
+    assert c.post("/api/sessions/w9:p1/choose", headers=h, json={"fingerprint": "old", "n": 1}).status_code == 409
+    e = c.get("/api/audit", headers=h).json()["items"][0]
+    assert (e["decision"], e["outcome"]) == ("choose", "refused") and "changed" in e["reason"] and fake.sent == []
+
+def test_keys_that_answer_a_waiting_agent_are_recorded(monkeypatch):
+    fake, c, h = _setup2(monkeypatch, ASK)
+    assert c.post("/api/sessions/w9:p1/keys", headers=h, json={"keys": ["Down", "Enter"]}).status_code == 200
+    e = c.get("/api/audit", headers=h).json()["items"][0]
+    assert (e["decision"], e["outcome"], e["login"]) == ("keys", "sent", "user@example.test")
+    assert "Down Enter" in e["command"] and parse_prompt(ASK)["question"] in e["command"]
+
+def test_keys_refused_on_a_destructive_prompt_are_recorded(monkeypatch):
+    fake, c, h = _setup2(monkeypatch, CLAUDE)
+    assert c.post("/api/sessions/w9:p1/keys", headers=h, json={"keys": ["Enter"]}).status_code == 409
+    e = c.get("/api/audit", headers=h).json()["items"][0]
+    assert (e["decision"], e["outcome"], e["destructive"]) == ("keys", "refused", True) and fake.sent == []
+
+def test_keys_sent_to_an_agent_that_is_not_waiting_are_not_decisions(monkeypatch):
+    fake, c, h = _setup2(monkeypatch, ASK)
+    api.sessions["w9:p1"]["status"] = "working"
+    assert c.post("/api/sessions/w9:p1/keys", headers=h, json={"keys": ["esc"]}).status_code == 200
+    assert c.get("/api/audit", headers=h).json()["items"] == []
+
 def test_audit_requires_identity(monkeypatch):
     fake, c, h = _setup(monkeypatch, CODEX)
     assert c.get("/api/audit").status_code == 403
