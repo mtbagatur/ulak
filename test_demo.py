@@ -63,7 +63,7 @@ def test_demo_story_approve_then_two_seals_then_the_agent_resumes(site):
     chrome.wait("document.querySelector('#messages .hint')?.textContent.includes('Pushing')")
     chrome.wait("document.querySelector('#messages').textContent.includes('Pushed. CI is running')")
     chrome.js("history.back()")
-    chrome.wait("document.querySelector('.card[data-key=\"d1:p1\"]').textContent.includes('All 12 billing tests pass')")
+    chrome.wait("document.querySelector('.card[data-key=\"d1:p1\"]').textContent.includes('All 12 sync tests pass')")
 
 
 def test_demo_refuses_an_answer_to_a_question_that_changed(site):

@@ -15,28 +15,28 @@
     transcript: agent === 'claude', hint: hint || ''});
 
   let sessions = [
-    card('d1:p1', 'claude', 'blocked', 'billing-api', 'work', 'Fix flaky invoice test', 'I found the race in the retry helper. Run the billing tests to confirm?', 90, 'Sonnet',
-      ask('pytest -q tests/test_billing.py', 'demo-a', false, true)),
-    card('d2:p1', 'claude', 'blocked', 'web-app', 'work', 'Ship 2.4', 'Release notes are ready. Push the release branch?', 240, 'Opus', ask('git push origin release/2.4', 'demo-b', true)),
-    card('d3:p1', 'codex', 'working', 'infra', 'ops', 'Terraform plan cleanup', 'Reading modules/network to find unused subnets…', 30, 'gpt', null, 'Reading modules/network…'),
-    card('d4:p1', 'claude', 'working', 'docs', 'work', 'Rewrite the quickstart', 'Editing docs/quickstart.md', 15, 'Haiku', null, 'Editing docs/quickstart.md…'),
-    card('d5:p1', 'agy', 'done', 'data-pipeline', 'ops', 'Backfill job', 'Backfill finished: 1.2M rows, 0 errors.', 120, ''),
-    card('d6:p1', 'claude', 'idle', 'notes', 'personal', '', '', 7200, 'Sonnet'),
+    card('d1:p1', 'claude', 'blocked', 'panel', 'work', 'Fix flaky sync test', 'I found the race in the retry helper. Run the sync tests to confirm?', 90, 'Sonnet',
+      ask('pytest -q tests/test_sync.py', 'demo-a', false, true)),
+    card('d2:p1', 'claude', 'blocked', 'tugra', 'work', 'Ship 2.4', 'Release notes are ready. Push the release branch?', 240, 'Opus', ask('git push origin release/2.4', 'demo-b', true)),
+    card('d3:p1', 'codex', 'working', 'sadrazam', 'ops', 'Terraform plan cleanup', 'Reading modules/network to find unused subnets…', 30, 'gpt', null, 'Reading modules/network…'),
+    card('d4:p1', 'agy', 'working', 'kurmay', 'work', 'Rewrite the quickstart', 'Editing docs/quickstart.md', 15, '', null, 'Editing docs/quickstart.md…'),
+    card('d5:p1', 'claude', 'done', 'kutuphane', 'ops', 'Backfill job', 'Backfill finished: 1.2M rows, 0 errors.', 120, 'Haiku'),
+    card('d6:p1', 'claude', 'idle', 'ulak', 'personal', '', '', 7200, 'Sonnet'),
   ];
   const chats = {
     'd1:p1': [
-      user('The invoice test fails about one run in ten. Find out why.'),
-      tool('Grep', 'retry_with_backoff in src/billing', 'src/billing/retry.py:41: def retry_with_backoff(fn, tries=3):'),
-      tool('Agent', 'Find every caller of retry_with_backoff', '4 callers: invoices.py, refunds.py, payouts.py, webhooks.py. Only invoices.py retries a write.', {kind: 'Explore', state: 'done'}),
-      tool('Agent', 'Run the billing suite 20 times and count the failures', '', {kind: 'general-purpose', state: 'running'}),
-      bot('Found it. `retry_with_backoff` sleeps with a **fixed** delay, so two workers retry in lockstep and collide on the same invoice row.'),
-      tool('Edit', 'src/billing/retry.py', '+    delay = base * 2 ** attempt + random.uniform(0, base)'),
-      bot('I added jitter to the backoff. Let me run the billing tests to confirm.'),
+      user('The sync test fails about one run in ten. Find out why.'),
+      tool('Grep', 'retry_with_backoff in src/sync', 'src/sync/retry.py:41: def retry_with_backoff(fn, tries=3):'),
+      tool('Agent', 'Find every caller of retry_with_backoff', '4 callers: feeds.py, exports.py, alerts.py, webhooks.py. Only feeds.py retries a write.', {kind: 'Explore', state: 'done'}),
+      tool('Agent', 'Run the sync suite 20 times and count the failures', '', {kind: 'general-purpose', state: 'running'}),
+      bot('Found it. `retry_with_backoff` sleeps with a **fixed** delay, so two workers retry in lockstep and collide on the same row.'),
+      tool('Edit', 'src/sync/retry.py', '+    delay = base * 2 ** attempt + random.uniform(0, base)'),
+      bot('I added jitter to the backoff. Let me run the sync tests to confirm.'),
     ],
     'd2:p1': [
       user('Cut the 2.4 release branch and write the notes. Ask me before anything leaves this machine.'),
       tool('Bash', 'git log --oneline v2.3.0..HEAD', '31 commits: 4 features, 19 fixes, 8 chores'),
-      tool('Write', 'docs/releases/2.4.md', '+ ## 2.4\n+ - Saved filters on the orders page\n+ - Faster first load (-38% JS)\n+ - 19 fixes'),
+      tool('Write', 'docs/releases/2.4.md', '+ ## 2.4\n+ - Saved filters on the archive page\n+ - Faster first load (-38% JS)\n+ - 19 fixes'),
       bot('The notes are in `docs/releases/2.4.md` and the branch `release/2.4` exists locally. Pushing it starts the release pipeline.'),
     ],
     'd3:p1': [
@@ -58,17 +58,17 @@
   };
   // What each agent does once its question is answered.
   const SCRIPT = {
-    'demo-a': {hint: 'Running the billing tests…', seconds: 5, no: 'Okay, I did not run the tests. The change is still uncommitted.',
-      yes: [tool('Bash', 'pytest -q tests/test_billing.py', '12 passed in 3.41s'), bot('All 12 billing tests pass, and 20 runs in a row came back clean. The fix is the jitter in `retry_with_backoff`.')]},
+    'demo-a': {hint: 'Running the sync tests…', seconds: 5, no: 'Okay, I did not run the tests. The change is still uncommitted.',
+      yes: [tool('Bash', 'pytest -q tests/test_sync.py', '12 passed in 3.41s'), bot('All 12 sync tests pass, and 20 runs in a row came back clean. The fix is the jitter in `retry_with_backoff`.')]},
     'demo-b': {hint: 'Pushing release/2.4…', seconds: 4, no: 'Okay, nothing was pushed. The notes are in `docs/releases/2.4.md` if you want to read them first.',
       yes: [tool('Bash', 'git push origin release/2.4', ' * [new branch]      release/2.4 -> release/2.4'), bot('Pushed. CI is running on `release/2.4`; I will tag 2.4.0 when it is green.')]},
     'demo-d': {hint: 'Applying the plan…', seconds: 5, no: 'Okay, nothing was applied. The plan is saved as `tf.plan`.',
       yes: [tool('Bash', 'terraform apply tf.plan', 'Apply complete! Resources: 0 added, 2 changed, 3 destroyed.'), bot('Applied. The three unused subnets are gone and both route tables are updated.')]},
   };
   const audit = [];
-  const notes = [{ts: now() - 240, pane: 'd2:p1', status: 'blocked', title: 'web-app', body: 'Approval needed: git push origin release/2.4'},
-    {ts: now() - 90, pane: 'd1:p1', status: 'blocked', title: 'billing-api', body: 'Approval needed: pytest -q tests/test_billing.py'}];
-  let pins = ['work|billing-api'], made = 0, infraAsked = false;
+  const notes = [{ts: now() - 240, pane: 'd2:p1', status: 'blocked', title: 'tugra', body: 'Approval needed: git push origin release/2.4'},
+    {ts: now() - 90, pane: 'd1:p1', status: 'blocked', title: 'panel', body: 'Approval needed: pytest -q tests/test_sync.py'}];
+  let pins = ['work|panel'], made = 0, infraAsked = false;
 
   if (worst) {  // break-ui: long names, unbreakable strings, a huge command, RTL/CJK/emoji
     const long = 'x'.repeat(200), big = Array.from({length: 60}, (_, i) => `find / -name '*.log' -exec rm -f {} \; # step ${i} ${'a'.repeat(60)}`).join('\n');
@@ -150,9 +150,9 @@
     const last = (chats[pane] || []).filter(m => m.role === 'assistant').at(-1)?.text || '';
     return {ts: now(), text: [`● ${last}`, '', ...(command ? ['Bash command', '', `  ${command}`, '', 'Do you want to proceed?', '❯ 1. Yes', '  2. No'] : s?.status === 'working' ? ['✻ Working… (esc to interrupt)'] : ['❯ '])].join('\n')};
   }
-  const DIFF = `diff --git a/src/billing/retry.py b/src/billing/retry.py
---- a/src/billing/retry.py
-+++ b/src/billing/retry.py
+  const DIFF = `diff --git a/src/sync/retry.py b/src/sync/retry.py
+--- a/src/sync/retry.py
++++ b/src/sync/retry.py
 @@ -41,7 +41,8 @@ def retry_with_backoff(fn, tries=3):
      """Call fn again after a failure, waiting longer each time."""
 -    delay = base * 2 ** attempt
@@ -173,7 +173,7 @@ diff --git a/tests/test_retry.py b/tests/test_retry.py
 +    assert len(waits) > 1 and all(2.0 <= w <= 4.0 for w in waits)
 `;
   const changes = pane => ({repo: true, more_files: 0, truncated: false, ts: now(), ...(pane === 'd1:p1'
-    ? {branch: 'retry-backoff', files: [{code: 'M', path: 'src/billing/retry.py'}, {code: 'M', path: 'tests/test_retry.py'}, {code: '?', path: 'docs/backoff.md'}], diff: DIFF}
+    ? {branch: 'retry-backoff', files: [{code: 'M', path: 'src/sync/retry.py'}, {code: 'M', path: 'tests/test_retry.py'}, {code: '?', path: 'docs/backoff.md'}], diff: DIFF}
     : {branch: 'main', files: [], diff: ''})});
   const COMMANDS = [...['/clear', '/compact', '/help', '/model'].map(name => ({name, description: '', source: 'builtin'})),
     {name: '/review', description: 'Review the current diff before it ships', source: 'project'},
@@ -181,8 +181,9 @@ diff --git a/tests/test_retry.py b/tests/test_retry.py
     {name: '/git:sync', description: 'Rebase on main and rerun the tests', source: 'user'}];
   const limits = () => ({now: now(), providers: [
     {id: 'claude', label: 'Claude', updated: now() - 120, items: [{label: '5h', used: 38, resets_at: now() + 2.4 * 3600}, {label: '7d', used: 71, resets_at: now() + 3.2 * 86400}]},
-    {id: 'codex', label: 'Codex', updated: now() - 300, items: [{label: '5h', used: 12, resets_at: now() + 4.1 * 3600}, {label: '7d', used: 91, resets_at: now() + 1.5 * 86400}]}]});
-  const PROJECTS = {projects: ['billing-api', 'web-app', 'docs'].map(name => ({name, path: `/home/you/projects/${name}`, display: `~/projects/${name}`})),
+    {id: 'codex', label: 'Codex', updated: now() - 300, items: [{label: '5h', used: 12, resets_at: now() + 4.1 * 3600}, {label: '7d', used: 91, resets_at: now() + 1.5 * 86400}]},
+    {id: 'agy', label: 'agy', updated: now() - 600, items: [{label: '7d', used: 24, resets_at: now() + 5.3 * 86400}]}]});
+  const PROJECTS = {projects: ['panel', 'tugra', 'kurmay'].map(name => ({name, path: `/home/you/projects/${name}`, display: `~/projects/${name}`})),
     tools: {claude: ['sonnet', 'opus'], codex: [], agy: []}};
 
   function route(method, path, body) {
