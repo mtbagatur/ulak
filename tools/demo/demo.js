@@ -158,8 +158,8 @@
 -    delay = base * 2 ** attempt
 +    delay = base * 2 ** attempt + random.uniform(0, base)
 +    log.debug("retry %s in %.2fs", attempt, delay)
- 
- 
+\x20
+\x20
  def retry(call, attempts=5):
 diff --git a/tests/test_retry.py b/tests/test_retry.py
 --- a/tests/test_retry.py
