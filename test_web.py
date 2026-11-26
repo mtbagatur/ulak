@@ -721,10 +721,56 @@ def test_interface_uses_no_emoji_glyphs():
 
 
 def test_theme_colour_is_the_same_everywhere():
-    page = re.search(r'name="theme-color" content="(#[0-9a-fA-F]{6})"', (WEB / "index.html").read_text()).group(1)
+    html = (WEB / "index.html").read_text()
+    metas = dict(re.findall(r'name="theme-color" media="\(prefers-color-scheme: (dark|light)\)" content="(#[0-9a-fA-F]{6})"', html))
     manifest = json.loads((WEB / "manifest.webmanifest").read_text())
-    ground = re.search(r"--bg:(#[0-9a-fA-F]{6})", (WEB / "style.css").read_text()).group(1)
-    assert page.lower() == manifest["theme_color"].lower() == manifest["background_color"].lower() == ground.lower()
+    dark, light = _palettes()
+    # The installed app's splash follows the dark ground; the browser bar follows whichever theme is showing.
+    assert metas["dark"].lower() == manifest["theme_color"].lower() == manifest["background_color"].lower() == dark["bg"].lower()
+    assert metas["light"].lower() == light["bg"].lower() != dark["bg"].lower()
+
+
+def _palettes():
+    css = (WEB / "style.css").read_text()
+    dark = dict(re.findall(r"--([a-z0-9-]+):(#[0-9a-fA-F]{6})\b", css.split("{", 1)[1].split("}", 1)[0]))
+    block = re.search(r"@media \(prefers-color-scheme: ?light\)\{:root\{([^}]*)\}", css).group(1)
+    return dark, dict(re.findall(r"--([a-z0-9-]+):(#[0-9a-fA-F]{6})\b", block))
+
+
+def _contrast(a, b):
+    def lum(h):
+        rgb = [int(h[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+        r, g, bl = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in rgb]
+        return 0.2126 * r + 0.7152 * g + 0.0722 * bl
+    hi, lo = sorted((lum(a), lum(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def test_both_themes_define_the_same_colours_and_stay_readable():
+    dark, light = _palettes()
+    assert set(light) == set(dark)  # one set of names, so no rule can fall back to the other theme by accident
+    for name, p in (("dark", dark), ("light", light)):
+        for ink in ("text", "strong", "muted", "zer", "lal-t", "ok"):
+            for ground in ("bg", "bg2", "card", "card2"):
+                assert _contrast(p[ink], p[ground]) >= 4.5, f"{name}: --{ink} on --{ground} is {_contrast(p[ink], p[ground]):.2f}"
+        assert _contrast(p["zer-ink"], p["zer"]) >= 4.5 and _contrast("#ffffff", p["lal"]) >= 4.5, name
+
+
+def test_light_theme_follows_the_system_setting(api_fixture):
+    chrome, api, url = api_fixture
+    dark, light = _palettes()
+    rgb = lambda h: "rgb({}, {}, {})".format(*(int(h[i:i + 2], 16) for i in (1, 3, 5)))
+    chrome.cdp("Emulation.setEmulatedMedia", features=[{"name": "prefers-color-scheme", "value": "light"}])
+    try:
+        open_first(chrome, url)
+        assert chrome.js("getComputedStyle(document.body).backgroundColor") == rgb(light["bg"])
+        assert chrome.js("getComputedStyle(document.body).color") == rgb(light["text"])
+        assert chrome.js("getComputedStyle(document.documentElement).colorScheme") == "light"
+        chrome.cdp("Emulation.setEmulatedMedia", features=[{"name": "prefers-color-scheme", "value": "dark"}])
+        assert chrome.js("getComputedStyle(document.body).backgroundColor") == rgb(dark["bg"])
+        assert chrome.js("getComputedStyle(document.documentElement).colorScheme") == "dark"
+    finally:
+        chrome.cdp("Emulation.setEmulatedMedia", features=[])
 
 
 def test_receipt_draws_the_road_from_sent_to_arrived(api_fixture):
