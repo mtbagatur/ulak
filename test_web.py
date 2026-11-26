@@ -278,6 +278,12 @@ def api_fixture(tmp_path):
         yield chrome, api, url
 
 
+def open_settings(chrome):
+    if chrome.js("document.querySelector('#sheet #refresh') === null"):
+        chrome.click("#settings")
+        chrome.wait("document.querySelector('#sheet #refresh') !== null")
+
+
 def open_first(chrome, url):
     chrome.cdp("Page.navigate", url=url)
     chrome.click(".card-open")
@@ -423,7 +429,8 @@ def test_unknown_state_and_long_labels_stay_visible(api_fixture, width):
     assert chrome.js("document.activeElement.getAttribute('aria-expanded') === 'true' && !document.querySelector('#idleCards').hidden")
     chrome.key("Enter", "Enter", 13)
     assert chrome.js("document.activeElement.getAttribute('aria-expanded') === 'false' && document.querySelector('#idleCards').hidden")
-    chrome.click("#lang")
+    chrome.click("#settings")
+    chrome.click("#sheet #lang")
     assert chrome.js("document.querySelector('#summary').textContent") == "Durumu bilinmeyen oturum: 1"
 
 
@@ -533,7 +540,8 @@ def test_offline_refresh_retains_cards_and_sse_reconnect_loads_snapshot(api_fixt
     api.ready.clear()
     chrome.offline(True)
     api.stream_generation += 1
-    chrome.click("#refresh")
+    open_settings(chrome)
+    chrome.click("#sheet #refresh")
     chrome.wait("!document.querySelector('#conn').hidden")
     assert chrome.js("document.querySelector('.g-working .proj').textContent") == "fixture"
     api.cards = [card("unknown", project="updated-while-offline")]
@@ -579,7 +587,8 @@ def test_sse_update_survives_a_late_list_snapshot(api_fixture):
     chrome.wait("document.querySelector('#conn').hidden && document.querySelector('.g-blocked .card') !== null")
     api.list_started.clear()
     api.list_respond.clear()
-    chrome.click("#refresh")
+    open_settings(chrome)
+    chrome.click("#sheet #refresh")
     assert api.list_started.wait(5)
     api.publish_session("unknown")
     chrome.wait("document.querySelector('.g-unknown .card') !== null")
@@ -600,7 +609,8 @@ def test_stalled_snapshot_recovers_without_reopening_the_stream(api_fixture):
     api.ready.clear()
     api.list_started.clear()
     api.list_respond.clear()
-    chrome.click("#refresh")
+    open_settings(chrome)
+    chrome.click("#sheet #refresh")
     assert api.list_started.wait(5)
     chrome.wait("!document.querySelector('#conn').hidden")
     api.cards = [card("unknown")]
@@ -708,3 +718,50 @@ def test_destructive_approval_asks_for_two_seals_before_the_first_tap(api_fixtur
     assert chrome.js(f"document.querySelector({json.dumps(APPROVE)}).textContent.trim()") == "Review…"
     chrome.click("#back")
     chrome.wait("document.querySelector('.card.two-seals') !== null")
+
+
+def test_header_keeps_the_ledger_and_moves_rare_actions_into_settings(api_fixture):
+    chrome, api, url = api_fixture
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelector('.card') !== null")
+    assert chrome.js("[...document.querySelectorAll('#home .top button')].filter(b => !b.hidden).map(b => b.id)") == ["history", "settings"]
+    chrome.click("#settings")
+    chrome.wait("document.querySelector('#sheet #lang') !== null")
+    assert chrome.js("['#lang', '#refresh', '[data-close]'].every(q => document.querySelector('#sheet ' + q) !== null)")
+    assert chrome.js("document.querySelector('#sheet .grab') !== null")
+    chrome.click("#sheet [data-close]")
+    chrome.wait("document.querySelector('#sheet').hidden")
+
+
+def test_always_allow_needs_a_deliberate_second_tap(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_prompt({**APPROVAL, "fingerprint": "with-always", "roles": ["approve", "deny", "always"], "options": [{"role": "approve"}, {"role": "deny"}, {"role": "always"}]})
+    open_first(chrome, url)
+    chrome.wait("document.querySelector('#promptZone [data-d=always]') !== null")
+    assert chrome.js("document.querySelector('#promptZone [data-d=always]').checkVisibility()") is False
+    chrome.click("#promptZone details.more summary")
+    chrome.wait("document.querySelector('#promptZone [data-d=always]').checkVisibility()")
+
+
+def test_slash_menu_opens_beside_a_pending_approval_not_over_it(api_fixture):
+    chrome, api, url = api_fixture
+    chrome.resize(390, 780)
+    open_first(chrome, url)
+    chrome.wait(f"document.querySelector({json.dumps(APPROVE)}) !== null")
+    chrome.js("(() => { const m = document.querySelector('#message'); m.focus(); m.value = '/'; m.dispatchEvent(new Event('input', {bubbles: true})); })()")
+    chrome.wait("!document.querySelector('#slashOptions').hidden")
+    assert chrome.js("""(() => {
+        const menu = document.querySelector('#slashOptions').getBoundingClientRect();
+        const prompt = document.querySelector('#promptZone .prompt').getBoundingClientRect();
+        return menu.top >= prompt.bottom - 1 || menu.bottom <= prompt.top + 1;
+    })()""")
+    assert chrome.js("getComputedStyle(document.querySelector('#keybar')).scrollbarWidth") == "none"
+
+
+def test_very_old_sessions_show_a_date_instead_of_a_day_count(api_fixture):
+    chrome, api, url = api_fixture
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelector('.card') !== null")
+    assert chrome.js("ago(Date.now() / 1000 - 3 * 86400)") == "3 d"
+    old = chrome.js("ago(Date.parse('2023-09-25T12:00:00Z') / 1000)")
+    assert "2023" in old and " d" not in old

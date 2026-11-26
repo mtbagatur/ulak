@@ -87,7 +87,8 @@ function ago(ts) {
   if (s < 45) return t('justNow');
   if (s < 3600) return `${Math.round(s / 60)} ${t('min')}`;
   if (s < 86400) return `${Math.floor(s / 3600)} ${t('hour')}`;
-  return `${Math.floor(s / 86400)} ${t('day')}`;
+  if (s < 30 * 86400) return `${Math.floor(s / 86400)} ${t('day')}`;
+  return new Date(ts * 1000).toLocaleDateString(LANG === 'tr' ? 'tr-TR' : 'en-GB', {day: 'numeric', month: 'short', year: 'numeric'});
 }
 
 // ---------- home ----------
@@ -119,6 +120,9 @@ const isPinned = s => pins.has(pinKey(s));
 const ICONS = {
   seal: '<circle cx="12" cy="12" r="9"/><path d="M8.5 8.5v4a3.5 3.5 0 0 0 7 0v-4"/>',
   pin: '<path d="M9 4h6l-1 6 3 3.5H7l3-3.5z"/><path d="M12 13.5V20"/>',
+  close: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
+  bell: '<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
+  refresh: '<path d="M19 12a7 7 0 1 1-2.05-4.95"/><path d="M19 4.5V8h-3.5"/>',
 };
 const icon = (name, size = 18) => `<svg class="ic" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
 function cardHtml(s) {
@@ -518,7 +522,7 @@ function renderPrompt(p, status) {
     const denyOnly = p.cut;
     zone.innerHTML = `<div class="prompt${two}"><h3>${p.destructive ? `${icon('seal', 15)}${icon('seal', 15)}<span>${esc(t('destructive'))}</span>` : esc(t('waitingApproval'))}</h3><pre>${esc(p.details)}</pre>${p.hook_note ? `<p class="hook-note">${esc(p.hook_note)}</p>` : ''}${denyOnly ? `<p class="q">${esc(t('cutNote'))}</p>` : ''}${p.destructive && !denyOnly ? `<p class="hook-note two-note">${esc(t('twoSealsNote'))}</p>` : ''}
       <div class="acts"><button class="deny" data-d="deny">${esc(t('deny'))}</button>${denyOnly ? '' : p.destructive ? `<button class="seal red" data-d="approve">${esc(t('review'))}</button>` : `<button class="seal" data-d="approve">${icon('seal', 18)}${esc(t('approve'))}</button>`}</div>
-      ${!denyOnly && roles.always && !p.destructive ? `<button class="also" data-d="always">${esc(t('alwaysAllow'))}</button>` : ''}</div>`;
+      ${!denyOnly && roles.always && !p.destructive ? `<details class="more"><summary>${esc(t('otherAnswers'))}</summary><p>${esc(t('alwaysNote'))}</p><button class="also" data-d="always">${esc(t('alwaysAllow'))}</button></details>` : ''}</div>`;
     zone.querySelectorAll('[data-d]').forEach(b => b.onclick = () => decide(b.dataset.d, b));
     return;
   }
@@ -756,12 +760,14 @@ function showSheet(html) {
   const s = $('#sheet');
   if (s.hidden) sheetOpener = document.activeElement === document.body ? null : document.activeElement;
   clearTimeout(sheetTimer); s.classList.remove('closing'); $('#sheetBack').classList.remove('closing');
-  s.innerHTML = html;
+  s.innerHTML = `<div class="grab" aria-hidden="true"></div>${html}`;
+  // Sheets with their own Cancel keep a two-button focus loop; the rest get one consistent close control.
+  if (!s.querySelector('[data-x]')) { s.insertAdjacentHTML('beforeend', `<button class="icon sheet-x" data-close aria-label="${esc(t('close'))}">${icon('close', 20)}</button>`); s.querySelector('[data-close]').onclick = hideSheet; }
   const title = s.querySelector('h3');
   if (title) { title.id = 'sheetTitle'; s.setAttribute('aria-labelledby', title.id); }
   else s.removeAttribute('aria-labelledby');
   s.hidden = false; s.inert = false; $('#sheetBack').hidden = false;
-  (s.querySelector('[autofocus],button:not(:disabled),input:not(:disabled),textarea:not(:disabled),select:not(:disabled)') || s).focus({preventScroll: true});
+  (s.querySelector('[autofocus],button:not(:disabled):not([data-close]),input:not(:disabled),textarea:not(:disabled),select:not(:disabled),[data-close]') || s).focus({preventScroll: true});
 }
 function hideSheet() {
   const s = $('#sheet'), b = $('#sheetBack');
@@ -864,7 +870,7 @@ $('#sMenu').onclick = () => {
     $('#sheet [data-y]').onclick = async b => { const ok = await act(b.currentTarget, () => api(`/api/sessions/${encodeURIComponent(state.current)}/close`, {confirm_token: r.confirm_token}), t('closed')); if (ok) { hideSheet(); history.state ? history.back() : (location.hash = '', route()); } };
   };
 };
-$('#refresh').onclick = e => act(e.currentTarget, loadList, '');
+
 
 // ---------- pull to refresh ----------
 (() => {
@@ -877,14 +883,16 @@ $('#refresh').onclick = e => act(e.currentTarget, loadList, '');
 // ---------- push ----------
 let swReg = null;
 async function pushState() {
-  const bell = $('#bell');
-  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !swReg) { bell.hidden = true; return; }
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !swReg) { setBell('none'); return; }
   const sub = await swReg.pushManager.getSubscription();
   let known = false;
   if (sub && Notification.permission === 'granted') { try { known = (await api('/api/push/known', {endpoint: sub.endpoint})).known; } catch { known = true; } }
-  bell.hidden = known;
+  setBell(known ? 'on' : 'off');
 }
-$('#bell').onclick = e => act(e.currentTarget, async () => {
+// 'none' = this browser cannot push, 'off' = it can and is not set up (the settings button carries a dot), 'on' = done
+let bellState = 'none';
+function setBell(v) { bellState = v; $('#settings').classList.toggle('dot', v === 'off'); if ($('#sheet [data-settings]')) settingsSheet(); }
+const enableBell = btn => act(btn, async () => {
   if (Notification.permission !== 'granted' && await Notification.requestPermission() !== 'granted') throw new Error(t('noPermission'));
   const {key} = await api('/api/push/public'); if (!key) throw new Error(t('noPushKey'));
   const pad = key.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(key.length / 4) * 4, '=');
@@ -963,18 +971,27 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) load
 function refreshLang() {
   applyStaticI18n();
   updateConnection();
-  $('#lang').textContent = LANG.toUpperCase();
   document.title = t('appName');
   setQuickLabel();
   state.sessions.size && renderHome();
   renderLimits();
   if (state.current) { updateSessionHeader(); $('#promptZone').dataset.sig = ''; state.chatHash = ''; loadChat(); }
 }
-$('#lang').onclick = async () => {
+async function toggleLang() {
   LANG = LANG === 'tr' ? 'en' : 'tr';
   store.set('lang', LANG);
   hideSheet(); refreshLang();
   try { const sub = await swReg?.pushManager.getSubscription(); if (sub) await api('/api/push/lang', {endpoint: sub.endpoint, lang: LANG}); } catch {}
-};
+}
+function settingsSheet() {
+  const bell = bellState === 'off' ? `<button id="bell" class="row">${icon('bell', 20)}<span>${esc(t('enableBell'))}</span></button>` : `<div class="row quiet">${icon('bell', 20)}<span>${esc(t(bellState === 'on' ? 'bellOn' : 'bellNone'))}</span></div>`;
+  showSheet(`<h3 data-settings>${esc(t('settings'))}</h3><div class="rows">${bell}
+    <button id="lang" class="row"><b class="lang">${LANG.toUpperCase()}</b><span>${esc(t('language'))}</span><small>${LANG === 'tr' ? 'English' : 'Türkçe'}</small></button>
+    <button id="refresh" class="row">${icon('refresh', 20)}<span>${esc(t('refresh'))}</span></button></div>`);
+  $('#sheet #lang').onclick = toggleLang;
+  $('#sheet #refresh').onclick = e => act(e.currentTarget, loadList, t('refreshed'));
+  const b = $('#sheet #bell'); if (b) b.onclick = e => enableBell(e.currentTarget);
+}
+$('#settings').onclick = settingsSheet;
 refreshLang();
 loadLimits();
