@@ -1229,3 +1229,10 @@ def test_opening_a_session_by_address_does_not_move_focus(api_fixture):
     chrome.cdp("Page.navigate", url=f"{url}/#/s/{PANE}")
     chrome.wait("document.querySelector('#messages .msg') !== null")
     assert chrome.js("document.activeElement === document.body")
+
+
+def test_command_suggestions_are_named_in_the_chosen_language(api_fixture):
+    chrome, _api, url = api_fixture
+    chrome.cdp("Page.navigate", url=f"{url}/?lang=tr")
+    chrome.wait("document.readyState === 'complete' && document.documentElement.lang === 'tr'")
+    assert chrome.js("document.querySelector('#slashOptions').getAttribute('aria-label')") == "Eğik çizgi komutları"
