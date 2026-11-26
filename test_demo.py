@@ -1,26 +1,87 @@
-from copy import deepcopy
+import json
+import threading
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
+import pytest
 from fastapi.testclient import TestClient
 
+from test_web import APPROVE, open_chrome
 from tools import demo_server as demo
 
 
-def test_demo_approval_resolves_the_fake_session():
-    original = deepcopy(demo.SESSIONS)
+class Quiet(SimpleHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+
+@pytest.fixture
+def site(tmp_path):
+    """The static build behind a plain file server, under a subpath, the way a web host would serve it."""
+    demo.build(tmp_path / "site" / "demo")
+    server = ThreadingHTTPServer(("127.0.0.1", 0), partial(Quiet, directory=str(tmp_path / "site")))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
-        client = TestClient(demo.app)
-        response = client.post("/api/sessions/d1:p1/approve", json={"decision": "approve", "fingerprint": "demo-a"})
-        assert response.status_code == 200 and response.json()["ok"]
-        chat = client.get("/api/sessions/d1:p1/chat").json()
-        assert chat["status"] == "done" and chat["prompt"] is None
-        assert chat["receipt"]["decision"] == "approve" and chat["receipt"]["delivered"]
-        assert client.get("/api/audit").json()["items"][0]["outcome"] == "sent"
+        with open_chrome(tmp_path) as chrome:
+            chrome.resize(390, 780)
+            chrome.cdp("Page.navigate", url=f"http://127.0.0.1:{server.server_port}/demo/?speed=8")
+            chrome.wait("document.querySelectorAll('.card').length === 6")
+            yield chrome
     finally:
-        demo.SESSIONS[:] = original
-        demo.AUDIT.clear()
+        server.shutdown()
+
+
+def open_card(chrome, pane):
+    chrome.click(f".card[data-key={json.dumps(pane)}] .card-open")
+    chrome.wait(f"location.hash === {json.dumps('#/s/' + pane)} && document.querySelector('#messages .msg') !== null")
+
+
+def text(chrome, selector):
+    return chrome.js(f"document.querySelector({json.dumps(selector)})?.textContent || ''")
+
+
+def test_static_demo_needs_no_server_and_installs_nothing(site):
+    chrome = site
+    assert text(chrome, ".top h1").endswith("demo")
+    assert chrome.js("document.querySelector('link[rel=manifest]') === null")
+    assert chrome.js("performance.getEntriesByType('resource').filter(r => new URL(r.name).pathname.startsWith('/api')).length") == 0
+    assert chrome.js("performance.getEntriesByType('resource').every(r => new URL(r.name).pathname.startsWith('/demo/'))")
+
+
+def test_demo_story_approve_then_two_seals_then_the_agent_resumes(site):
+    chrome = site
+    open_card(chrome, "d1:p1")
+    assert "retry_with_backoff" in text(chrome, "#messages")
+    chrome.click(APPROVE)
+    chrome.wait("location.hash === '#/s/d2:p1'")  # the next session that waits
+    chrome.wait("document.querySelector('#promptZone .two-seals') !== null")
+    assert "release/2.4" in text(chrome, "#messages") and "retry_with_backoff" not in text(chrome, "#messages")
+    chrome.click(APPROVE)
+    chrome.click("#sheet [data-y]")
+    chrome.wait("document.querySelector('#receipt.ok') !== null")
+    assert chrome.js("location.hash") == "#/s/d2:p1"  # nothing else waits, so the road to the agent stays in view
+    chrome.wait("document.querySelector('#messages .hint')?.textContent.includes('Pushing')")
+    chrome.wait("document.querySelector('#messages').textContent.includes('Pushed. CI is running')")
+    chrome.js("history.back()")
+    chrome.wait("document.querySelector('.card[data-key=\"d1:p1\"]').textContent.includes('All 12 billing tests pass')")
+
+
+def test_demo_refuses_an_answer_to_a_question_that_changed(site):
+    chrome = site
+    chrome.wait("document.querySelector('.card[data-key=\"d3:p1\"] [data-act=approve]') !== null")  # the third agent stops by itself
+    open_card(chrome, "d3:p1")
+    assert text(chrome, "#promptZone pre") == "terraform plan -out=tf.plan"
+    chrome.click(APPROVE)
+    chrome.wait("document.querySelector('#toasts .err')?.textContent.includes('changed')")
+    chrome.wait("document.querySelector('#promptZone pre')?.textContent === 'terraform apply tf.plan'")
+    assert chrome.js("document.querySelector('#promptZone .two-seals') !== null")
+    chrome.js("history.back()")
+    chrome.click("#history")
+    chrome.click("#sheet [data-tab=decisions]")
+    assert "terraform plan -out=tf.plan" in text(chrome, "#sheet [data-panel=decisions]")
 
 
 def test_demo_never_serves_a_stale_app():
     client = TestClient(demo.app)
-    for path in ("/", "/static/app.js", "/static/i18n.js", "/sw.js"):
+    for path in ("/", "/static/app.js", "/static/i18n.js", "/static/demo.js"):
         assert client.get(path).headers["cache-control"] == "no-cache", path
