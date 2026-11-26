@@ -64,6 +64,17 @@ def test_demo_story_approve_then_two_seals_then_the_agent_resumes(site):
     chrome.wait("document.querySelector('#messages').textContent.includes('Pushed. CI is running')")
     chrome.js("history.back()")
     chrome.wait("document.querySelector('.card[data-key=\"d1:p1\"]').textContent.includes('All 12 sync tests pass')")
+    assert "`" not in text(chrome, '.card[data-key="d1:p1"]')  # a card shows plain words, not markdown marks
+
+
+def test_a_file_link_in_the_demo_opens_the_fake_file_not_the_host(site):
+    chrome = site
+    open_card(chrome, "d2:p1")
+    href = chrome.js("""(() => { const a = document.querySelector('#messages a[href*="/file?path="]');
+        a.addEventListener('click', e => e.preventDefault()); a.click(); return a.href; })()""")
+    assert href.startswith("blob:"), href
+    chrome.js(f"void fetch({json.dumps(href)}).then(r => r.text()).then(body => {{ window.fileBody = body; }})")
+    chrome.wait("(window.fileBody || '').includes('Saved filters')")
 
 
 def test_demo_refuses_an_answer_to_a_question_that_changed(site):

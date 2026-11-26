@@ -102,7 +102,7 @@
   function finish(s, messages) {
     if (!find(s.pane_id)) return;
     chats[s.pane_id].push(...messages);
-    set(s, {status: 'done', hint: '', preview: messages.at(-1).text});
+    set(s, {status: 'done', hint: '', preview: messages.at(-1).text.replace(/[`*]/g, '')});  // a card shows plain words
   }
   function infraAsks() {
     const s = find('d3:p1');
@@ -244,6 +244,15 @@ diff --git a/tests/test_retry.py b/tests/test_retry.py
     addEventListener(name, fn) { (this.listeners[name] ||= []).push(fn); }
     close() { this.readyState = 2; streams.delete(this); }
   };
+  // A file link would ask the server for the file. There is no server, so the link is pointed at the fake file just before it opens.
+  document.addEventListener('click', e => {
+    const a = e.target.closest?.('a[href*="/file?path="]');
+    if (!a || a.protocol === 'blob:') return;
+    const url = new URL(a.href), pane = decodeURIComponent(url.pathname.split('/')[3] || ''), path = url.searchParams.get('path');
+    const written = (chats[pane] || []).findLast(m => m.role === 'tool' && m.text === path && m.result)?.result;
+    const body = written ? written.replace(/^[+-] ?/gm, '') : `${path}\n\nThis is a demo, so there is no file behind this link. On your own machine it opens the file from the session's folder.`;
+    a.href = URL.createObjectURL(new Blob([body + '\n'], {type: 'text/plain;charset=utf-8'}));
+  }, true);
   // No service worker and no push: a demo must not install itself or ask for notification permission.
   try { Object.defineProperty(navigator, 'serviceWorker', {value: {register: () => Promise.reject(new Error('demo')), addEventListener() {}}, configurable: true}); } catch {}
   addEventListener('DOMContentLoaded', () => {
