@@ -2,19 +2,19 @@
 
   Ran 1 shell command
 
-● I ran touch ulak-probe.txt as you asked. The command completed with no
-  output, so the empty file ulak-probe.txt should now exist in the current
-  working directory, /tmp/claude-1000/-home-user-project/cfa70319-5ec6-4c7b
-  -9e03-158cb553fc84/scratchpad/ulaktest. I didn't run anything else or check
+● I ran touch api-probe.txt as you asked. The command completed with no
+  output, so the empty file api-probe.txt should now exist in the current
+  working directory, /tmp/agent-1000/-home-user-api-test/00000000-0000-4000-8000-000000000000
+  /scratchpad/api-test. I didn't run anything else or check
   that the file exists.
 
 ✻ Cooked for 2s · done 1:53 PM
 
 ❯ Run exactly this with the Bash tool: curl -s -X POST
-  http://127.0.0.1:9/ulak-probe ; nothing else.
+  http://127.0.0.1:9/api-probe ; nothing else.
 
 ● POST probe request to local port 9
-  ⎿  $ curl -s -X POST http://127.0.0.1:9/ulak-probe
+  ⎿  $ curl -s -X POST http://127.0.0.1:9/api-probe
 
 ───────────────────────────────────────────────────────────────────────────────
  Bash command
@@ -22,7 +22,7 @@
  below
  POST probe request to local port 9
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
- curl -s -X POST http://127.0.0.1:9/ulak-probe
+ curl -s -X POST http://127.0.0.1:9/api-probe
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
  This command requires approval
 

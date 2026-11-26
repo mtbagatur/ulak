@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 with patch.object(Path, 'read_text', side_effect=FileNotFoundError):
     # Import with default settings so tests never depend on the live configuration.
-    import app as ulak
+    import app as api
 
 
 def test_rm_is_destructive(): assert is_destructive("rm -rf ./build", "/missing")
@@ -42,13 +42,13 @@ def test_finished_session_moves_to_idle_after_five_minutes():
     assert bucket("done", now - 300, now) == "idle"
 
 def test_tailscale_header_required(monkeypatch):
-    monkeypatch.setattr(ulak, 'allowed_login', 'user@example.test')
-    c=TestClient(ulak.app)
+    monkeypatch.setattr(api, 'allowed_login', 'user@example.test')
+    c=TestClient(api.app)
     assert c.get('/api/sessions').status_code == 403
 
 def test_orphan_approval_rejected(monkeypatch):
-    monkeypatch.setattr(ulak, 'allowed_login', 'user@example.test')
-    c=TestClient(ulak.app)
+    monkeypatch.setattr(api, 'allowed_login', 'user@example.test')
+    c=TestClient(api.app)
     r=c.post('/api/sessions/w404:p1/approve',headers={'Tailscale-User-Login':'user@example.test'},json={'decision':'approve'})
     assert r.status_code == 404
 
@@ -76,16 +76,16 @@ def test_passive_screen_reads_do_not_request_scrollback(monkeypatch):
 
     async def scenario():
         fake = ReadClient()
-        monkeypatch.setattr(ulak, "client", fake)
-        ulak.read_cache.clear()
-        assert await ulak.read_screen("w1:p1", "idle", force=True) == "visible"
+        monkeypatch.setattr(api, "client", fake)
+        api.read_cache.clear()
+        assert await api.read_screen("w1:p1", "idle", force=True) == "visible"
         # A user-opened chat may inspect bounded recent history; it must not reuse
         # the passive snapshot cached for the session card.
-        assert await ulak.read_screen("w1:p1", "idle", history=True) == "recent_unwrapped"
-        assert await ulak.read_screen("w1:p1", "blocked", history=True, force=True) == "visible"
+        assert await api.read_screen("w1:p1", "idle", history=True) == "recent_unwrapped"
+        assert await api.read_screen("w1:p1", "blocked", history=True, force=True) == "visible"
         assert [p["source"] for p in fake.params] == ["visible", "recent_unwrapped", "visible"]
         assert fake.params[1]["lines"] == 120
-        ulak.read_cache.clear()
+        api.read_cache.clear()
 
     asyncio.run(scenario())
 
@@ -96,24 +96,24 @@ def test_closed_pane_drops_ephemeral_state(monkeypatch):
 
     async def scenario():
         pane = "w99:p99"
-        monkeypatch.setattr(ulak, "client", CloseClient())
-        ulak.sessions[pane] = {"pane_id": pane}
-        ulak.raw_agents[pane] = {"pane_id": pane}
-        ulak.read_cache[pane] = (0, "stale", "idle", "visible")
-        ulak.pending_confirm[pane] = {"token": "test"}
-        ulak.pushed[pane] = "fingerprint"
-        ulak.work_started[pane] = 1
-        ulak.pane_ids.add(pane)
+        monkeypatch.setattr(api, "client", CloseClient())
+        api.sessions[pane] = {"pane_id": pane}
+        api.raw_agents[pane] = {"pane_id": pane}
+        api.read_cache[pane] = (0, "stale", "idle", "visible")
+        api.pending_confirm[pane] = {"token": "test"}
+        api.pushed[pane] = "fingerprint"
+        api.work_started[pane] = 1
+        api.pane_ids.add(pane)
 
-        await ulak.handle_event({"event": "pane.closed", "data": {"pane_id": pane}})
+        await api.handle_event({"event": "pane.closed", "data": {"pane_id": pane}})
 
-        assert pane not in ulak.sessions
-        assert pane not in ulak.raw_agents
-        assert pane not in ulak.read_cache
-        assert pane not in ulak.pending_confirm
-        assert pane not in ulak.pushed
-        assert pane not in ulak.work_started
-        assert pane not in ulak.pane_ids
+        assert pane not in api.sessions
+        assert pane not in api.raw_agents
+        assert pane not in api.read_cache
+        assert pane not in api.pending_confirm
+        assert pane not in api.pushed
+        assert pane not in api.work_started
+        assert pane not in api.pane_ids
 
     asyncio.run(scenario())
 
@@ -125,13 +125,13 @@ def test_initialize_subscribes_before_http_requests_without_loading_every_sessio
             async def subscribe(self, subscriptions): calls.append(subscriptions)
         async def forbidden_load(): raise AssertionError("startup must not wait for every pane")
         async def idle_event_loop(): return None
-        monkeypatch.setattr(ulak, "client", StartupClient())
-        monkeypatch.setattr(ulak, "load_all", forbidden_load)
-        monkeypatch.setattr(ulak, "event_loop", idle_event_loop)
-        monkeypatch.setattr(ulak, "load_since", lambda: None)
-        await asyncio.wait_for(ulak.initialize(), 0.1)
+        monkeypatch.setattr(api, "client", StartupClient())
+        monkeypatch.setattr(api, "load_all", forbidden_load)
+        monkeypatch.setattr(api, "event_loop", idle_event_loop)
+        monkeypatch.setattr(api, "load_since", lambda: None)
+        await asyncio.wait_for(api.initialize(), 0.1)
         await asyncio.sleep(0)
-        assert calls == [ulak.BASE_EVENTS]
+        assert calls == [api.BASE_EVENTS]
 
     asyncio.run(scenario())
 
@@ -143,7 +143,7 @@ CODEX = """• I need to run a command outside the sandbox.
 
   Would you like to run the following command?
 
-  $ touch ulak-probe2.txt
+  $ touch api-probe2.txt
 
 › 1. Yes, proceed (y)
   2. Yes, and don't ask again for this command (a)
@@ -153,13 +153,13 @@ CODEX = """• I need to run a command outside the sandbox.
 def test_claude_keys_from_options():
     p = parse_approval(CLAUDE)
     assert p["keys"] == {"approve": "1", "always": "2", "deny": "4"}
-    assert "curl -s -X POST http://127.0.0.1:9/ulak-probe" in p["command"]
+    assert "curl -s -X POST http://127.0.0.1:9/api-probe" in p["command"]
     assert "Ran 1 shell command" not in p["command"]
 
 def test_codex_keys_from_options():
     p = parse_approval(CODEX)
     assert p["keys"] == {"approve": "1", "always": "2", "deny": "3"}
-    assert "touch ulak-probe2.txt" in p["command"]
+    assert "touch api-probe2.txt" in p["command"]
 
 def test_no_prompt_no_approval():
     assert parse_approval("❯ 1. Yes this is just chat\nall done") is None
@@ -179,12 +179,12 @@ class FakeHerdr:
 
 def _setup(monkeypatch, text):
     fake = FakeHerdr(text)
-    monkeypatch.setattr(ulak, "client", fake)
-    monkeypatch.setattr(ulak, "allowed_login", "user@example.test")
-    monkeypatch.setattr(ulak, "sessions", {"w9:p1": {"pane_id": "w9:p1", "status": "blocked"}})
-    monkeypatch.setattr(ulak, "pane_ids", {"w9:p1"})
-    monkeypatch.setattr(ulak, "pending_confirm", {})
-    return fake, TestClient(ulak.app), {"Tailscale-User-Login": "user@example.test"}
+    monkeypatch.setattr(api, "client", fake)
+    monkeypatch.setattr(api, "allowed_login", "user@example.test")
+    monkeypatch.setattr(api, "sessions", {"w9:p1": {"pane_id": "w9:p1", "status": "blocked"}})
+    monkeypatch.setattr(api, "pane_ids", {"w9:p1"})
+    monkeypatch.setattr(api, "pending_confirm", {})
+    return fake, TestClient(api.app), {"Tailscale-User-Login": "user@example.test"}
 
 def test_stale_fingerprint_rejected(monkeypatch):
     fake, c, h = _setup(monkeypatch, CODEX)
@@ -224,7 +224,7 @@ def test_destructive_confirmation_rejects_changed_prompt(monkeypatch):
     first = c.post("/api/sessions/w9:p1/approve", headers=h, json={"decision": "approve", "fingerprint": fp}).json()
     assert first["confirm_required"]
 
-    fake.text = CLAUDE.replace("/ulak-probe", "/ulak-probe-changed")
+    fake.text = CLAUDE.replace("/api-probe", "/api-probe-changed")
     changed = c.post("/api/sessions/w9:p1/approve", headers=h, json={
         "decision": "approve", "fingerprint": fp, "confirm_token": first["confirm_token"]
     })
@@ -256,7 +256,7 @@ def test_deny_invalidates_confirmation_if_command_is_asked_again(monkeypatch):
 
 def test_observed_replacement_invalidates_confirmation_if_command_returns(monkeypatch):
     fake, client, headers = _setup(monkeypatch, CLAUDE)
-    monkeypatch.setattr(ulak, "read_cache", {})
+    monkeypatch.setattr(api, "read_cache", {})
     path = "/api/sessions/w9:p1/approve"
     action = {"decision": "approve", "fingerprint": parse_approval(CLAUDE)["fingerprint"]}
     first = client.post(path, headers=headers, json=action).json()
@@ -284,7 +284,7 @@ def test_expired_confirmation_requires_a_fresh_request(monkeypatch):
     path = "/api/sessions/w9:p1/approve"
     action = {"decision": "approve", "fingerprint": parse_approval(CLAUDE)["fingerprint"]}
     first = c.post(path, headers=h, json=action).json()
-    ulak.pending_confirm["w9:p1"]["expires"] = 0
+    api.pending_confirm["w9:p1"]["expires"] = 0
     assert c.post(path, headers=h, json={**action, "confirm_token": first["confirm_token"]}).status_code == 409
     assert fake.sent == []
     fresh = c.post(path, headers=h, json=action).json()
@@ -314,11 +314,11 @@ def test_prompt_replies_are_exclusive_per_pane_while_in_flight(monkeypatch):
     async def scenario():
         _, _, headers = _setup(monkeypatch, CODEX)
         fake = PausedHerdr()
-        monkeypatch.setattr(ulak, "client", fake)
-        ulak.sessions["w9:p2"] = {"pane_id": "w9:p2", "status": "idle"}
+        monkeypatch.setattr(api, "client", fake)
+        api.sessions["w9:p2"] = {"pane_id": "w9:p2", "status": "idle"}
         root = "/api/sessions/w9:p1"
         action = {"decision": "approve", "fingerprint": parse_approval(CODEX)["fingerprint"]}
-        async with AsyncClient(transport=ASGITransport(ulak.app), base_url="http://testserver", headers=headers) as c:
+        async with AsyncClient(transport=ASGITransport(api.app), base_url="http://testserver", headers=headers) as c:
             first = asyncio.create_task(c.post(f"{root}/approve", json=action))
             try:
                 await asyncio.wait_for(fake.read_started.wait(), 3)
@@ -353,8 +353,8 @@ def test_prompt_reply_can_be_retried_after_a_failed_rpc(monkeypatch):
 
     _, _, headers = _setup(monkeypatch, CODEX)
     fake = FailingHerdr(CODEX)
-    monkeypatch.setattr(ulak, "client", fake)
-    client = TestClient(ulak.app, raise_server_exceptions=False)
+    monkeypatch.setattr(api, "client", fake)
+    client = TestClient(api.app, raise_server_exceptions=False)
     path = "/api/sessions/w9:p1/approve"
     action = {"decision": "approve", "fingerprint": parse_approval(CODEX)["fingerprint"]}
     assert client.post(path, headers=headers, json=action).status_code == 500
@@ -415,7 +415,7 @@ def test_codex_choice_needs_enter_but_approval_keeps_digit():
 
 def test_trust_dialog_unnumbered_keys():
     p = parse_prompt(fx("claude-trust.txt"))
-    assert p["kind"] == "trust" and "ulak-test" in p["question"]
+    assert p["kind"] == "trust" and "api-test" in p["question"]
     assert [o["keys"] for o in p["options"]] == [["Enter"], ["Down", "Enter"]]
     assert p["options"][1]["label"] == "Yes, I trust this folder"
 
@@ -426,7 +426,7 @@ def test_multiselect_digit_only_and_checked():
 
 def test_claude_bash_approval_is_approval_kind():
     p = parse_prompt(CLAUDE)
-    assert p["kind"] == "approval" and "ulak-probe" in p["details"]
+    assert p["kind"] == "approval" and "api-probe" in p["details"]
     assert [o["keys"] for o in p["options"]] == [["1"], ["2"], ["4"]]
 
 def test_agy_file_edit_is_an_approval():
@@ -439,8 +439,8 @@ def test_agy_file_edit_is_an_approval():
 def test_agy_file_edit_overrides_terminal_done_status(monkeypatch):
     async def fake_read_screen(*args, **kwargs):
         return fx("agy-file-edit-approval.txt")
-    monkeypatch.setattr(ulak, "read_screen", fake_read_screen)
-    card = asyncio.run(ulak.make_card({"pane_id": "agy-test:p1", "agent": "agy", "agent_status": "done", "cwd": "/tmp/ulak-test"}))
+    monkeypatch.setattr(api, "read_screen", fake_read_screen)
+    card = asyncio.run(api.make_card({"pane_id": "agy-test:p1", "agent": "agy", "agent_status": "done", "cwd": "/tmp/api-test"}))
     assert card["status"] == card["bucket"] == "blocked"
     assert card["pending"]["kind"] == "approval"
     assert card["model"] == "Gemini 3.8 Flash"
@@ -458,10 +458,10 @@ def test_prompt_fingerprint_changes_with_options():
     assert a["fingerprint"] != b["fingerprint"]
 
 def test_push_blocked_payload_is_human():
-    s = {"pane_id": "w9:p1", "status": "blocked", "cwd": "/home/x/projeler/ulak"}
+    s = {"pane_id": "w9:p1", "status": "blocked", "cwd": "/home/user/api"}
     push = build_push(s, parse_prompt(CLAUDE), destructive=True)
-    assert push["title"] == "ulak · needs you" and push["body"].startswith("⚠ ") and "curl -s -X POST" in push["body"]
-    assert push["tag"] == "ulak-w9:p1" and push["url"] == "/?pane=w9:p1"
+    assert push["title"] == "api · needs you" and push["body"].startswith("⚠ ") and "curl -s -X POST" in push["body"]
+    assert push["tag"].endswith("w9:p1") and push["url"] == "/?pane=w9:p1"
 
 def test_push_done_uses_preview():
     push = build_push({"pane_id": "w1:p1", "status": "done", "cwd": "/a/api", "preview": "Devir yazıldı."})
@@ -497,13 +497,13 @@ def test_claude_jsonl_chat(tmp_path):
     assert msgs[2]["text"] == "ls -la" and msgs[2]["result"] == "a\nb" and model == "Sonnet 5.5"
 
 def test_project_name():
-    assert project_name({"cwd": "/home/b/shared/panel/"}) == "panel"
+    assert project_name({"cwd": "/home/user/api/"}) == "api"
 
 
 def test_approval_details_are_tidied():
     p = parse_prompt(CLAUDE)
     assert "Tip:" not in p["details"] and "below" not in p["details"] and "requires approval" not in p["details"]
-    assert p["details"].splitlines()[-1] == "curl -s -X POST http://127.0.0.1:9/ulak-probe"
+    assert p["details"].splitlines()[-1] == "curl -s -X POST http://127.0.0.1:9/api-probe"
 
 
 def test_live_ask_user_question_with_rule_inside_menu():
@@ -529,13 +529,13 @@ class FakeHerdr2(FakeHerdr):
 
 def _setup2(monkeypatch, text, agent="claude"):
     fake = FakeHerdr2(text)
-    monkeypatch.setattr(ulak, "client", fake)
-    monkeypatch.setattr(ulak, "allowed_login", "user@example.test")
+    monkeypatch.setattr(api, "client", fake)
+    monkeypatch.setattr(api, "allowed_login", "user@example.test")
     card = {"pane_id": "w9:p1", "status": "blocked", "agent": agent, "project": "x", "since": 0, "bucket": "blocked"}
-    monkeypatch.setattr(ulak, "sessions", {"w9:p1": card})
-    monkeypatch.setattr(ulak, "pane_ids", {"w9:p1"})
-    monkeypatch.setattr(ulak, "pending_confirm", {})
-    return fake, TestClient(ulak.app), {"Tailscale-User-Login": "user@example.test"}
+    monkeypatch.setattr(api, "sessions", {"w9:p1": card})
+    monkeypatch.setattr(api, "pane_ids", {"w9:p1"})
+    monkeypatch.setattr(api, "pending_confirm", {})
+    return fake, TestClient(api.app), {"Tailscale-User-Login": "user@example.test"}
 
 def test_choose_sends_option_keys(monkeypatch):
     fake, c, h = _setup2(monkeypatch, ASK)
@@ -552,7 +552,7 @@ def test_choose_rejects_stale_or_unknown(monkeypatch):
 
 def test_choose_rechecks_the_question_even_if_options_are_unchanged(monkeypatch):
     fake, c, h = _setup2(monkeypatch, ASK)
-    monkeypatch.setattr(ulak, "read_cache", {})
+    monkeypatch.setattr(api, "read_cache", {})
     path = "/api/sessions/w9:p1"
     before = c.get(f"{path}/chat", headers=h).json()["prompt"]
     fake.text = ASK.replace("Which database should we use?", "Which database should we keep?")
@@ -574,11 +574,11 @@ def test_unknown_status_remains_visible_and_rejects_old_approval(monkeypatch, tm
 
     _, c, h = _setup2(monkeypatch, CODEX, "codex")
     fake = SnapshotHerdr(CODEX)
-    monkeypatch.setattr(ulak, "client", fake)
-    monkeypatch.setattr(ulak, "STATE", tmp_path)
+    monkeypatch.setattr(api, "client", fake)
+    monkeypatch.setattr(api, "STATE", tmp_path)
     for name in ("raw_agents", "read_cache", "since"):
-        monkeypatch.setattr(ulak, name, {})
-    monkeypatch.setattr(ulak.refresh_pane, "labels", {}, raising=False)
+        monkeypatch.setattr(api, name, {})
+    monkeypatch.setattr(api.refresh_pane, "labels", {}, raising=False)
     fingerprint = parse_approval(CODEX)["fingerprint"]
 
     cards = c.get("/api/sessions", headers=h).json()
@@ -627,7 +627,7 @@ def test_start_session_validates_and_runs_fixed_command(monkeypatch, tmp_path):
 def test_quick_send(monkeypatch):
     fake, c, h = _setup2(monkeypatch, "")
     assert c.post("/api/quick", headers=h, json={"text": "selam"}).status_code == 404
-    ulak.sessions["wB:p1"] = {"pane_id": "wB:p1", "quick": True, "status": "idle"}
+    api.sessions["wB:p1"] = {"pane_id": "wB:p1", "quick": True, "status": "idle"}
     assert c.post("/api/quick", headers=h, json={"text": "selam"}).status_code == 200
     assert ("agent.prompt", {"target": "wB:p1", "text": "selam"}) in fake.calls
 
@@ -641,9 +641,9 @@ def test_cut_claude_command_is_deny_only(monkeypatch):
 
 
 def test_pins_roundtrip(monkeypatch, tmp_path):
-    monkeypatch.setattr(ulak, "STATE", tmp_path)
-    monkeypatch.setattr(ulak, "allowed_login", "user@example.test")
-    c = TestClient(ulak.app)
+    monkeypatch.setattr(api, "STATE", tmp_path)
+    monkeypatch.setattr(api, "allowed_login", "user@example.test")
+    c = TestClient(api.app)
     h = {"Tailscale-User-Login": "user@example.test"}
     assert c.get("/api/pins", headers=h).json() == {"pins": []}
     assert c.put("/api/pins", headers=h, json={"pins": ["a|b", "a|b", "c|d"]}).json() == {"pins": ["a|b", "c|d"]}
@@ -686,7 +686,7 @@ def test_tool_models_adds_discovered_and_validates(monkeypatch):
 
 def test_upload_saves_file_and_rejects_bad_types(monkeypatch, tmp_path):
     fake, c, h = _setup(monkeypatch, CODEX)
-    monkeypatch.setattr(ulak, "STATE", tmp_path)
+    monkeypatch.setattr(api, "STATE", tmp_path)
     r = c.post("/api/sessions/w9:p1/upload", headers={**h, "Content-Type": "image/png"}, content=b"\x89PNG-data")
     assert r.status_code == 200 and open(r.json()["path"], "rb").read() == b"\x89PNG-data" and r.json()["path"].endswith(".png")
     assert c.post("/api/sessions/w9:p1/upload", headers={**h, "Content-Type": "application/x-sh"}, content=b"x").status_code == 415
@@ -701,7 +701,7 @@ def test_session_file_route_serves_documents_within_workspace_only(monkeypatch, 
     (workspace / "notes.md").write_text("# Notes")
     outside = tmp_path / "outside.md"
     outside.write_text("private")
-    monkeypatch.setattr(ulak, "raw_agents", {"w9:p1": {"pane_id": "w9:p1", "cwd": str(workspace)}})
+    monkeypatch.setattr(api, "raw_agents", {"w9:p1": {"pane_id": "w9:p1", "cwd": str(workspace)}})
     response = c.get("/api/sessions/w9:p1/file", headers=h, params={"path": "notes.md"})
     assert response.status_code == 200 and response.text == "# Notes"
     assert response.headers["content-disposition"].startswith("inline")
@@ -712,8 +712,8 @@ def test_session_file_route_serves_documents_within_workspace_only(monkeypatch, 
 def test_limits_order_claude_codex_agy(monkeypatch, tmp_path):
     fake, c, h = _setup(monkeypatch, CODEX)
     f = tmp_path / "a.json"; f.write_text('{"h5": {"used_percentage": 1, "resets_at": 5}}')
-    monkeypatch.setattr(ulak, "CONFIG", {"limit_files": {"agy": str(f), "claude": str(f)}})
-    monkeypatch.setattr(ulak, "codex_limits", lambda: {"id": "codex", "label": "Codex", "updated": 1, "items": []})
+    monkeypatch.setattr(api, "CONFIG", {"limit_files": {"agy": str(f), "claude": str(f)}})
+    monkeypatch.setattr(api, "codex_limits", lambda: {"id": "codex", "label": "Codex", "updated": 1, "items": []})
     assert [p["id"] for p in c.get("/api/limits", headers=h).json()["providers"]] == ["claude", "codex", "agy"]
 
 
@@ -725,7 +725,7 @@ def test_tidy_details_keeps_only_the_command():
 
 def test_codex_idle_composer_is_chrome():
     from chat import clean_lines
-    screen = "› devam\n\n• Tamam.\n\n› Ask Codex to do anything\n\n  GPT-6-Luna default · ~/ortak/panel · Panel devri"
+    screen = "› devam\n\n• Tamam.\n\n› Ask Codex to do anything\n\n  GPT-6-Luna default · /home/user/api · API handoff"
     assert clean_lines(screen) == ["› devam", "", "• Tamam."]
 
 

@@ -1,11 +1,11 @@
 claude --model haiku
 🧰 araçlar açık · Ctrl-R geçmiş · z <klasör> · y dosya · lg git
-user@host:~/projeler/ulak-trust-test$ claude --model haiku
+user@host:/home/user/api-trust-test$ claude --model haiku
 
 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Accessing workspace:
 
- /home/user/projects/ulak-trust-test
+ /home/user/projects/api-trust-test
 
  Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open source project, or work from your team). If not, take
  a moment to review what's in this folder first.

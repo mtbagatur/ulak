@@ -2,7 +2,7 @@
 
   Would you like to run the following command?
 
-  $ touch ulak-probe2.txt
+  $ touch api-probe2.txt
 
 › 1. Yes, proceed (y)
   2. Yes, and don't ask again for this command (a)

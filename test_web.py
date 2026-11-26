@@ -261,7 +261,7 @@ def open_chrome(profile):
 
 
 @pytest.fixture
-def ulak(tmp_path):
+def api_fixture(tmp_path):
     with open_chrome(tmp_path) as chrome, serve_fake_api() as (api, url):
         yield chrome, api, url
 
@@ -272,8 +272,8 @@ def open_first(chrome, url):
     chrome.wait("!document.querySelector('#session').hidden && document.querySelector('#messages .msg') !== null")
 
 
-def test_inline_approval_ignores_second_keyboard_reply_while_request_is_pending(ulak):
-    chrome, api, url = ulak
+def test_inline_approval_ignores_second_keyboard_reply_while_request_is_pending(api_fixture):
+    chrome, api, url = api_fixture
     chrome.cdp("Page.navigate", url=url)
     chrome.wait("document.querySelector('[data-act=approve]') !== null")
     api.respond.clear()
@@ -291,8 +291,8 @@ def test_inline_approval_ignores_second_keyboard_reply_while_request_is_pending(
     assert api.requests == [{"decision": "approve", "fingerprint": APPROVAL["fingerprint"]}]
 
 
-def test_inline_approval_displays_entire_wrapped_command_at_320_px(ulak):
-    chrome, api, url = ulak
+def test_inline_approval_displays_entire_wrapped_command_at_320_px(api_fixture):
+    chrome, api, url = api_fixture
     command = "\n".join("echo " + character * 46 for character in "abc")
     api.publish_prompt({**APPROVAL, "details": command})
     chrome.resize(320, 640)
@@ -305,8 +305,8 @@ def test_inline_approval_displays_entire_wrapped_command_at_320_px(ulak):
     })()""")
 
 
-def test_destructive_approval_shows_command_and_focuses_dialog_before_sending(ulak):
-    chrome, api, url = ulak
+def test_destructive_approval_shows_command_and_focuses_dialog_before_sending(api_fixture):
+    chrome, api, url = api_fixture
     api.publish_prompt(DESTRUCTIVE)
     open_first(chrome, url)
     chrome.wait(f"document.querySelector({json.dumps(APPROVE)}) !== null")
@@ -335,8 +335,8 @@ def test_destructive_approval_shows_command_and_focuses_dialog_before_sending(ul
     assert api.replies == [{"decision": "approve", "fingerprint": DESTRUCTIVE["fingerprint"], "confirm_token": "test-confirmation"}]
 
 
-def test_changed_prompt_cannot_be_approved_by_old_confirmation_sheet(ulak):
-    chrome, api, url = ulak
+def test_changed_prompt_cannot_be_approved_by_old_confirmation_sheet(api_fixture):
+    chrome, api, url = api_fixture
     api.publish_prompt(DESTRUCTIVE)
     open_first(chrome, url)
     chrome.click(APPROVE)
@@ -349,8 +349,8 @@ def test_changed_prompt_cannot_be_approved_by_old_confirmation_sheet(ulak):
     assert len(api.requests) == 1 and api.requests[0]["fingerprint"] == DESTRUCTIVE["fingerprint"]
 
 
-def test_delayed_approval_navigation_does_not_interrupt_another_pane(ulak):
-    chrome, api, url = ulak
+def test_delayed_approval_navigation_does_not_interrupt_another_pane(api_fixture):
+    chrome, api, url = api_fixture
     open_first(chrome, url)
     chrome.js("""(() => {
         const schedule = window.setTimeout;
@@ -368,8 +368,8 @@ def test_delayed_approval_navigation_does_not_interrupt_another_pane(ulak):
     assert chrome.js("location.hash") == "#/s/fake:p2"
 
 
-def test_unknown_after_reply_times_out_without_resending_or_leaving_chat(ulak):
-    chrome, api, url = ulak
+def test_unknown_after_reply_times_out_without_resending_or_leaving_chat(api_fixture):
+    chrome, api, url = api_fixture
     open_first(chrome, url)
     chrome.click(APPROVE)
     chrome.wait("document.querySelector('#toasts .ok')?.textContent === 'Reply sent'")
@@ -379,8 +379,8 @@ def test_unknown_after_reply_times_out_without_resending_or_leaving_chat(ulak):
     assert len(api.replies) == len(api.requests) == 1
 
 
-def test_approval_409_shows_error_and_refreshes_prompt(ulak):
-    chrome, api, url = ulak
+def test_approval_409_shows_error_and_refreshes_prompt(api_fixture):
+    chrome, api, url = api_fixture
     chrome.cdp("Page.navigate", url=url + "#/s/" + PANE)
     chrome.wait("document.querySelector('#promptZone pre')?.textContent === 'pytest -q'")
     api.approval = OTHER_APPROVAL  # The backend sees the change before it is delivered to the browser.
@@ -391,8 +391,8 @@ def test_approval_409_shows_error_and_refreshes_prompt(ulak):
 
 
 @pytest.mark.parametrize("width", [320, 375, 1280])
-def test_unknown_state_and_long_labels_stay_visible(ulak, width):
-    chrome, api, url = ulak
+def test_unknown_state_and_long_labels_stay_visible(api_fixture, width):
+    chrome, api, url = api_fixture
     project = "project-" + "x" * 120
     workspace = "workspace-" + "y" * 120
     api.cards = [card("unknown", project=project, workspace_label=workspace), card("idle", pane_id="fake:p2", project=project)]
@@ -415,8 +415,8 @@ def test_unknown_state_and_long_labels_stay_visible(ulak, width):
     assert chrome.js("document.querySelector('#summary').textContent") == "Durumu bilinmeyen oturum: 1"
 
 
-def test_long_choice_prompt_scrolls_without_hiding_composer(ulak):
-    chrome, api, url = ulak
+def test_long_choice_prompt_scrolls_without_hiding_composer(api_fixture):
+    chrome, api, url = api_fixture
     api.publish_prompt({
         "kind": "choice", "fingerprint": "long-choice", "question": "Choose a test path " * 18,
         "options": [{"n": n, "label": f"Path-{n}-" + "long" * 30} for n in range(1, 8)],
@@ -435,8 +435,8 @@ def test_long_choice_prompt_scrolls_without_hiding_composer(ulak):
     })()""")
 
 
-def test_last_line_of_long_reply_is_reachable_above_composer(ulak):
-    chrome, api, url = ulak
+def test_last_line_of_long_reply_is_reachable_above_composer(api_fixture):
+    chrome, api, url = api_fixture
     api.cards = [card("done")]
     api.approval = None
     code = "\n".join("value_" * 28 for _ in range(22))
@@ -465,19 +465,19 @@ def test_last_line_of_long_reply_is_reachable_above_composer(ulak):
         })()""")
 
 
-def test_chat_urls_render_as_safe_clickable_links(ulak):
-    chrome, api, url = ulak
-    api.messages = [{"role": "assistant", "text": "Read [the guide](https://example.test/guide), https://example.test/docs, [the PDF](/home/user/project/notes.pdf) and /home/user/project/attached.pdf."}]
+def test_chat_urls_render_as_safe_clickable_links(api_fixture):
+    chrome, api, url = api_fixture
+    api.messages = [{"role": "assistant", "text": "Read [the guide](https://example.test/guide), https://example.test/docs, [the PDF](/home/user/api/notes.pdf) and /home/user/api/attached.pdf."}]
     open_first(chrome, url)
     chrome.wait("document.querySelector('#messages a[href*=example]') !== null")
     assert chrome.js("document.querySelector('#messages a')?.getAttribute('href')") == "https://example.test/guide"
     assert chrome.js("document.querySelector('#messages a')?.rel") == "noopener noreferrer"
-    assert chrome.js("new URL(document.querySelectorAll('#messages a')[2].href).searchParams.get('path')") == "/home/user/project/notes.pdf"
-    assert chrome.js("new URL(document.querySelectorAll('#messages a')[3].href).searchParams.get('path')") == "/home/user/project/attached.pdf"
+    assert chrome.js("new URL(document.querySelectorAll('#messages a')[2].href).searchParams.get('path')") == "/home/user/api/notes.pdf"
+    assert chrome.js("new URL(document.querySelectorAll('#messages a')[3].href).searchParams.get('path')") == "/home/user/api/attached.pdf"
 
 
-def test_slash_command_suggestions_filter_and_fill_composer(ulak):
-    chrome, api, url = ulak
+def test_slash_command_suggestions_filter_and_fill_composer(api_fixture):
+    chrome, api, url = api_fixture
     open_first(chrome, url)
     chrome.js("(() => { const input=document.querySelector('#message'); input.value='/'; input.dispatchEvent(new Event('input',{bubbles:true})); })()")
     chrome.wait("!document.querySelector('#slashOptions').hidden")
@@ -488,16 +488,16 @@ def test_slash_command_suggestions_filter_and_fill_composer(ulak):
     assert chrome.js("document.querySelector('#message').value") == "/compact "
 
 
-def test_open_chat_picks_up_new_message_without_manual_refresh(ulak):
-    chrome, api, url = ulak
+def test_open_chat_picks_up_new_message_without_manual_refresh(api_fixture):
+    chrome, api, url = api_fixture
     open_first(chrome, url)
     chrome.wait("document.querySelector('#messages .msg') !== null")
     api.messages = [{"role": "assistant", "text": "Fresh event-free update"}]
     wait_for(lambda: chrome.js("document.querySelector('#messages .msg')?.textContent === 'Fresh event-free update'"), "chat poll observes new message", timeout=3)
 
 
-def test_offline_refresh_retains_cards_and_sse_reconnect_loads_snapshot(ulak):
-    chrome, api, url = ulak
+def test_offline_refresh_retains_cards_and_sse_reconnect_loads_snapshot(api_fixture):
+    chrome, api, url = api_fixture
     api.cards = [card("working")]
     chrome.cdp("Page.navigate", url=url)
     chrome.wait("document.querySelector('.g-working .card') !== null")
@@ -516,8 +516,8 @@ def test_offline_refresh_retains_cards_and_sse_reconnect_loads_snapshot(ulak):
     assert chrome.js("document.querySelector('#conn').hidden")
 
 
-def test_open_chat_retains_draft_and_waits_for_fresh_data_after_sse_ready(ulak):
-    chrome, api, url = ulak
+def test_open_chat_retains_draft_and_waits_for_fresh_data_after_sse_ready(api_fixture):
+    chrome, api, url = api_fixture
     open_first(chrome, url)
     chrome.wait("document.querySelector('#conn').hidden")
     chrome.js("""(() => {
@@ -545,8 +545,8 @@ def test_open_chat_retains_draft_and_waits_for_fresh_data_after_sse_ready(ulak):
     assert chrome.js("document.querySelector('#message').value") == "A draft stays here"
 
 
-def test_sse_update_survives_a_late_list_snapshot(ulak):
-    chrome, api, url = ulak
+def test_sse_update_survives_a_late_list_snapshot(api_fixture):
+    chrome, api, url = api_fixture
     chrome.cdp("Page.navigate", url=url)
     chrome.wait("document.querySelector('#conn').hidden && document.querySelector('.g-blocked .card') !== null")
     api.list_started.clear()
@@ -561,8 +561,8 @@ def test_sse_update_survives_a_late_list_snapshot(ulak):
     assert chrome.js("document.querySelector('.g-blocked .card') === null")
 
 
-def test_stalled_snapshot_recovers_without_reopening_the_stream(ulak):
-    chrome, api, url = ulak
+def test_stalled_snapshot_recovers_without_reopening_the_stream(api_fixture):
+    chrome, api, url = api_fixture
     chrome.cdp("Page.navigate", url=url)
     chrome.wait("document.querySelector('#conn').hidden && document.querySelector('.g-blocked .card') !== null")
     chrome.js("""(() => {
