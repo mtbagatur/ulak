@@ -805,3 +805,34 @@ def test_agent_screen_is_shown_read_only_and_follows_the_terminal(api_fixture):
     api.screen = "$ pytest -q\n13 passed"
     chrome.wait("document.querySelector('#sheet pre.term')?.textContent.endsWith('13 passed')")
     assert not api.replies
+
+
+def test_subagents_show_as_cards_with_their_state(api_fixture):
+    chrome, api, url = api_fixture
+    long = "Map every caller of the retry helper across the billing and invoicing packages " * 2
+    api.messages = [
+        {"role": "assistant", "text": "Sending three out."},
+        {"role": "tool", "tool": "Bash", "text": "ls"},
+        {"role": "tool", "tool": "Agent", "text": long.strip(), "agent": {"kind": "Explore", "state": "running"}},
+        {"role": "tool", "tool": "Task", "text": "Check the changelog", "agent": {"kind": "", "state": "done"}, "result": "<i onclick=window.pwned=1>Two entries</i>"},
+        {"role": "tool", "tool": "Agent", "text": "Probe staging", "agent": {"kind": "general-purpose", "state": "failed"}},
+    ]
+    chrome.resize(320, 700)
+    open_first(chrome, url)
+    chrome.wait("document.querySelectorAll('#messages details.sub').length === 3")
+    assert chrome.js("document.querySelectorAll('#messages details.tool:not(.sub)').length") == 1
+    assert chrome.js("[...document.querySelectorAll('#messages details.sub')].map(d => d.dataset.state)") == ["running", "done", "failed"]
+    assert chrome.js("[...document.querySelectorAll('#messages details.sub .sub-state')].map(e => e.textContent)") == ["Working", "Done", "Failed"]
+    assert chrome.js("document.querySelector('#messages details.sub .sub-kind').textContent") == "Subagent · Explore"
+    assert chrome.js("document.querySelectorAll('#messages details.sub')[1].querySelector('.sub-kind').textContent") == "Subagent"
+    # The whole description is readable at 320 px and nothing spills out of the column.
+    assert chrome.js("(() => { const e=document.querySelector('#messages details.sub .sub-what'); return e.scrollWidth <= e.clientWidth + 1 && e.scrollHeight <= e.clientHeight + 1; })()")
+    assert chrome.js("document.documentElement.scrollWidth") <= 320
+    assert chrome.js("(() => { const edge=document.querySelector('#messages').getBoundingClientRect().right; return [...document.querySelectorAll('#messages details.sub')].every(d => d.getBoundingClientRect().right <= edge - 8); })()")
+    assert chrome.js("document.querySelector('#messages details.sub i') === null")
+    # A card that is still out keeps its place when it comes back: same element, new state.
+    chrome.js("window.firstSub = document.querySelector('#messages details.sub')")
+    api.messages = [dict(m, agent=dict(m["agent"], state="done")) if m.get("agent", {}).get("state") == "running" else m for m in api.messages]
+    wait_for(lambda: chrome.js("document.querySelector('#messages details.sub').dataset.state") == "done", "running subagent turns done", timeout=4)
+    assert chrome.js("document.querySelector('#messages details.sub') === window.firstSub")
+    assert chrome.js("document.querySelector('#messages details.sub .sub-state').textContent") == "Done"

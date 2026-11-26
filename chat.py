@@ -195,6 +195,10 @@ def _harness(d):
     return isinstance(origin, dict) and origin.get("kind") not in (None, "human")
 
 
+SUBAGENT_TOOLS = ("Agent", "Task")
+NOTICE_RE = re.compile(r"<tool-use-id>([\w-]+)</tool-use-id>.*?<status>(\w+)</status>")
+
+
 def claude_chat(path, max_messages=60, tail_bytes=700_000):
     """Parse the tail of a Claude JSONL file -> (messages, model)."""
     path = Path(path)
@@ -208,6 +212,10 @@ def claude_chat(path, max_messages=60, tail_bytes=700_000):
         lines = lines[1:]  # first line is probably cut in half
     msgs, model, tools = [], "", {}
     for line in lines:
+        if "<task-notification" in line:  # a background subagent stopped; the line type that carries this varies by version
+            for use_id, status in NOTICE_RE.findall(line):
+                if "agent" in tools.get(use_id, {}):
+                    tools[use_id]["agent"]["state"] = "done" if status == "completed" else "failed"
         try:
             d = json.loads(line)
         except ValueError:
@@ -222,8 +230,12 @@ def claude_chat(path, max_messages=60, tail_bytes=700_000):
             for block in content if isinstance(content, list) else []:
                 if block.get("type") == "text" and block.get("text", "").strip():
                     msgs.append({"role": "assistant", "text": block["text"].strip(), "ts": ts})
-                elif block.get("type") == "tool_use":
+                elif block.get("type") == "tool_use" and block.get("id") not in tools:
                     m = {"role": "tool", "tool": block.get("name", ""), "text": _tool_summary(block.get("name"), block.get("input")), "ts": ts}
+                    if m["tool"] in SUBAGENT_TOOLS:  # a card of its own: what it was sent to do and whether it is back
+                        inp = block.get("input") if isinstance(block.get("input"), dict) else {}
+                        m["text"] = str(inp.get("description") or "").strip()[:160]
+                        m["agent"] = {"kind": str(inp.get("subagent_type") or "")[:40], "state": "running"}
                     tools[block.get("id")] = m
                     msgs.append(m)
         else:
@@ -240,5 +252,11 @@ def claude_chat(path, max_messages=60, tail_bytes=700_000):
                     res = block.get("content")
                     if isinstance(res, list):
                         res = " ".join(x.get("text", "") for x in res if isinstance(x, dict))
-                    tools[block["tool_use_id"]]["result"] = str(res or "").strip()[:400]
+                    m = tools[block["tool_use_id"]]
+                    if "agent" in m:
+                        launch = d.get("toolUseResult")
+                        if isinstance(launch, dict) and launch.get("status") == "async_launched":
+                            continue  # still out there; the notice above closes it
+                        m["agent"]["state"] = "failed" if block.get("is_error") else "done"
+                    m["result"] = str(res or "").strip()[:400]
     return msgs[-max_messages:], pretty_model(model)

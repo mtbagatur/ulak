@@ -432,7 +432,16 @@ const md = value => {
   });
   return html.replace(/\u0001(\d+)\u0002/g, (_, n) => held[Number(n)] || '');
 };
+// A subagent is not one more tool line: it is someone sent off on an errand, so it gets a card that says what for and whether it is back.
+function subNode(d, m) {
+  const state = ['running', 'done', 'failed'].includes(m.agent.state) ? m.agent.state : 'running';
+  d.className = 'tool sub'; d.dataset.state = state;
+  d.innerHTML = `<summary><span class="sub-mark" aria-hidden="true"></span><span class="sub-body"><span class="sub-kind">${esc(t('subagent') + (m.agent.kind ? ' · ' + m.agent.kind : ''))}</span><span class="sub-what">${esc(m.text || t('subagent'))}</span></span><span class="sub-state">${esc(t({running: 'subRunning', done: 'subDone', failed: 'subFailed'}[state]))}</span></summary>${m.result ? `<pre>${md(m.result)}</pre>` : ''}`;
+  return d;
+}
+const subSig = m => m.agent ? `${m.agent.state}|${(m.result || '').length}` : '';
 function msgNode(m) {
+  if (m.role === 'tool' && m.agent) { const d = subNode(document.createElement('details'), m); d.dataset.sig = subSig(m); return d; }
   if (m.role === 'tool') {
     const d = document.createElement('details'); d.className = 'tool';
     d.innerHTML = `<summary><b>${esc(m.tool || t('tool'))}</b><span>${md(m.text.split('\n')[0])}</span></summary>${m.result || m.text.includes('\n') ? `<pre>${md(m.result || m.text)}</pre>` : ''}`;
@@ -454,7 +463,7 @@ async function loadChat(first = false) {
   try {
     const r = await readSnapshot(`/api/sessions/${encodeURIComponent(pane)}/chat`);
     if (chatRequest !== request || view !== state.view || generation !== snapshotGeneration) return;
-    const key = JSON.stringify([r.messages.length, r.messages.at(-1), r.hint]);
+    const key = JSON.stringify([r.messages.length, r.messages.at(-1), r.hint, r.messages.map(subSig).join()]);
     if (key !== state.chatHash) { state.chatHash = key; renderMessages(r, first); }
     renderPrompt(r.prompt, r.status);
     renderReceipt(r.receipt);
@@ -485,6 +494,8 @@ function renderMessages(r, first) {
   const msgs = r.messages;
   const same = state.rendered > 0 && state.sig === sig(msgs[Math.max(0, state.rendered - 1)]) && msgs.length >= state.rendered && state.source === r.source;
   if (!same) { box.innerHTML = ''; state.rendered = 0; }
+  // A subagent comes back long after its card was drawn: update that card where it stands.
+  msgs.slice(0, state.rendered).forEach((m, i) => { const el = box.children[i]; if (m.agent && el?.classList.contains('sub') && el.dataset.sig !== subSig(m)) { subNode(el, m); el.dataset.sig = subSig(m); } });
   for (const m of msgs.slice(state.rendered)) box.appendChild(msgNode(m));
   state.rendered = msgs.length; state.sig = sig(msgs[msgs.length - 1]); state.source = r.source;
   if (!msgs.length) box.innerHTML = `<div class="empty">${t('noChat')}</div>`;

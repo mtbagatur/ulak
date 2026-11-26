@@ -542,6 +542,45 @@ def test_claude_jsonl_chat(tmp_path):
     assert [m["role"] for m in msgs] == ["user", "assistant", "tool"]
     assert msgs[2]["text"] == "ls -la" and msgs[2]["result"] == "a\nb" and model == "Sonnet 5.5"
 
+def _agent_use(i, description, kind="Explore", name="Agent"):
+    return {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": i, "name": name, "input": {"description": description, "subagent_type": kind, "prompt": "long private brief"}}]}}
+
+
+def test_subagents_become_cards_with_a_state(tmp_path):
+    f = tmp_path / "s.jsonl"
+    launched = "Async agent launched successfully. (internal metadata)"
+    lines = [
+        _agent_use("a1", "Map the billing module"),
+        _agent_use("a1", "Map the billing module"),  # the transcript repeats a streamed block
+        {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "a1", "content": [{"type": "text", "text": "Three entry points."}]}]}},
+        _agent_use("a2", "Run the slow suite", "general-purpose"),
+        {"type": "user", "toolUseResult": {"status": "async_launched", "agentId": "x"}, "message": {"content": [{"type": "tool_result", "tool_use_id": "a2", "content": [{"type": "text", "text": launched}]}]}},
+        _agent_use("a3", "Check the changelog", "general-purpose", "Task"),
+        {"type": "user", "toolUseResult": {"status": "async_launched", "agentId": "y"}, "message": {"content": [{"type": "tool_result", "tool_use_id": "a3", "content": launched}]}},
+        {"type": "queue-operation", "operation": "enqueue", "content": "<task-notification>\n<tool-use-id>a3</tool-use-id>\n<status>completed</status>\n</task-notification>"},
+        _agent_use("a4", "Probe the staging API"),
+        {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "a4", "is_error": True, "content": "boom"}]}},
+        _agent_use("a5", "Background job that dies"),
+        {"type": "user", "toolUseResult": {"status": "async_launched"}, "message": {"content": [{"type": "tool_result", "tool_use_id": "a5", "content": launched}]}},
+        {"type": "attachment", "rendered": "<task-notification><tool-use-id>a5</tool-use-id><status>failed</status></task-notification>"},
+    ]
+    f.write_text("\n".join(json.dumps(l) for l in lines))
+    msgs, _ = claude_chat(f)
+    assert [(m["text"], m["agent"]["state"]) for m in msgs] == [
+        ("Map the billing module", "done"), ("Run the slow suite", "running"), ("Check the changelog", "done"),
+        ("Probe the staging API", "failed"), ("Background job that dies", "failed")]
+    assert msgs[0]["agent"]["kind"] == "Explore" and msgs[0]["result"] == "Three entry points."
+    assert "result" not in msgs[1] and "result" not in msgs[2]  # the launch receipt is plumbing, not an answer
+    assert "long private brief" not in json.dumps(msgs)
+
+
+def test_ordinary_tools_are_not_subagents(tmp_path):
+    f = tmp_path / "s.jsonl"
+    f.write_text(json.dumps({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "ls", "description": "Agent"}}]}}))
+    msgs, _ = claude_chat(f)
+    assert "agent" not in msgs[0]
+
+
 def test_project_name():
     assert project_name({"cwd": "/home/user/api/"}) == "api"
 

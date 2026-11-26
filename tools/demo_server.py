@@ -43,6 +43,9 @@ SESSIONS = [
 CHAT = [
     {"role": "user", "text": "The invoice test fails about one run in ten. Find out why."},
     {"role": "tool", "tool": "Grep", "text": "retry_with_backoff in src/billing", "result": "src/billing/retry.py:41: def retry_with_backoff(fn, tries=3):"},
+    {"role": "tool", "tool": "Agent", "text": "Find every caller of retry_with_backoff", "agent": {"kind": "Explore", "state": "done"},
+     "result": "4 callers: invoices.py, refunds.py, payouts.py, webhooks.py. Only invoices.py retries a write."},
+    {"role": "tool", "tool": "Agent", "text": "Run the billing suite 20 times and count the failures", "agent": {"kind": "general-purpose", "state": "running"}},
     {"role": "assistant", "text": "Found it. `retry_with_backoff` sleeps with a **fixed** delay, so two workers retry in lockstep and collide on the same invoice row."},
     {"role": "tool", "tool": "Edit", "text": "src/billing/retry.py", "result": "+    delay = base * 2 ** attempt + random.uniform(0, base)"},
     {"role": "assistant", "text": "I added jitter to the backoff. Let me run the billing tests to confirm."},
