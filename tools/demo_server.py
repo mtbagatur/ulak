@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 WEB = Path(__file__).resolve().parent.parent / "web"
@@ -146,6 +146,25 @@ async def projects():
 @app.post("/api/sessions/{pane}/upload")
 async def upload(pane: str):
     return {"ok": True, "path": "/home/you/.state/uploads/20261120-120000-abc123.png", "bytes": 1}
+
+
+@app.post("/api/sessions/{pane}/approve")
+async def approve(pane: str, request: Request):
+    item = next((session for session in SESSIONS if session["pane_id"] == pane), None)
+    if not item or not item.get("pending"):
+        return JSONResponse({"detail": "No demo approval is pending"}, status_code=409)
+    action = await request.json()
+    pending = item["pending"]
+    if action.get("fingerprint") != pending.get("fingerprint"):
+        return JSONResponse({"detail": "The approval screen changed; refresh"}, status_code=409)
+    if pending.get("destructive") and action.get("decision") == "approve":
+        if action.get("confirm_token") != "demo-confirmation":
+            return {"confirm_required": True, "confirm_token": "demo-confirmation", "command": pending["details"]}
+    item["pending"] = None
+    item["status"] = "done"
+    item["bucket"] = "done"
+    item["since"] = time.time()
+    return {"ok": True, "next": None}
 
 
 @app.get("/api/events")

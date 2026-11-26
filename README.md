@@ -6,6 +6,8 @@
 
 <p align="center"><a href="https://github.com/mtbagatur/ulak/actions/workflows/test.yml"><img src="https://github.com/mtbagatur/ulak/actions/workflows/test.yml/badge.svg" alt="Tests"></a></p>
 
+![Ulak demo: sessions, chat and approval on a phone](docs/demo.gif)
+
 <p align="center">
   <strong>Your coding agents, in your pocket.</strong><br>
   Approve a command, answer a question, send a nudge. Then get back to your coffee.
