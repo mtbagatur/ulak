@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ulak: a courier for your coding agents</title>
+<meta name="description" content="Answer your coding agents from your phone. Every yes is bound to the question you read. Served from your own computer over Tailscale: no terminal, no account, no relay.">
+<meta name="theme-color" content="#1c1520" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f3ecdf" media="(prefers-color-scheme: light)">
+<link rel="canonical" href="https://ulak.tahabagatur.com/">
+<link rel="alternate" hreflang="en" href="https://ulak.tahabagatur.com/">
+<link rel="alternate" hreflang="tr" href="https://ulak.tahabagatur.com/tr/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Ulak: a courier for your coding agents">
+<meta property="og:description" content="Answer your coding agents from your phone. Every yes is bound to the question you read. Served from your own computer over Tailscale: no terminal, no account, no relay.">
+<meta property="og:url" content="https://ulak.tahabagatur.com/">
+<meta property="og:image" content="https://ulak.tahabagatur.com/icon-512.png">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<header class="wrap top">
+  <a class="brand" href="./"><img src="icon.svg" alt="" width="34" height="34">Ulak</a>
+  <a href="tr/" lang="tr" hreflang="tr">Türkçe</a>
+  <a href="https://github.com/mtbagatur/ulak">GitHub</a>
+</header>
+<main>
+<div class="wrap hero">
+  <div>
+    <h1>A courier for your coding agents, not a key to your machine.</h1>
+    <p class="sub">The yes goes to the question you read.</p>
+    <p class="lead">An agent stops and asks: <em>run this?</em> You are not at your desk. The usual fix is a terminal on your phone, which puts the whole machine on your phone. Ulak carries one thing between you and your agents: the answer.</p>
+    <div class="cta">
+      <a class="btn seal" href="demo/"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke-dasharray="50 6.5" transform="rotate(-62 12 12)"/><path d="M9 8.5v4a3 3 0 0 0 6 0v-4"/></svg>Try it in your browser</a>
+      <a class="btn" href="https://github.com/mtbagatur/ulak">Read the source</a>
+    </div>
+    <ul class="facts"><li>Served from your own computer</li><li>Reached only over your Tailscale network</li><li>No account, no relay, no telemetry</li><li>For Claude Code, Codex and Antigravity in Herdr</li></ul>
+  </div>
+  <figure class="stage">
+    <a class="phone" href="demo/" data-demo="demo/" data-title="Ulak demo"><img src="demo.gif" alt="Ulak on a phone: an approval, a push that needs two seals, and an answer refused because the question changed" width="390" height="780"></a>
+    <figcaption class="wide-only">This is the real app over a pretend machine that lives in this tab. Tap around; nothing is sent anywhere.</figcaption>
+    <figcaption class="narrow-only">Recorded from the demo. Open it to play the three scenes yourself; nothing leaves your browser.</figcaption>
+  </figure>
+</div>
+
+<section id="road">
+  <div class="wrap">
+    <h2>One answer, four stops</h2>
+    <p class="intro">A tap on a small screen is easy to get wrong. Ulak follows your answer from the moment you read the question until the agent has it, and checks it at each stop.</p>
+    <ol class="road">
+      <li>
+        <span class="stop">Read</span>
+        <h3>Your yes is bound to what you read.</h3>
+        <p>Every approval carries a fingerprint of the prompt on your screen. If the agent is asking something else by the time your tap arrives, the server refuses it, shows you the new question and approves nothing.</p>
+        <figure><img src="shots/en/refused.png" alt="An approval refused because the question changed" width="390" height="780" loading="lazy"></figure>
+      </li>
+      <li class="two">
+        <span class="stop">Sealed twice</span>
+        <h3>Commands that leave a mark need two seals.</h3>
+        <p><code>rm</code>, <code>git push</code>, <code>ssh</code>, <code>terraform apply</code>, <code>kubectl delete</code>, cloud CLIs and your own patterns show the full command and ask again. The second seal expires in two minutes.</p>
+        <figure><img src="shots/en/second-seal.png" alt="A git push asking for a second confirmation with the full command" width="390" height="780" loading="lazy"></figure>
+      </li>
+      <li>
+        <span class="stop">Delivered</span>
+        <h3>You see the answer arrive.</h3>
+        <p>A line above the composer follows it: sent, on its way, agent received it. If the prompt never leaves the agent's screen, Ulak says so instead of assuming.</p>
+        <figure><img src="shots/en/delivered.png" alt="The line above the composer: approved, on its way, agent received it" width="390" height="780" loading="lazy"></figure>
+      </li>
+      <li class="done">
+        <span class="stop">On record</span>
+        <h3>Every decision is written down.</h3>
+        <p>Each approval, each refusal and each timeout is logged on your own machine with who, what and when. It is one tap away in the app.</p>
+        <figure><img src="shots/en/decisions.png" alt="The decision log: who answered what, and when the agent got it" width="390" height="780" loading="lazy"></figure>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<section id="others">
+  <div class="wrap">
+    <h2>When to pick something else</h2>
+    <p class="intro">Ulak is narrow on purpose. These projects solve the same problem with other trade-offs, and each is the better choice for some people.</p>
+    <ul class="choices">
+      <li><strong>Pick <a href="https://github.com/cobanov/herdrchat">HerdrChat</a></strong>when you want a native app, a real terminal, subagent and workflow transcripts, an iPad layout, or several computers in one list.</li>
+      <li><strong>Pick <a href="https://github.com/AltanS/collie">ColliePWA</a></strong>when you use tmux or zellij instead of Herdr, or want built-in voice input, themes and its durable-agent tools.</li>
+      <li><strong>Pick <a href="https://github.com/devswha/ovis">Ovis</a></strong>when your phone cannot join a tailnet, or you want one app across desktop, phone and browser.</li>
+      <li class="own"><strong>Pick Ulak</strong>when you want the phone to be able to answer and little else, every yes tied to the question you read, and code short enough to read before you trust it.</li>
+    </ul>
+    <p class="not"><b>What Ulak does not do:</b> no terminal, one computer, one person, Herdr only. A pane with no agent in it can be read but not written to. The <a href="https://github.com/mtbagatur/ulak#when-to-pick-something-else">full comparison</a> is in the README, read from each project's own README on 26 November 2026.</p>
+  </div>
+</section>
+
+<section id="run">
+  <div class="wrap">
+    <h2>Run it on your own machine</h2>
+    <p class="need">You need <a href="https://herdr.dev">Herdr</a> running your agents, <a href="https://tailscale.com">Tailscale</a> on the computer and on the phone, and Python 3.</p>
+<pre><code>git clone https://github.com/mtbagatur/ulak.git &amp;&amp; cd ulak
+ULAK_ALLOWED_LOGIN=you@github ULAK_VAPID_SUBJECT=mailto:you@example.com ./install.sh
+tailscale serve --bg 8765</code></pre>
+    <p class="after">Then open your machine's Tailscale address on the phone and add it to the home screen. Before you run it, read <a href="https://github.com/mtbagatur/ulak/blob/main/SECURITY.md">SECURITY.md</a>: what each check protects, and where it stops.</p>
+  </div>
+</section>
+</main>
+<footer>
+  <div class="wrap">
+    <span>Made by <a href="https://tahabagatur.com">Taha Bağatur</a></span>
+    <a href="https://github.com/mtbagatur/ulak">Source</a>
+    <a href="https://github.com/mtbagatur/ulak/blob/main/SECURITY.md">Security</a>
+    <a href="https://github.com/mtbagatur/ulak/blob/main/LICENSE">MIT</a>
+  </div>
+</footer>
+<script src="site.js"></script>
+</body>
+</html>

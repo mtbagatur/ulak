@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ulak: kod ajanlarına ulak</title>
+<meta name="description" content="Kod ajanlarına telefondan cevap ver. Her evet, okuduğun soruya bağlıdır. Kendi bilgisayarından, Tailscale üzerinden çalışır: terminal yok, hesap yok, aracı sunucu yok.">
+<meta name="theme-color" content="#1c1520" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f3ecdf" media="(prefers-color-scheme: light)">
+<link rel="canonical" href="https://ulak.tahabagatur.com/tr/">
+<link rel="alternate" hreflang="en" href="https://ulak.tahabagatur.com/">
+<link rel="alternate" hreflang="tr" href="https://ulak.tahabagatur.com/tr/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Ulak: kod ajanlarına ulak">
+<meta property="og:description" content="Kod ajanlarına telefondan cevap ver. Her evet, okuduğun soruya bağlıdır. Kendi bilgisayarından, Tailscale üzerinden çalışır: terminal yok, hesap yok, aracı sunucu yok.">
+<meta property="og:url" content="https://ulak.tahabagatur.com/tr/">
+<meta property="og:image" content="https://ulak.tahabagatur.com/icon-512.png">
+<link rel="icon" href="../icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<link rel="stylesheet" href="../site.css">
+</head>
+<body>
+<header class="wrap top">
+  <a class="brand" href="./"><img src="../icon.svg" alt="" width="34" height="34">Ulak</a>
+  <a href="../" lang="en" hreflang="en">English</a>
+  <a href="https://github.com/mtbagatur/ulak">GitHub</a>
+</header>
+<main>
+<div class="wrap hero">
+  <div>
+    <h1>Ajanlarına ulak, makinene anahtar değil.</h1>
+    <p class="sub">Evet, okuduğun soruya gider.</p>
+    <p class="lead">Ajan durur ve sorar: <em>bunu çalıştırayım mı?</em> Masanda değilsin. Bilinen çözüm telefona terminal kurmaktır; o da bütün makineyi telefona taşır. Ulak seninle ajanların arasında tek şey taşır: cevabı.</p>
+    <div class="cta">
+      <a class="btn seal" href="../demo/"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke-dasharray="50 6.5" transform="rotate(-62 12 12)"/><path d="M9 8.5v4a3 3 0 0 0 6 0v-4"/></svg>Tarayıcında dene</a>
+      <a class="btn" href="https://github.com/mtbagatur/ulak">Kaynağı oku</a>
+    </div>
+    <ul class="facts"><li>Kendi bilgisayarından sunulur</li><li>Yalnız kendi Tailscale ağından ulaşılır</li><li>Hesap, aracı sunucu ve telemetri yok</li><li>Herdr içindeki Claude Code, Codex ve Antigravity için</li></ul>
+  </div>
+  <figure class="stage">
+    <a class="phone" href="../demo/" data-demo="../demo/" data-title="Ulak demosu"><img src="../shots/tr/two-seals.png" alt="Telefonda Ulak: git push iki mühür istiyor" width="390" height="780"></a>
+    <figcaption class="wide-only">Bu, gerçek uygulamanın bu sekmede yaşayan sahte bir makine üzerinde çalışan hâli. Dilediğin gibi dokun; hiçbir yere bir şey gitmez.</figcaption>
+    <figcaption class="narrow-only">Demodan bir kare. Üç sahneyi kendin oynamak için demoyu aç; tarayıcından dışarı bir şey çıkmaz.</figcaption>
+  </figure>
+</div>
+
+<section id="road">
+  <div class="wrap">
+    <h2>Bir cevabın dört durağı</h2>
+    <p class="intro">Küçük ekranda bir dokunuş kolayca yanlış yere gider. Ulak cevabını, soruyu okuduğun andan ajanın eline geçene kadar izler ve her durakta denetler.</p>
+    <ol class="road">
+      <li>
+        <span class="stop">Okundu</span>
+        <h3>Evet, okuduğun soruya bağlıdır.</h3>
+        <p>Her onay, ekranındaki sorunun parmak izini taşır. Dokunuşun vardığında ajan başka bir şey soruyorsa sunucu cevabı reddeder, yeni soruyu gösterir ve hiçbir şeyi onaylamaz.</p>
+        <figure><img src="../shots/tr/refused.png" alt="Soru değiştiği için reddedilen onay" width="390" height="780" loading="lazy"></figure>
+      </li>
+      <li class="two">
+        <span class="stop">İki mühür</span>
+        <h3>İz bırakan komut iki mühür ister.</h3>
+        <p><code>rm</code>, <code>git push</code>, <code>ssh</code>, <code>terraform apply</code>, <code>kubectl delete</code>, bulut CLI'ları ve kendi eklediğin kalıplar komutun tamamını gösterir ve bir kez daha sorar. İkinci mührün süresi iki dakikadır.</p>
+        <figure><img src="../shots/tr/second-seal.png" alt="git push için komutun tamamıyla ikinci onay" width="390" height="780" loading="lazy"></figure>
+      </li>
+      <li>
+        <span class="stop">Ulaştı</span>
+        <h3>Cevabın vardığını görürsün.</h3>
+        <p>Yazı alanının üstündeki çizgi cevabı izler: gönderildi, yolda, ajan aldı. Soru ajanın ekranından kalkmazsa Ulak bunu söyler, varsaymaz.</p>
+        <figure><img src="../shots/tr/delivered.png" alt="Yazı alanının üstündeki çizgi: onaylandı, yolda, ajan aldı" width="390" height="780" loading="lazy"></figure>
+      </li>
+      <li class="done">
+        <span class="stop">Kayıtta</span>
+        <h3>Her karar deftere geçer.</h3>
+        <p>Her onay, her ret ve her zaman aşımı kimin, neyi, ne zaman cevapladığıyla birlikte kendi makinende kaydedilir. Uygulamada bir dokunuş uzaklıktadır.</p>
+        <figure><img src="../shots/tr/decisions.png" alt="Karar kaydı: kim neyi cevapladı, ajan ne zaman aldı" width="390" height="780" loading="lazy"></figure>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<section id="others">
+  <div class="wrap">
+    <h2>Ne zaman başkasını seçmeli</h2>
+    <p class="intro">Ulak bilerek dardır. Şu projeler aynı sorunu başka tercihlerle çözer ve her biri bazıları için daha doğru seçimdir.</p>
+    <ul class="choices">
+      <li><strong><a href="https://github.com/cobanov/herdrchat">HerdrChat</a></strong>yerel uygulama, gerçek terminal, alt ajan ve iş akışı dökümleri, iPad düzeni ya da tek listede birkaç bilgisayar istiyorsan.</li>
+      <li><strong><a href="https://github.com/AltanS/collie">ColliePWA</a></strong>Herdr yerine tmux ya da zellij kullanıyorsan, yerleşik sesle yazma, temalar ve kalıcı ajan araçlarını istiyorsan.</li>
+      <li><strong><a href="https://github.com/devswha/ovis">Ovis</a></strong>telefonun bir tailnet'e katılamıyorsa ya da masaüstü, telefon ve tarayıcıda tek uygulama istiyorsan.</li>
+      <li class="own"><strong>Ulak</strong>telefon cevap verebilsin ama fazlasını yapamasın, her evet okuduğun soruya bağlı olsun ve kod güvenmeden önce okunacak kadar kısa olsun istiyorsan.</li>
+    </ul>
+    <p class="not"><b>Ulak'ın yapmadıkları:</b> terminal yok, tek bilgisayar, tek kişi, yalnız Herdr. İçinde ajan olmayan panel okunur ama ona yazılmaz. <a href="https://github.com/mtbagatur/ulak#when-to-pick-something-else">Karşılaştırmanın tamamı</a> README'de; her projenin kendi README'sinden 26 Kasım 2026'da okundu.</p>
+  </div>
+</section>
+
+<section id="run">
+  <div class="wrap">
+    <h2>Kendi makinende çalıştır</h2>
+    <p class="need">Gerekenler: ajanlarını çalıştıran <a href="https://herdr.dev">Herdr</a>, bilgisayarda ve telefonda <a href="https://tailscale.com">Tailscale</a>, bir de Python 3.</p>
+<pre><code>git clone https://github.com/mtbagatur/ulak.git &amp;&amp; cd ulak
+ULAK_ALLOWED_LOGIN=you@github ULAK_VAPID_SUBJECT=mailto:you@example.com ./install.sh
+tailscale serve --bg 8765</code></pre>
+    <p class="after">Sonra telefonda makinenin Tailscale adresini aç ve ana ekrana ekle. Çalıştırmadan önce <a href="https://github.com/mtbagatur/ulak/blob/main/SECURITY.md">SECURITY.md</a> dosyasını oku: her denetim neyi korur, nerede durur.</p>
+  </div>
+</section>
+</main>
+<footer>
+  <div class="wrap">
+    <span><a href="https://tahabagatur.com/tr/">Taha Bağatur</a> yaptı</span>
+    <a href="https://github.com/mtbagatur/ulak">Kaynak</a>
+    <a href="https://github.com/mtbagatur/ulak/blob/main/SECURITY.md">Güvenlik</a>
+    <a href="https://github.com/mtbagatur/ulak/blob/main/LICENSE">MIT</a>
+  </div>
+</footer>
+<script src="../site.js"></script>
+</body>
+</html>
