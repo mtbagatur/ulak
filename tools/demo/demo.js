@@ -174,9 +174,22 @@ diff --git a/tests/test_retry.py b/tests/test_retry.py
 +    waits = {backoff(3) for _ in range(50)}
 +    assert len(waits) > 1 and all(2.0 <= w <= 4.0 for w in waits)
 `;
-  const changes = pane => ({repo: true, more_files: 0, truncated: false, ts: now(), ...(pane === 'd1:p1'
-    ? {branch: 'retry-backoff', files: [{code: 'M', path: 'src/sync/retry.py'}, {code: 'M', path: 'tests/test_retry.py'}, {code: '?', path: 'docs/backoff.md'}], diff: DIFF}
-    : {branch: 'main', files: [], diff: ''})});
+  const RELEASE_DIFF = `diff --git a/package.json b/package.json
+--- a/package.json
++++ b/package.json
+@@ -1,5 +1,5 @@
+ {
+   "name": "tugra",
+-  "version": "2.3.0",
++  "version": "2.4.0",
+   "private": true,
+   "scripts": {
+`;
+  const CHANGED_FILES = {
+    'd1:p1': {branch: 'retry-backoff', files: [{code: 'M', path: 'src/sync/retry.py'}, {code: 'M', path: 'tests/test_retry.py'}, {code: '?', path: 'docs/backoff.md'}], diff: DIFF},
+    'd2:p1': {branch: 'release/2.4', files: [{code: 'M', path: 'package.json'}, {code: '?', path: 'docs/releases/2.4.md'}], diff: RELEASE_DIFF},
+  };
+  const changes = pane => ({repo: true, more_files: 0, truncated: false, ts: now(), ...(CHANGED_FILES[pane] || {branch: 'main', files: [], diff: ''})});
   const COMMANDS = [...['/clear', '/compact', '/help', '/model'].map(name => ({name, description: '', source: 'builtin'})),
     {name: '/review', description: 'Review the current diff before it ships', source: 'project'},
     {name: '/release-notes', description: 'Draft release notes from merged changes', source: 'project'},

@@ -122,3 +122,13 @@ def test_demo_decisions_include_a_menu_choice(site):
     shown = text(chrome, "#sheet [data-panel=decisions]")
     assert "Chosen" in shown and "Which month should the backfill start from?" in shown and "> March 2026" in shown
     assert chrome.js("[...document.querySelectorAll('#sheet, #sheet .audit')].every(el => el.scrollWidth <= el.clientWidth)")
+
+
+def test_demo_release_session_has_changes_to_show(site):
+    chrome = site
+    open_card(chrome, "d2:p1")
+    chrome.click("#sMenu")
+    chrome.click("#sheet [data-d]")
+    chrome.wait("document.querySelector('#sheet .diff') !== null")
+    shown = text(chrome, "#sheet")
+    assert "release/2.4" in shown and "docs/releases/2.4.md" in shown and '"version": "2.4.0"' in shown
