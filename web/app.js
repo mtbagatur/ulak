@@ -8,6 +8,13 @@ const TOOLNAME = {claude: 'Claude', codex: 'Codex', agy: 'agy', terminal: 'Termi
 const store = {get(k){try{return localStorage.getItem(k)}catch{return null}}, set(k,v){try{localStorage.setItem(k,v)}catch{}}};
 
 const state = {sessions: new Map(), current: null, view: 0, chatHash: '', rendered: 0, prompt: null, idleOpen: store.get('idleOpen') === '1', busy: new Set(), live: false};
+const presenceId = crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); });
+function reportPresence(visible = !document.hidden) {
+  fetch('/api/presence', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({client_id: presenceId, visible}), keepalive: true}).catch(() => {});
+}
+reportPresence(!document.hidden);
+setInterval(() => { if (!document.hidden) reportPresence(true); }, 4000);
+window.addEventListener('pagehide', () => reportPresence(false));
 
 // ---------- network ----------
 async function api(url, body, method, signal) {
@@ -321,6 +328,7 @@ function connect() {
   };
 }
 document.addEventListener('visibilitychange', () => {
+  reportPresence(!document.hidden);
   if (document.hidden) clearRetry();
   else resumeConnection();
 });

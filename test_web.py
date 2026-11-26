@@ -47,6 +47,7 @@ class FakeAPI:
         self.events = []
         self.requests = []
         self.replies = []
+        self.presence = []
         self.respond = threading.Event()
         self.respond.set()
         self.ended = threading.Event()
@@ -139,11 +140,15 @@ class Handler(SimpleHTTPRequestHandler):
             pass
 
     def do_POST(self):
+        api = self.api
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        if self.path == "/api/presence":
+            api.presence.append(body)
+            self.json({"ok": True})
+            return
         if self.path != "/api/sessions/fake%3Ap1/approve":
             self.send_error(404)
             return
-        api = self.api
-        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         api.requests.append(body)
         assert api.respond.wait(8), "test did not release the held approval"
         prompt = api.approval
@@ -494,6 +499,21 @@ def test_open_chat_picks_up_new_message_without_manual_refresh(api_fixture):
     chrome.wait("document.querySelector('#messages .msg') !== null")
     api.messages = [{"role": "assistant", "text": "Fresh event-free update"}]
     wait_for(lambda: chrome.js("document.querySelector('#messages .msg')?.textContent === 'Fresh event-free update'"), "chat poll observes new message", timeout=3)
+
+
+def test_visibility_changes_update_server_presence(api_fixture):
+    chrome, api, url = api_fixture
+    open_first(chrome, url)
+    wait_for(lambda: api.presence and api.presence[-1]["visible"], "initial visible presence")
+    client_id = api.presence[-1]["client_id"]
+    first_count = len(api.presence)
+    wait_for(lambda: len(api.presence) > first_count and api.presence[-1]["visible"], "periodic visible heartbeat", timeout=6)
+    chrome.js("Object.defineProperty(document, 'hidden', {configurable:true, value:true}); document.dispatchEvent(new Event('visibilitychange'))")
+    wait_for(lambda: api.presence and not api.presence[-1]["visible"], "hidden presence")
+    assert api.presence[-1]["client_id"] == client_id
+    chrome.js("Object.defineProperty(document, 'hidden', {configurable:true, value:false}); document.dispatchEvent(new Event('visibilitychange'))")
+    wait_for(lambda: api.presence and api.presence[-1]["visible"], "visible presence restored")
+    assert api.presence[-1]["client_id"] == client_id
 
 
 def test_offline_refresh_retains_cards_and_sse_reconnect_loads_snapshot(api_fixture):

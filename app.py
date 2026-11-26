@@ -47,6 +47,8 @@ pane_ids = set()
 read_cache = {}     # pane -> (time, screen text, status, read source)
 pushed = {}         # pane -> last pushed prompt fingerprint
 work_started = {}   # pane -> when the current working stretch began (kept while blocked)
+client_presence = {} # opaque browser UUID -> last visible heartbeat timestamp
+PRESENCE_TTL = 10
 gate = NotificationGate()
 client = HerdrClient()
 allowed_login = os.environ.get("ULAK_ALLOWED_LOGIN", "")
@@ -100,6 +102,11 @@ class Action(BaseModel):
     cwd: str | None = None
     tool: str | None = None
     model: str | None = None
+
+
+class Presence(BaseModel):
+    client_id: str
+    visible: bool
 
 
 # --- helpers -------------------------------------------------------------
@@ -398,7 +405,12 @@ async def push_after_grace(pane, status, worked=None):
         return  # a quick turn: the phone does not need to buzz
     await asyncio.sleep(10)
     item = sessions.get(pane)
-    if not item or item.get("status") != status or not gate.allow(pane, status, time.time()):
+    now = time.time()
+    if not item or item.get("status") != status:
+        return
+    if any(now - seen <= PRESENCE_TTL for seen in client_presence.values()):
+        return
+    if not gate.allow(pane, status, now):
         return
     prompt, destructive = None, False
     if status == "blocked":
@@ -755,6 +767,21 @@ async def events(request: Request):
         finally:
             subscribers.discard(q)
     return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.post("/api/presence")
+async def update_presence(presence: Presence):
+    if not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", presence.client_id, re.I):
+        raise HTTPException(400, "Invalid client id")
+    now = time.time()
+    for client_id, seen in list(client_presence.items()):
+        if now - seen > PRESENCE_TTL:
+            client_presence.pop(client_id, None)
+    if presence.visible:
+        client_presence[presence.client_id] = now
+    else:
+        client_presence.pop(presence.client_id, None)
+    return {"ok": True}
 
 
 @app.get("/api/notifications")

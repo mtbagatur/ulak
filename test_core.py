@@ -136,6 +136,42 @@ def test_initialize_subscribes_before_http_requests_without_loading_every_sessio
     asyncio.run(scenario())
 
 
+def test_fresh_visible_presence_suppresses_push_but_hidden_or_stale_presence_does_not(monkeypatch):
+    async def scenario():
+        now = 1000.0
+        monkeypatch.setattr(api, "sessions", {"w9:p1": {"pane_id": "w9:p1", "status": "done"}})
+        monkeypatch.setattr(api, "client_presence", {"00000000-0000-4000-8000-000000000001": now}, raising=False)
+        monkeypatch.setattr(api, "gate", type("Gate", (), {"allow": lambda self, *args: True})())
+        monkeypatch.setattr(api.time, "time", lambda: now)
+        async def no_wait(_): return None
+        monkeypatch.setattr(api.asyncio, "sleep", no_wait)
+        sends = []
+        async def send(*args): sends.append(args)
+        monkeypatch.setattr(api, "send_push", send)
+
+        await api.push_after_grace("w9:p1", "done", 120)
+        assert sends == []
+
+        api.client_presence["00000000-0000-4000-8000-000000000001"] = now - 11
+        await api.push_after_grace("w9:p1", "done", 120)
+        assert len(sends) == 1
+
+
+    asyncio.run(scenario())
+
+
+def test_presence_endpoint_records_only_fresh_visible_tabs(monkeypatch):
+    _, c, h = _setup(monkeypatch, CODEX)
+    monkeypatch.setattr(api, "client_presence", {}, raising=False)
+    client_id = "00000000-0000-4000-8000-000000000001"
+    visible = c.post("/api/presence", headers=h, json={"client_id": client_id, "visible": True})
+    assert visible.status_code == 200 and client_id in api.client_presence
+    hidden = c.post("/api/presence", headers=h, json={"client_id": client_id, "visible": False})
+    assert hidden.status_code == 200 and client_id not in api.client_presence
+    invalid = c.post("/api/presence", headers=h, json={"client_id": "tab", "visible": True})
+    assert invalid.status_code == 400
+
+
 # --- Review tests: real screens, fresh-read approval ---
 from core import parse_approval
 CLAUDE = (Path(__file__).parent / "fixtures/claude-bash-approval.txt").read_text()
