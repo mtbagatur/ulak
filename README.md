@@ -11,6 +11,8 @@
 
 <p align="center"><a href="https://github.com/mtbagatur/ulak/actions/workflows/test.yml"><img src="https://github.com/mtbagatur/ulak/actions/workflows/test.yml/badge.svg" alt="Tests"></a></p>
 
+<p align="center"><a href="https://ulak.tahabagatur.com/"><strong>ulak.tahabagatur.com</strong></a> · <a href="https://ulak.tahabagatur.com/demo/">Try the live demo in your browser</a> (nothing to install, no real machine behind it)</p>
+
 ![Ulak demo: an approval, a push that needs two seals, and an answer refused because the question changed](docs/demo.gif)
 
 ## The problem
