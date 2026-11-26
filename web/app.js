@@ -781,7 +781,10 @@ if (/iPhone|iPad|iPod/.test(navigator.userAgent)) document.documentElement.class
 if (window.visualViewport) {
   let baseH = 0;
   const sa = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
-  if (sa) document.documentElement.classList.add('sa');
+  // Only a home-screen app that draws under the status bar (black-translucent, top inset > 0) loses its bottom strip; one that starts below the bar reaches the screen bottom and keeps the real inset.
+  const probe = document.createElement('div'); probe.style.cssText = 'position:fixed;visibility:hidden;padding-top:env(safe-area-inset-top)'; document.body.append(probe);
+  const insetTop = parseFloat(getComputedStyle(probe).paddingTop) || 0; probe.remove();
+  if (sa && insetTop > 0) document.documentElement.classList.add('sa');
   const fit = () => {
     baseH = Math.max(baseH, visualViewport.height);  // tallest viewport seen = keyboard closed (innerHeight also shrinks in a home-screen app)
     const kb = baseH - visualViewport.height > 120;
