@@ -82,31 +82,6 @@
   </div>
 </section>
 
-<section id="mark">
-  <div class="wrap">
-    <svg class="sign" viewBox="0 0 32 32" aria-hidden="true"><use class="w" href="#wax"/><circle class="r" cx="16" cy="16" r="9.6"/><path class="u" d="M12 11.2v5.2a4 4 0 0 0 8 0v-5.2"/></svg>
-    <h2>İşaret ne söylüyor</h2>
-    <p class="intro">İşaret, içine U basılmış bir mum mühür. Üç parçasının her biri uygulamanın yaptığı bir şeyi anlatır ve her birine içeride yeniden rastlarsın.</p>
-    <ol class="parts">
-      <li>
-        <svg viewBox="0 0 32 32" aria-hidden="true"><use class="e" href="#wax"/></svg>
-        <h3>Elle basılmış mum.</h3>
-        <p>Kenarı hiçbir zaman aynı çıkmaz, çünkü mühür bilerek basılır. Uygulamada Onayla bir mühürdür: bastığında işaret, cevapladığın sorunun üstüne düşer. İz bırakan komut iki mühür ister.</p>
-      </li>
-      <li>
-        <svg viewBox="0 0 32 32" aria-hidden="true"><use class="g" href="#wax"/><circle class="h t" cx="16" cy="16" r="9.6"/></svg>
-        <h3>Baskının bıraktığı halka.</h3>
-        <p>Mühür, basıldığı sayfaya aittir. Evet'in okuduğun soruya bağlıdır: ajan başka bir soruya geçtiyse cevap reddedilir ve ret kayda düşer.</p>
-      </li>
-      <li>
-        <svg viewBox="0 0 32 32" aria-hidden="true"><use class="g" href="#wax"/><path class="h" d="M12 11.2v5.2a4 4 0 0 0 8 0v-5.2"/></svg>
-        <h3>Bir U, başka bir şey değil.</h3>
-        <p>U, Ulak'ın U'su. Sözünü sorana götürür, ulaştığını sana söyler. Terminal açmaz, düz kabuğa yazmaz.</p>
-      </li>
-    </ol>
-  </div>
-</section>
-
 <section id="others">
   <div class="wrap">
     <h2>Ne zaman başkasını seçmeli</h2>
@@ -129,6 +104,17 @@
 ULAK_ALLOWED_LOGIN=you@github ULAK_VAPID_SUBJECT=mailto:you@example.com ./install.sh
 tailscale serve --bg 8765</code></pre>
     <p class="after">Sonra telefonda makinenin Tailscale adresini aç ve ana ekrana ekle. Çalıştırmadan önce <a href="https://github.com/mtbagatur/ulak/blob/main/SECURITY.md">SECURITY.md</a> dosyasını oku: her denetim neyi korur, nerede durur.</p>
+  </div>
+</section>
+
+<section id="mark">
+  <div class="wrap">
+    <h2><svg class="sign" viewBox="0 0 32 32" aria-hidden="true"><use class="w" href="#wax"/><circle class="r" cx="16" cy="16" r="9.6"/><path class="u" d="M12 11.2v5.2a4 4 0 0 0 8 0v-5.2"/></svg>İşaret ne söylüyor</h2>
+    <ul class="parts">
+      <li><svg viewBox="0 0 32 32" aria-hidden="true"><use class="e" href="#wax"/></svg><span><b>Elle basılmış mum.</b> Onayla bir mühürdür; iz bırakan komut iki mühür ister.</span></li>
+      <li><svg viewBox="0 0 32 32" aria-hidden="true"><use class="g" href="#wax"/><circle class="h t" cx="16" cy="16" r="9.6"/></svg><span><b>Baskının bıraktığı halka.</b> Evet'in, okuduğun soruya bağlıdır.</span></li>
+      <li><svg viewBox="0 0 32 32" aria-hidden="true"><use class="g" href="#wax"/><path class="h" d="M12 11.2v5.2a4 4 0 0 0 8 0v-5.2"/></svg><span><b>Bir U, Ulak'ın U'su.</b> Sözünü götürür, terminal açmaz.</span></li>
+    </ul>
   </div>
 </section>
 </main>

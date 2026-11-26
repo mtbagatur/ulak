@@ -120,10 +120,27 @@ def test_theme_button_on_the_page_also_turns_the_demo(served):
     chrome.js("localStorage.removeItem('theme')")
 
 
+def test_the_mark_note_stays_small(served):
+    chrome, url, seen = served
+    for path in ("/", "/tr/"):
+        for width, most in ((1280, 240), (390, 420)):
+            chrome.resize(width, 900)
+            chrome.cdp("Page.navigate", url=url + path)
+            chrome.wait("document.readyState === 'complete' && document.querySelector('#mark') !== null")
+            mark, run = (chrome.js(f"document.querySelector('{s}').getBoundingClientRect().height") for s in ("#mark", "#run"))
+            assert mark <= most and mark < run, (path, width, mark, run)
+            assert chrome.js("document.querySelector('#mark .sign').getBoundingClientRect().width") <= 32, path
+            assert chrome.js("document.documentElement.scrollWidth <= innerWidth"), path
+
+
 def test_both_pages_say_what_the_mark_means(out):
     for page in PAGES:
         html = (out / page).read_text()
         part = html.split('<section id="mark">')[1].split("</section>")[0]
+        # a footnote for the curious: the last thing before the footer, with no headings of its own below the title
+        assert html.index('<section id="mark">') > html.index('<section id="run">'), page
+        assert html.split('<section id="mark">')[1].split("</section>")[1].strip().startswith("</main>"), page
+        assert "<h3" not in part and 'class="intro"' not in part, page
         assert part.count("<li") == 3 and part.count("<svg") == 4, page
         # pressed wax, the ring the press leaves, the U: nothing about a corner any more
         assert part.count('href="#wax"') == 4 and "corner" not in part and "köşe" not in part, page

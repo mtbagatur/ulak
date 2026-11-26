@@ -126,19 +126,21 @@ section>.wrap>.intro{margin-top:14px;max-width:38em;color:var(--muted)}
   .road figure{width:100%}
 }
 
-/* what the mark says: the whole seal, then each of its three parts lit on its own */
-.sign{display:block;width:88px;height:88px;margin-bottom:26px}
+/* what the mark says: a footnote for the curious, after everything the visitor came for */
+#mark{padding:30px 0 34px}
+#mark h2{display:flex;align-items:center;gap:10px;font-size:1.05rem;line-height:1.3;color:var(--muted)}
+.sign{flex:none;width:28px;height:28px}
 .sign .w{fill:var(--seal)}
 .sign .r{fill:none;stroke:var(--bg);stroke-opacity:.28}
 .sign .u{fill:none;stroke:var(--bg);stroke-width:2.8;stroke-linecap:round}
-.parts{list-style:none;margin:44px 0 0;padding:0;display:grid;gap:38px}
-.parts svg{display:block;width:60px;height:60px;overflow:visible}
+.parts{list-style:none;margin:16px 0 0;padding:0;display:grid;gap:12px;font-size:.88rem;line-height:1.45;color:var(--muted)}
+.parts li{display:flex;gap:10px;align-items:flex-start}
+.parts svg{flex:none;width:22px;height:22px;overflow:visible}
+.parts b{color:var(--text);font-weight:600}
 .parts .g,.parts .e{fill:var(--line)}
 .parts .h{fill:none;stroke-width:2.8;stroke-linecap:round;stroke:var(--zer)}
 .parts .e,.parts .t{stroke:var(--zer);stroke-width:1.5}
-.parts h3{font-size:1.4rem;line-height:1.15;margin-top:16px;font-weight:600}
-.parts p{margin-top:10px;font-size:.98rem}
-@media (min-width:760px){.parts{grid-template-columns:repeat(3,minmax(0,1fr));gap:32px}}
+@media (min-width:760px){.parts{grid-template-columns:repeat(3,minmax(0,1fr));gap:28px}}
 
 /* honest part: a plain list, and the one row that is ours carries the seal's gold */
 .choices{display:grid;margin-top:34px;padding:0;list-style:none;border-top:1px solid var(--line)}
