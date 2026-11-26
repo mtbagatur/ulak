@@ -18,3 +18,9 @@ def test_demo_approval_resolves_the_fake_session():
     finally:
         demo.SESSIONS[:] = original
         demo.AUDIT.clear()
+
+
+def test_demo_never_serves_a_stale_app():
+    client = TestClient(demo.app)
+    for path in ("/", "/static/app.js", "/static/i18n.js", "/sw.js"):
+        assert client.get(path).headers["cache-control"] == "no-cache", path

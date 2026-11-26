@@ -70,6 +70,14 @@ app.mount("/static", StaticFiles(directory=WEB), name="static")
 pins = ["work|billing-api"]
 
 
+@app.middleware("http")
+async def fresh(request: Request, call_next):
+    response = await call_next(request)
+    if not request.url.path.startswith("/api"):
+        response.headers["Cache-Control"] = "no-cache"  # same as the real app: a reload always gets the current build
+    return response
+
+
 @app.get("/")
 async def index():
     return FileResponse(WEB / "index.html")
