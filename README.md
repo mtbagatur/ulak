@@ -4,6 +4,8 @@
 
 <h1 align="center">Ulak</h1>
 
+<p align="center"><a href="https://github.com/mtbagatur/ulak/actions/workflows/test.yml"><img src="https://github.com/mtbagatur/ulak/actions/workflows/test.yml/badge.svg" alt="Tests"></a></p>
+
 <p align="center">
   <strong>Your coding agents, in your pocket.</strong><br>
   Approve a command, answer a question, send a nudge. Then get back to your coffee.
