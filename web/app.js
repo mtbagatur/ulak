@@ -781,14 +781,16 @@ if (/iPhone|iPad|iPod/.test(navigator.userAgent)) document.documentElement.class
 if (window.visualViewport) {
   let baseH = 0;
   const sa = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
-  // Only a home-screen app that draws under the status bar (black-translucent, top inset > 0) loses its bottom strip; one that starts below the bar reaches the screen bottom and keeps the real inset.
-  const probe = document.createElement('div'); probe.style.cssText = 'position:fixed;visibility:hidden;padding-top:env(safe-area-inset-top)'; document.body.append(probe);
-  const insetTop = parseFloat(getComputedStyle(probe).paddingTop) || 0; probe.remove();
-  if (sa && insetTop > 0) document.documentElement.classList.add('sa');
+  // A home-screen app that draws under the status bar (black-translucent, top inset > 0) has been measured to end that much above the screen bottom. .under asks for the missing height; .sa stays only while the webview is in fact still short, because then the bottom inset lies outside the page.
+  // Measured 27.11.2026 in the home-screen app: at load the top inset still read 0 and came out as 47px later, so it is read again on every fit, not once.
+  const probe = document.createElement('div'); probe.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none;padding-top:env(safe-area-inset-top)'; document.body.append(probe);
+  let under = false;
   if (sa) document.documentElement.classList.add('installed');
   const fit = () => {
     baseH = Math.max(baseH, visualViewport.height);  // tallest viewport seen = keyboard closed (innerHeight also shrinks in a home-screen app)
     const kb = baseH - visualViewport.height > 120;
+    if (sa && !under && parseFloat(getComputedStyle(probe).paddingTop) > 0) { under = true; document.documentElement.classList.add('under'); }
+    if (under) document.documentElement.classList.toggle('sa', screen.height - baseH > 20 && innerWidth < innerHeight + 200);
     document.documentElement.classList.toggle('kb', kb);
     // Measured on iPhone (?debug=1, Safari tab): visualViewport already ends above the URL pill and ^ v done bar, so no reserve is needed
     document.documentElement.style.setProperty('--vvh', visualViewport.height + 'px'); window.scrollTo(0, 0); const b = $('#messages'); if (!$('#session').hidden && document.activeElement === ta) b.scrollTop = b.scrollHeight; };
@@ -800,15 +802,17 @@ if (window.visualViewport) {
     const probe = document.createElement('div');  // resolves env(safe-area-inset-*) to pixels
     probe.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none;top:0;left:0;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)';
     document.body.appendChild(probe);
-    const dbg = () => { const c = $('#composer'), r = c && c.getBoundingClientRect(), a = $('#app'), ar = a && a.getBoundingClientRect(), cs = getComputedStyle(probe), de = document.documentElement; d.textContent =
+    const fx = document.createElement('div'); fx.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none;left:0;bottom:0;width:1px;height:1px'; document.body.appendChild(fx);  // where the browser thinks the bottom is
+    const dbg = () => { const c = $('#composer'), r = c && c.getBoundingClientRect(), a = $('#app'), ar = a && a.getBoundingClientRect(), cs = getComputedStyle(probe), de = document.documentElement, dk = $('.dock'); d.textContent =
       `vv.h=${visualViewport.height.toFixed(0)} vv.top=${visualViewport.offsetTop.toFixed(0)} inner=${innerHeight} outer=${outerHeight} screen=${screen.height} base=${baseH.toFixed(0)}\n` +
       `html.clientH=${de.clientHeight} body.clientH=${document.body.clientHeight} app.bottom=${ar ? ar.bottom.toFixed(0) : '-'} composer.bottom=${r ? r.bottom.toFixed(0) : '-'} --vvh=${de.style.getPropertyValue('--vvh')}\n` +
-      `safe t/r/b/l=${cs.paddingTop}/${cs.paddingRight}/${cs.paddingBottom}/${cs.paddingLeft} standalone=${navigator.standalone === true || matchMedia('(display-mode: standalone)').matches} scrollY=${scrollY.toFixed(0)} cls=${de.className}`; };
+      `safe t/r/b/l=${cs.paddingTop}/${cs.paddingRight}/${cs.paddingBottom}/${cs.paddingLeft} standalone=${navigator.standalone === true || matchMedia('(display-mode: standalone)').matches} scrollY=${scrollY.toFixed(0)} cls=${de.className}\n` +
+      `docH=${de.scrollHeight} html.h=${de.getBoundingClientRect().height.toFixed(0)} fixedBottom=${fx.getBoundingClientRect().bottom.toFixed(0)} dock.bottom=${dk ? dk.getBoundingClientRect().bottom.toFixed(0) : '-'}`; };
     visualViewport.addEventListener('resize', dbg); visualViewport.addEventListener('scroll', dbg); document.addEventListener('focusin', () => setTimeout(dbg, 300)); setInterval(dbg, 500); dbg();
   };
   if (/[?&]debug=1/.test(location.search)) startDebug();
   { let taps = []; document.addEventListener('pointerdown', () => { const n = Date.now(); taps = taps.filter(x => n - x < 2000); taps.push(n); if (taps.length >= 6) { taps = []; startDebug(); } }); }  // 6 quick taps enable the strip (home-screen app has no URL bar)
-  visualViewport.addEventListener('resize', fit); visualViewport.addEventListener('scroll', () => window.scrollTo(0, 0)); fit();
+  visualViewport.addEventListener('resize', fit); visualViewport.addEventListener('scroll', () => window.scrollTo(0, 0)); fit(); if (sa) { requestAnimationFrame(fit); setTimeout(fit, 300); setTimeout(fit, 1500); }
 }
 
 // ---------- sheets ----------

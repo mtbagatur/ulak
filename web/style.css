@@ -12,15 +12,16 @@
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html{-webkit-text-size-adjust:100%}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--text);overscroll-behavior:none}
-body{position:fixed;inset:0;overflow:hidden;-webkit-text-size-adjust:100%}
+body{overflow:hidden;-webkit-text-size-adjust:100%}
 [hidden]{display:none!important}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
-#app{position:absolute;inset:0;height:var(--vvh,100dvh);display:flex;flex-direction:column;padding-top:var(--safe-t)}
-/* Measured in the home-screen app while it drew under the status bar (black-translucent): the webview ends 47px above the screen bottom (inner=797, screen=844); painting past it is clipped even with body/#app grown, so the 34px safe-area inset is already outside the page: drop it. app.js sets .sa only in that case. */
+#app{position:absolute;inset:0;height:var(--vvh,100dvh);overflow:hidden;display:flex;flex-direction:column;padding-top:var(--safe-t)}
+/* The home-screen app draws under the iPhone status bar (black-translucent), so the page's own ground reaches the clock in either theme. Measured there on 22 and 26.11.2026: the webview then ends 47px above the screen bottom (inner=797, screen=844) and growing body/#app is clipped. .under lets the document itself be that much taller (being measured); while the webview is still short app.js keeps .sa, and the 34px bottom inset, already outside the page, is dropped. */
+html.under{min-height:calc(100% + env(safe-area-inset-top))}
 .sa{--safe-b:0px}
-/* Measured on an iPhone screenshot, dark: the status bar iOS draws above the home-screen app is --bg2 (#140f17), whatever theme-color says. The page starts in that colour and eases into its own, so the glow no longer begins at a hard edge. Light bar not measured yet. */
-html.ios.installed[data-theme=dark]{--bar:var(--bg2)}
-#home{background:linear-gradient(var(--bar,transparent),transparent 72px),radial-gradient(120% 46% at 100% 0,color-mix(in srgb,var(--zer) 9%,transparent),transparent 70%) var(--bg)}
+/* In a browser tab the bar above the page is the browser's, in plain --bg (measured 27.11: #1c1520 over a glow of #221a22). The glow eases in below it instead of starting at a hard edge; under the clock (.under) it runs to the top. */
+html:not(.under) #home{background:linear-gradient(var(--bg),transparent 64px),radial-gradient(120% 46% at 100% 0,color-mix(in srgb,var(--zer) 9%,transparent),transparent 70%) var(--bg)}
+#home{background:radial-gradient(120% 46% at 100% 0,color-mix(in srgb,var(--zer) 9%,transparent),transparent 70%) var(--bg)}
 .screen{position:relative;flex:1;min-height:0;display:flex;flex-direction:column;padding:0 var(--safe-r) 0 var(--safe-l);background:var(--bg)}
 #session{animation:slidein .22s var(--ease-out)}
 @keyframes slidein{from{transform:translateX(24px);opacity:0}}
@@ -67,7 +68,7 @@ button.loading::after{content:"";position:absolute;left:calc(50% - 8px);top:calc
 [data-theme=light] .moon .bite{transform:translate(13px,-13px)}
 [data-theme=light] .moon .disc{transform:scale(.62)}
 [data-theme=light] .moon .halo{transform:none;opacity:1}
-.conn{flex:none;font-size:12px;color:var(--zer);display:flex;align-items:center;gap:6px;padding:4px calc(16px + var(--safe-r)) 4px calc(16px + var(--safe-l));background:var(--bg2)}
+.conn{flex:none;font-size:12px;color:var(--zer);display:flex;align-items:center;gap:6px;padding:4px calc(16px + var(--safe-r)) 4px calc(16px + var(--safe-l));background:var(--bg)}
 .conn::before{content:"";flex:none;width:7px;height:7px;border-radius:50%;background:currentColor}
 .conn.bad{color:var(--lal-t)}
 .summary{padding:6px 16px 12px;font:500 21px/1.15 var(--display);color:var(--strong);min-height:26px;text-wrap:balance}

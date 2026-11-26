@@ -1147,21 +1147,30 @@ def test_daylight_is_warm_paper_without_pink_and_the_site_wears_the_same_colours
         assert f'content="{light["bg"]}" media="(prefers-color-scheme: light)"' in (WEB.parent / "site" / page).read_text()
 
 
-def test_home_screen_app_on_iphone_meets_the_status_bar_in_its_colour(api_fixture):
-    # Measured on an iPhone screenshot (26.11.2026, dark): the bar iOS draws above the app is #140f17 (= --bg2), the page #1c1520,
-    # and the gold glow started at full strength right under it. The page now starts in the bar's colour and eases into its own.
+def test_home_screen_app_on_iphone_draws_its_own_ground_under_the_clock(api_fixture):
+    # The bar iOS draws above a home-screen app does not follow the theme the app's own button picks (measured 26.11.2026:
+    # a light page under a dark bar). So the page goes under the clock itself, and nothing above the glow fakes a bar.
     chrome, api, url = api_fixture
-    dark, light = _palettes()
-    rgb = lambda h: "rgb({}, {}, {})".format(*(int(h[i:i + 2], 16) for i in (1, 3, 5)))
-    top = "getComputedStyle(document.querySelector('#home')).backgroundImage.split('gradient(')[1]"
-    chrome.cdp("Emulation.setEmulatedMedia", features=[{"name": "prefers-color-scheme", "value": "dark"}])
-    try:
-        open_first(chrome, url)
-        assert not chrome.js(top).startswith(rgb(dark["bg2"]))  # a browser tab, or another phone: nothing to meet
-        chrome.js("document.documentElement.classList.add('ios', 'installed')")  # what app.js adds when it runs from an iPhone home screen
-        chrome.wait(f"{top}.startsWith('{rgb(dark['bg2'])}')")
-        # the light bar has not been measured yet, so the light page is left as it was
-        chrome.cdp("Emulation.setEmulatedMedia", features=[{"name": "prefers-color-scheme", "value": "light"}])
-        chrome.wait(f"document.documentElement.dataset.theme === 'light' && !{top}.startsWith('{rgb(dark['bg2'])}') && !{top}.startsWith('{rgb(light['bg2'])}')")
-    finally:
-        chrome.cdp("Emulation.setEmulatedMedia", features=[])
+    assert 'name="apple-mobile-web-app-status-bar-style" content="black-translucent"' in (WEB / "index.html").read_text()
+    open_first(chrome, url)
+    layers = "getComputedStyle(document.querySelector('#home')).backgroundImage.split('gradient(').length - 1"
+    assert chrome.js(layers) == 2  # in a browser tab the glow eases in below the browser's own bar
+    # Drawing under the bar leaves the webview short at the bottom on iOS; the document asks for the missing height,
+    # and the bottom inset is dropped only while app.js still measures the page as short (.sa).
+    assert chrome.js("getComputedStyle(document.documentElement).minHeight") in ("0px", "auto")
+    chrome.js("document.documentElement.classList.add('under')")
+    assert chrome.js(layers) == 1  # under the clock: the glow alone, up to the top
+    assert chrome.js("getComputedStyle(document.documentElement).minHeight") == "100%"  # 100% + a top inset that is 0 here
+    chrome.js("document.documentElement.classList.add('sa')")
+    assert chrome.js("getComputedStyle(document.querySelector('.dock')).paddingBottom") == "10px"
+
+
+def test_the_browser_bars_on_iphone_can_follow_the_theme():
+    # Measured in a Safari tab on 27.11.2026: Safari colours the areas above and below the page from what it finds at the
+    # edges. A fixed body kept them in the colour the page opened with (light page, dark bars), and the connection strip at
+    # the very top lent them its own darker ground. So the body is not fixed, #app does the clipping, and the strip sits on --bg.
+    css = (WEB / "style.css").read_text()
+    body = re.search(r"^body\{([^}]*)\}", css, re.M).group(1)
+    assert "position:fixed" not in body
+    assert "overflow:hidden" in re.search(r"^#app\{([^}]*)\}", css, re.M).group(1)
+    assert "background:var(--bg)}" in re.search(r"^\.conn\{[^}]*\}", css, re.M).group(0)
