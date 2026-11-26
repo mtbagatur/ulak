@@ -957,3 +957,13 @@ def test_answer_stays_in_the_chat_when_nothing_else_is_waiting(api_fixture):
     api.cards = [card("working")]
     time.sleep(4.5)  # it used to leave for the home screen once the agent moved on, so the road to the agent was never seen
     assert chrome.js("!document.querySelector('#session').hidden && !document.querySelector('#receipt').hidden")
+
+
+def test_relative_paths_link_whole_and_links_follow_the_theme(api_fixture):
+    chrome, api, url = api_fixture
+    api.messages = [{"role": "assistant", "text": "The notes are in docs/releases/2.4.md, the code in src/app.py, the rest in ./notes.md and at https://example.test/a.md."}]
+    open_first(chrome, url)
+    chrome.wait("document.querySelectorAll('#messages a').length === 3")
+    links = chrome.js("[...document.querySelectorAll('#messages a')].map(a => [a.textContent, new URL(a.href).searchParams.get('path')])")
+    assert links == [["docs/releases/2.4.md", "docs/releases/2.4.md"], ["./notes.md", "./notes.md"], ["https://example.test/a.md", None]]
+    assert chrome.js("getComputedStyle(document.querySelector('#messages a')).color === getComputedStyle(document.querySelector('#messages a').parentElement).color")

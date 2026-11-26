@@ -419,11 +419,12 @@ const md = value => {
     const html = link(label, href);
     return html ? hold(html) : whole;
   });
-  source = source.replace(/(?:\/|\.\.?\/)[^\s<>"'`]+/g, raw => {
-    let path = raw, trailing = '';
+  // A path starts where a word starts, so docs/notes.md links whole (relative to the session's folder), not from its first slash.
+  source = source.replace(/(^|[^\w.\-\/])((?:\/|\.\.?\/|[\w.\-]+\/)[^\s<>"'`]+)/g, (raw, before, found) => {
+    let path = found, trailing = '';
     while (/[),.!?;:]$/.test(path)) { trailing = path.slice(-1) + trailing; path = path.slice(0, -1); }
     const html = link(path, path);
-    return html ? hold(html) + trailing : raw;
+    return html ? before + hold(html) + trailing : raw;
   });
   let html = esc(source).replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
   html = html.replace(/https?:\/\/[^\s<>"']+/gi, raw => {
