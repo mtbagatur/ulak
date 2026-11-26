@@ -785,6 +785,7 @@ if (window.visualViewport) {
   const probe = document.createElement('div'); probe.style.cssText = 'position:fixed;visibility:hidden;padding-top:env(safe-area-inset-top)'; document.body.append(probe);
   const insetTop = parseFloat(getComputedStyle(probe).paddingTop) || 0; probe.remove();
   if (sa && insetTop > 0) document.documentElement.classList.add('sa');
+  if (sa) document.documentElement.classList.add('installed');
   const fit = () => {
     baseH = Math.max(baseH, visualViewport.height);  // tallest viewport seen = keyboard closed (innerHeight also shrinks in a home-screen app)
     const kb = baseH - visualViewport.height > 120;

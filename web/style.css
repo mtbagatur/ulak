@@ -18,7 +18,9 @@ body{position:fixed;inset:0;overflow:hidden;-webkit-text-size-adjust:100%}
 #app{position:absolute;inset:0;height:var(--vvh,100dvh);display:flex;flex-direction:column;padding-top:var(--safe-t)}
 /* Measured in the home-screen app while it drew under the status bar (black-translucent): the webview ends 47px above the screen bottom (inner=797, screen=844); painting past it is clipped even with body/#app grown, so the 34px safe-area inset is already outside the page: drop it. app.js sets .sa only in that case. */
 .sa{--safe-b:0px}
-#home{background:radial-gradient(120% 46% at 100% 0,color-mix(in srgb,var(--zer) 9%,transparent),transparent 70%) var(--bg)}
+/* Measured on an iPhone screenshot, dark: the status bar iOS draws above the home-screen app is --bg2 (#140f17), whatever theme-color says. The page starts in that colour and eases into its own, so the glow no longer begins at a hard edge. Light bar not measured yet. */
+html.ios.installed[data-theme=dark]{--bar:var(--bg2)}
+#home{background:linear-gradient(var(--bar,transparent),transparent 72px),radial-gradient(120% 46% at 100% 0,color-mix(in srgb,var(--zer) 9%,transparent),transparent 70%) var(--bg)}
 .screen{position:relative;flex:1;min-height:0;display:flex;flex-direction:column;padding:0 var(--safe-r) 0 var(--safe-l);background:var(--bg)}
 #session{animation:slidein .22s var(--ease-out)}
 @keyframes slidein{from{transform:translateX(24px);opacity:0}}

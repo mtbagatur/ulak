@@ -1145,3 +1145,23 @@ def test_daylight_is_warm_paper_without_pink_and_the_site_wears_the_same_colours
         assert mine and all(theirs[k] == v for k, v in mine.items())
     for page in ("index.html", "tr/index.html"):
         assert f'content="{light["bg"]}" media="(prefers-color-scheme: light)"' in (WEB.parent / "site" / page).read_text()
+
+
+def test_home_screen_app_on_iphone_meets_the_status_bar_in_its_colour(api_fixture):
+    # Measured on an iPhone screenshot (26.11.2026, dark): the bar iOS draws above the app is #140f17 (= --bg2), the page #1c1520,
+    # and the gold glow started at full strength right under it. The page now starts in the bar's colour and eases into its own.
+    chrome, api, url = api_fixture
+    dark, light = _palettes()
+    rgb = lambda h: "rgb({}, {}, {})".format(*(int(h[i:i + 2], 16) for i in (1, 3, 5)))
+    top = "getComputedStyle(document.querySelector('#home')).backgroundImage.split('gradient(')[1]"
+    chrome.cdp("Emulation.setEmulatedMedia", features=[{"name": "prefers-color-scheme", "value": "dark"}])
+    try:
+        open_first(chrome, url)
+        assert not chrome.js(top).startswith(rgb(dark["bg2"]))  # a browser tab, or another phone: nothing to meet
+        chrome.js("document.documentElement.classList.add('ios', 'installed')")  # what app.js adds when it runs from an iPhone home screen
+        chrome.wait(f"{top}.startsWith('{rgb(dark['bg2'])}')")
+        # the light bar has not been measured yet, so the light page is left as it was
+        chrome.cdp("Emulation.setEmulatedMedia", features=[{"name": "prefers-color-scheme", "value": "light"}])
+        chrome.wait(f"document.documentElement.dataset.theme === 'light' && !{top}.startsWith('{rgb(dark['bg2'])}') && !{top}.startsWith('{rgb(light['bg2'])}')")
+    finally:
+        chrome.cdp("Emulation.setEmulatedMedia", features=[])
