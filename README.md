@@ -112,7 +112,7 @@ Optional, in `.secrets/config.json` (untracked):
 }
 ```
 
-- `rules_file`: extra destructive patterns, one per line as ``- desen: `regex` ``.
+- `rules_file`: extra destructive regexes, one per line. Blank lines and lines starting with `#` are ignored. Also accepted: markdown list ``- pattern: `regex` ``.
 - `quick_targets` / `quick_label`: workspace or project names that get the quick-send button.
 - `limit_files`: usage-limit files shown in the limits strip. Two formats are understood: JSON `{"h5": {"used_percentage": 4, "resets_at": 1795200600}, "d7": {...}, "ts": 1795183857}` (epoch seconds), or tab-separated text `name<TAB>window<TAB>NN%<TAB>ISO-reset` where NN% is what is *remaining*.
 - `min_work_seconds`: a "finished" push is skipped when the turn took less than this (default 120).

@@ -22,6 +22,14 @@ def test_git_status_is_normal(): assert not is_destructive("git status", "/missi
 def test_guard_rule_loaded(tmp_path):
     f=tmp_path/'rules.md';f.write_text('- desen: `dangerous-operation`\n')
     assert is_destructive("dangerous-operation", str(f))
+
+def test_guard_rules_accept_plain_pattern_alias_and_legacy_format(tmp_path):
+    f = tmp_path / "rules.md"
+    f.write_text("# deployment rules\n\nplain-danger\n- pattern: `alias-danger`\n- desen: `legacy-danger`\n")
+    assert is_destructive("plain-danger", str(f))
+    assert is_destructive("alias-danger", str(f))
+    assert is_destructive("legacy-danger", str(f))
+    assert not is_destructive("deployment rules", str(f))
 def test_debounce():
     g=NotificationGate();assert g.allow('w1:p1','done',0);assert not g.allow('w1:p1','done',5);assert g.allow('w1:p1','done',11)
 def test_debounce_per_pane_and_status():

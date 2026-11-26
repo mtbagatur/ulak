@@ -23,7 +23,12 @@ def is_destructive(command, rules_path=None):
         rules = open(rules_path, encoding="utf-8").read() if rules_path else ""
     except OSError:
         rules = ""
-    for pattern in re.findall(r"- desen: `([^`]+)`", rules):
+    for line in rules.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        markdown = re.fullmatch(r"-\s*(?:pattern|desen):\s*`([^`]+)`\s*", line)
+        pattern = markdown.group(1) if markdown else line
         try:
             if re.search(pattern, text, re.I):
                 return True
