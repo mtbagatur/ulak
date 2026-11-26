@@ -174,3 +174,12 @@ def test_history_close_button_stays_off_the_tabs(site, width):
         return [...document.querySelectorAll('#sheet [data-tab]')].filter(tab => { const r = tab.getBoundingClientRect();
             return r.left < x.right && r.right > x.left && r.top < x.bottom && r.bottom > x.top; }).map(tab => tab.textContent); })()""")
     assert overlapping == []
+
+
+@pytest.mark.parametrize("lang", ("en", "tr"))
+def test_all_three_limits_fit_the_narrowest_phone(site, lang):
+    chrome = site
+    chrome.resize(320, 700)
+    chrome.js(f"if (LANG !== {json.dumps(lang)}) toggleLang()")
+    chrome.wait("document.querySelectorAll('#limits .lim').length === 3")
+    assert chrome.js("(() => { const box = document.querySelector('#limits'); return box.scrollWidth - box.clientWidth; })()") <= 0
