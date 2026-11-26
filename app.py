@@ -38,6 +38,18 @@ QUICK_TARGETS = {str(x).lower() for x in CONFIG.get("quick_targets", [])}
 QUICK_LABEL = CONFIG.get("quick_label", "")
 PROJECT_ROOTS = [str(x) for x in CONFIG.get("project_roots", ["~"])]  # folders whose subfolders are offered for new sessions
 MIN_WORK = float(CONFIG.get("min_work_seconds", 120))  # no "finished" push for turns shorter than this
+
+
+def approval_timeout(config):
+    """Seconds an approval may wait before Ulak denies it. 0 (the default) means it waits for a person, forever."""
+    try:
+        return max(0.0, float(config.get("approval_timeout_minutes") or 0)) * 60
+    except (TypeError, ValueError):
+        return 0.0
+
+
+APPROVAL_TIMEOUT = approval_timeout(CONFIG)
+waiting = {}        # pane -> (prompt fingerprint, when Ulak first saw it waiting)
 sessions = {}       # pane -> card (what the phone shows)
 raw_agents = {}     # pane -> last agent record from herdr
 since = {}          # pane -> {"status", "ts"}
@@ -346,6 +358,8 @@ async def initialize():
     except Exception as exc:
         print(f"Herdr initialization failed: {exc}", flush=True)
     asyncio.create_task(event_loop())
+    if APPROVAL_TIMEOUT:
+        asyncio.create_task(timeout_loop())
 
 
 async def event_loop():
@@ -543,6 +557,50 @@ async def confirm_delivery(pane, fingerprint, entry_id):
     await broadcast({"type": "receipt", "pane": pane, "delivered": bool(delivered)})
 
 
+async def expire_approvals(now=None):
+    """Deny approvals nobody answered in time. It can only deny, and only the prompt it has been timing."""
+    if not APPROVAL_TIMEOUT:
+        return []
+    now = time.time() if now is None else now
+    live = {pane: s["pending"]["fingerprint"] for pane, s in sessions.items()
+            if s.get("status") == "blocked" and (s.get("pending") or {}).get("kind") == "approval"}
+    for pane in [p for p, (fp, _) in waiting.items() if live.get(p) != fp]:
+        del waiting[pane]  # answered, changed or gone: a new prompt gets its own full wait
+    expired = []
+    for pane, fingerprint in live.items():
+        first = waiting.setdefault(pane, (fingerprint, now))[1]
+        if now - first < APPROVAL_TIMEOUT or pane in replying_panes:
+            continue
+        try:
+            with exclusive_prompt_reply(pane):
+                pending = await fresh_pending(pane)
+                if not pending or pending["fingerprint"] != fingerprint or "deny" not in pending["keys"]:
+                    waiting.pop(pane, None)  # the card is stale; time whatever is really there from scratch
+                    continue
+                await client.call("agent.send_keys", {"target": pane, "keys": [pending["keys"]["deny"]]})
+                pending_confirm.pop(pane, None)
+                entry = audit(pane, "deny", "timeout", command=pending["command"], destructive=pending["destructive"],
+                              reason=f"No answer in {APPROVAL_TIMEOUT / 60:g} minutes")
+                track_delivery(pane, fingerprint, entry)
+            waiting[pane] = (fingerprint, float("inf"))  # done; never twice for the same prompt
+            expired.append(pane)
+        except Exception as exc:
+            print(f"Approval timeout failed for {pane}: {exc}", flush=True)
+    return expired
+
+
+async def timeout_loop():
+    while True:
+        await asyncio.sleep(20)
+        try:
+            for pane in await expire_approvals():
+                card = await refresh_pane(pane)
+                if card:
+                    await broadcast({"type": "session", "session": card})
+        except Exception as exc:
+            print(f"Approval timeout loop: {exc}", flush=True)
+
+
 def track_delivery(pane, fingerprint, entry):
     task = asyncio.create_task(confirm_delivery(pane, fingerprint, entry["id"]))
     delivery_tasks.add(task)
@@ -686,7 +744,7 @@ async def prompt(pane: str, action: Action):
 
 @app.get("/api/config")
 async def config():
-    return {"quick_label": QUICK_LABEL if QUICK_TARGETS else ""}
+    return {"quick_label": QUICK_LABEL if QUICK_TARGETS else "", "approval_timeout_minutes": APPROVAL_TIMEOUT / 60}
 
 
 @app.post("/api/quick")

@@ -123,6 +123,7 @@ const ICONS = {
   close: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
   bell: '<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
   refresh: '<path d="M19 12a7 7 0 1 1-2.05-4.95"/><path d="M19 4.5V8h-3.5"/>',
+  timer: '<circle cx="12" cy="13" r="7.5"/><path d="M12 9v4l2.5 2M9.5 2.5h5"/>',
 };
 const icon = (name, size = 18) => `<svg class="ic" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
 function cardHtml(s) {
@@ -846,9 +847,9 @@ $('#sheetBack').onclick = hideSheet;
   s.addEventListener('touchend', end); s.addEventListener('touchcancel', end);
 })();
 
-let quickLabel = '';
+let quickLabel = '', approvalTimeout = 0;
 function setQuickLabel() { $('#toQuick').textContent = quickLabel ? t('quickTo', {x: quickLabel}) : t('quickSend'); }
-api('/api/config').then(c => { quickLabel = c.quick_label || ''; $('#toQuick').hidden = !quickLabel; setQuickLabel(); }).catch(() => {});
+api('/api/config').then(c => { quickLabel = c.quick_label || ''; approvalTimeout = +c.approval_timeout_minutes || 0; $('#toQuick').hidden = !quickLabel; setQuickLabel(); }).catch(() => {});
 $('#toQuick').hidden = true;
 $('#toQuick').onclick = () => {
   showSheet(`<h3>${esc(t('quickTo', {x: quickLabel}))}</h3><textarea id="quickText" aria-label="${esc(t('quickPh'))}" placeholder="${esc(t('quickPh'))}" autofocus></textarea><div class="acts"><button class="ghost" data-x>${esc(t('cancel'))}</button><button class="primary" data-y>${esc(t('send'))}</button></div>`);
@@ -990,8 +991,8 @@ if ('serviceWorker' in navigator) {
 $('#history').onclick = e => act(e.currentTarget, async () => {
   const [{items}, audit] = await Promise.all([api('/api/notifications'), api('/api/audit')]);
   const rows = items.length ? items.map(n => `<button class="card b-${n.status === 'blocked' ? 'blocked' : 'done'}" data-pane="${esc(n.pane || '')}"><b>${esc(histTitle(n))}</b><div>${esc(histBody(n))}</div><small>${ago(n.ts)}</small></button>`).join('') : `<div class="empty">${t('noNotifs')}</div>`;
-  const outcome = a => a.outcome === 'refused' ? `${t('outRefused')}: ${errText(a.reason)}` : a.outcome === 'confirm_requested' ? t('outConfirm') : `${t(DECIDED[a.decision] || 'sent')} · ${arrival(a)}`;
-  const decisions = audit.items.length ? audit.items.map(a => `<div class="audit ${a.outcome === 'refused' ? 'no' : ''}"><b>${esc(a.project || a.pane)}</b><span>${esc(outcome(a))}</span>${a.command ? `<pre>${esc(a.command)}</pre>` : ''}<small>${esc(a.login || '')} · ${esc(new Date(a.ts * 1000).toLocaleString(LANG === 'tr' ? 'tr-TR' : 'en-GB', {dateStyle: 'medium', timeStyle: 'short'}))}</small></div>`).join('') : `<div class="empty">${t('noDecisions')}</div>`;
+  const outcome = a => a.outcome === 'refused' ? `${t('outRefused')}: ${errText(a.reason)}` : a.outcome === 'confirm_requested' ? t('outConfirm') : a.outcome === 'timeout' ? `${t('outTimeout', {n: (/[\d.]+/.exec(a.reason || '') || [''])[0]})} · ${arrival(a)}` : `${t(DECIDED[a.decision] || 'sent')} · ${arrival(a)}`;
+  const decisions = audit.items.length ? audit.items.map(a => `<div class="audit ${a.outcome === 'refused' ? 'no' : ''}"><b>${esc(a.project || a.pane)}</b><span>${esc(outcome(a))}</span>${a.command ? `<pre>${esc(a.command)}</pre>` : ''}<small>${esc(a.login || (a.outcome === 'timeout' ? 'Ulak' : ''))} · ${esc(new Date(a.ts * 1000).toLocaleString(LANG === 'tr' ? 'tr-TR' : 'en-GB', {dateStyle: 'medium', timeStyle: 'short'}))}</small></div>`).join('') : `<div class="empty">${t('noDecisions')}</div>`;
   showSheet(`<h3 class="sr-only">${esc(t('history'))}</h3><div class="tabs" role="tablist"><button role="tab" data-tab="notifications" aria-selected="true">${esc(t('notifications'))}</button><button role="tab" data-tab="decisions" aria-selected="false">${esc(t('decisions'))}</button></div>
     <div class="scroll" style="max-height:65vh" data-panel="notifications">${rows}</div><div class="scroll" style="max-height:65vh" data-panel="decisions" hidden>${decisions}</div>`);
   $('#sheet').querySelectorAll('[data-tab]').forEach(tab => tab.onclick = () => {
@@ -1061,7 +1062,8 @@ function settingsSheet() {
   const bell = bellState === 'off' ? `<button id="bell" class="row">${icon('bell', 20)}<span>${esc(t('enableBell'))}</span></button>` : `<div class="row quiet">${icon('bell', 20)}<span>${esc(t(bellState === 'on' ? 'bellOn' : 'bellNone'))}</span></div>`;
   showSheet(`<h3 data-settings>${esc(t('settings'))}</h3><div class="rows">${bell}
     <button id="lang" class="row"><b class="lang">${LANG.toUpperCase()}</b><span>${esc(t('language'))}</span><small>${LANG === 'tr' ? 'English' : 'Türkçe'}</small></button>
-    <button id="refresh" class="row">${icon('refresh', 20)}<span>${esc(t('refresh'))}</span></button></div>`);
+    <button id="refresh" class="row">${icon('refresh', 20)}<span>${esc(t('refresh'))}</span></button>
+    ${approvalTimeout ? `<div class="row quiet timeout">${icon('timer', 20)}<span>${esc(t('timeoutOn', {n: approvalTimeout}))}</span></div>` : ''}</div>`);
   $('#sheet #lang').onclick = toggleLang;
   $('#sheet #refresh').onclick = e => act(e.currentTarget, loadList, t('refreshed'));
   const b = $('#sheet #bell'); if (b) b.onclick = e => enableBell(e.currentTarget);

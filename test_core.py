@@ -1034,3 +1034,66 @@ def test_changes_endpoint_reads_only_the_sessions_own_folder(monkeypatch, tmp_pa
     assert fake.sent == []
     assert c.get("/api/sessions/w9:p1/changes").status_code == 403
     assert c.get("/api/sessions/nope/changes", headers=h).status_code == 404
+
+
+# --- approvals nobody answered: optional timeout, deny only ---
+
+def _waiting(monkeypatch, minutes):
+    fake, c, h = _setup(monkeypatch, CODEX)
+    fp = parse_approval(CODEX)["fingerprint"]
+    api.sessions["w9:p1"].update(project="x", agent="codex", pending={"kind": "approval", "fingerprint": fp})
+    monkeypatch.setattr(api, "APPROVAL_TIMEOUT", minutes * 60)
+    monkeypatch.setattr(api, "waiting", {})
+    return fake, c, h, fp
+
+
+def test_unanswered_approvals_wait_forever_unless_a_timeout_is_configured(monkeypatch):
+    assert api.approval_timeout({}) == 0 and api.approval_timeout({"approval_timeout_minutes": "x"}) == 0
+    assert api.approval_timeout({"approval_timeout_minutes": -5}) == 0 and api.approval_timeout({"approval_timeout_minutes": 30}) == 1800
+    fake, c, h, fp = _waiting(monkeypatch, 0)
+    assert asyncio.run(api.expire_approvals(now=1000)) == []
+    assert asyncio.run(api.expire_approvals(now=10 ** 9)) == []
+    assert fake.sent == [] and c.get("/api/audit", headers=h).json()["items"] == []
+    assert c.get("/api/config", headers=h).json()["approval_timeout_minutes"] == 0
+
+
+def test_a_configured_timeout_denies_the_same_prompt_and_records_it(monkeypatch):
+    fake, c, h, fp = _waiting(monkeypatch, 30)
+    tracked = []
+    monkeypatch.setattr(api, "track_delivery", lambda *a: tracked.append(a))
+    assert asyncio.run(api.expire_approvals(now=1000)) == []        # the clock starts when Ulak first sees it
+    assert asyncio.run(api.expire_approvals(now=1000 + 1799)) == [] and fake.sent == []
+    assert asyncio.run(api.expire_approvals(now=1000 + 1800)) == ["w9:p1"]
+    assert fake.sent == [[parse_approval(CODEX)["keys"]["deny"]]]   # the only key it can ever send
+    entry = c.get("/api/audit", headers=h).json()["items"][0]
+    assert (entry["decision"], entry["outcome"], entry["login"]) == ("deny", "timeout", "")
+    assert entry["command"] and "30" in entry["reason"]
+    assert tracked and tracked[0][1] == fp
+    assert asyncio.run(api.expire_approvals(now=1000 + 1801)) == [] and len(fake.sent) == 1  # once, not every tick
+    assert c.get("/api/config", headers=h).json()["approval_timeout_minutes"] == 30
+
+
+def test_a_timeout_never_answers_a_different_prompt(monkeypatch):
+    fake, c, h, fp = _waiting(monkeypatch, 30)
+    asyncio.run(api.expire_approvals(now=1000))
+    # The card still shows the old prompt, but the agent's screen has moved on to another one.
+    fake.text = CODEX.replace("api-probe2.txt", "something-else.txt")
+    assert parse_approval(fake.text)["fingerprint"] != fp
+    assert asyncio.run(api.expire_approvals(now=5000)) == [] and fake.sent == []
+    # A new prompt on the card gets its own full wait.
+    fake.text = CODEX
+    api.sessions["w9:p1"]["pending"]["fingerprint"] = "another"
+    assert asyncio.run(api.expire_approvals(now=6000)) == []
+    api.sessions["w9:p1"]["pending"]["fingerprint"] = fp
+    assert asyncio.run(api.expire_approvals(now=6001)) == [] and fake.sent == []
+    assert asyncio.run(api.expire_approvals(now=6001 + 1800)) == ["w9:p1"]
+
+
+def test_a_timeout_steps_aside_for_a_reply_in_progress_and_for_questions(monkeypatch):
+    fake, c, h, fp = _waiting(monkeypatch, 1)
+    asyncio.run(api.expire_approvals(now=0))
+    monkeypatch.setattr(api, "replying_panes", {"w9:p1"})
+    assert asyncio.run(api.expire_approvals(now=600)) == [] and fake.sent == []
+    monkeypatch.setattr(api, "replying_panes", set())
+    api.sessions["w9:p1"]["pending"]["kind"] = "question"   # a menu is a question, not a permission
+    assert asyncio.run(api.expire_approvals(now=1200)) == [] and fake.sent == []

@@ -52,6 +52,7 @@ class FakeAPI:
         self.audit = []
         self.commands = None
         self.screen = "idle"
+        self.config = {"quick_label": "", "approval_timeout_minutes": 0}
         self.changes = {"repo": False, "branch": "", "files": [], "more_files": 0, "diff": "", "truncated": False}
         self.presence = []
         self.respond = threading.Event()
@@ -132,7 +133,7 @@ class Handler(SimpleHTTPRequestHandler):
         elif self.path == "/api/limits":
             self.json({"now": time.time(), "providers": []})
         elif self.path == "/api/config":
-            self.json({"quick_label": ""})
+            self.json(self.api.config)
         else:
             if self.path.startswith("/static/"):
                 self.path = self.path.removeprefix("/static")
@@ -683,6 +684,33 @@ def test_decisions_tab_lists_sent_and_refused_answers(api_fixture):
     assert "Refused" in first and "The approval screen changed" in first and "user@example.test" in first
     assert "Denied" in second and "agent received it" in second and "<img src=x" in second
     assert chrome.js("window.pwned") is None
+
+
+def test_a_timed_out_approval_is_on_the_record_and_the_setting_is_visible(api_fixture):
+    chrome, api, url = api_fixture
+    now = time.time()
+    api.audit = [{"id": "t1", "ts": now, "pane": PANE, "project": "fixture", "decision": "deny", "outcome": "timeout", "reason": "No answer in 30 minutes",
+                  "command": "npm publish", "destructive": True, "login": "", "delivered": now}]
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelector('#settings') !== null && document.querySelector('.card') !== null")
+    chrome.click("#settings")
+    chrome.wait("document.querySelector('#sheet [data-settings]') !== null")
+    assert chrome.js("document.querySelector('#sheet .row.timeout')") is None  # off by default: nothing to say
+    api.config = {"quick_label": "", "approval_timeout_minutes": 30}
+    chrome.cdp("Page.navigate", url=url + "?again")
+    chrome.wait("document.querySelector('#settings') !== null && document.querySelector('.card') !== null")
+    chrome.click("#settings")
+    chrome.wait("document.querySelector('#sheet .row.timeout') !== null")
+    assert chrome.js("document.querySelector('#sheet .row.timeout').textContent") == "Unanswered approvals are denied after 30 min"
+    assert chrome.js("document.querySelector('#sheet .row.timeout').tagName") == "DIV"  # shown, not switchable from the phone
+    chrome.click("#sheet [data-close]")
+    chrome.click("#history")
+    chrome.wait("document.querySelector('#sheet [data-tab=decisions]') !== null")
+    chrome.click("#sheet [data-tab=decisions]")
+    chrome.wait("document.querySelectorAll('#sheet .audit').length === 1")
+    text = chrome.js("document.querySelector('#sheet .audit').textContent")
+    assert "Denied after 30 min without an answer" in text and "agent received it" in text and "npm publish" in text
+    assert "undefined" not in text and "null" not in text
 
 
 def test_interface_uses_no_emoji_glyphs():
