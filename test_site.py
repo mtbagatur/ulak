@@ -118,3 +118,10 @@ def test_theme_button_on_the_page_also_turns_the_demo(served):
     chrome.wait(f"document.documentElement.dataset.theme !== '{before}'")
     chrome.wait("document.querySelector('.phone iframe').contentDocument.documentElement.dataset.theme === document.documentElement.dataset.theme")
     chrome.js("localStorage.removeItem('theme')")
+
+
+def test_both_pages_say_what_the_mark_means(out):
+    for page in PAGES:
+        html = (out / page).read_text()
+        part = html.split('<section id="mark">')[1].split("</section>")[0]
+        assert part.count("<li") == 3 and part.count("<svg") == 4, page

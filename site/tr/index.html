@@ -23,10 +23,10 @@
 </head>
 <body>
 <header class="wrap top">
-  <a class="brand" href="./"><svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 4h12v12A12 12 0 1 1 16 4z" fill="currentColor"/><path d="M11.5 11.5v5.4a4.2 4.2 0 0 0 8.4 0v-3l4.6-4.6" fill="none" stroke-width="2.9" stroke-linecap="round" stroke-linejoin="round"/></svg>Ulak</a>
+  <a class="brand" href="./"><svg class="mark draw" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 4h12v12A12 12 0 1 1 16 4z" fill="currentColor"/><path pathLength="1" d="M11.5 11.5v5.4a4.2 4.2 0 0 0 8.4 0v-3l4.6-4.6" fill="none" stroke-width="2.9" stroke-linecap="round" stroke-linejoin="round"/></svg>Ulak</a>
   <a href="../" lang="en" hreflang="en">English</a>
   <a href="https://github.com/mtbagatur/ulak">GitHub</a>
-  <button class="theme" type="button" data-theme-toggle aria-pressed="true" aria-label="Koyu tema"><svg class="moon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><defs><mask id="hilal"><rect x="-4" y="-4" width="32" height="32" fill="#fff"/><circle class="bite" cx="16.4" cy="8.6" r="7.2" fill="#000"/></mask></defs><circle class="halo" cx="12" cy="12" r="9.5"/><circle class="disc" cx="12" cy="12" r="8.2" fill="currentColor" mask="url(#hilal)"/></svg></button>
+  <button class="theme" type="button" data-theme-toggle aria-pressed="true" aria-label="Koyu tema"><svg class="moon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><defs><mask id="hilal"><rect x="-4" y="-4" width="32" height="32" fill="#fff"/><circle class="bite" cx="16.4" cy="8.6" r="7.2" fill="#000"/></mask></defs><path class="halo" d="M12 2.5h9.5V12A9.5 9.5 0 1 1 12 2.5z"/><circle class="disc" cx="12" cy="12" r="8.2" fill="currentColor" mask="url(#hilal)"/></svg></button>
 </header>
 <main>
 <div class="wrap hero">
@@ -76,6 +76,31 @@
         <h3>Her karar deftere geçer.</h3>
         <p>Her onay, her ret ve her zaman aşımı kimin, neyi, ne zaman cevapladığıyla birlikte kendi makinende kaydedilir. Uygulamada bir dokunuş uzaklıktadır.</p>
         <figure><img src="../shots/tr/decisions.png" alt="Karar kaydı: kim neyi cevapladı, ajan ne zaman aldı" width="390" height="780" loading="lazy"></figure>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<section id="mark">
+  <div class="wrap">
+    <svg class="sign" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 4h12v12A12 12 0 1 1 16 4z"/><path d="M11.5 11.5v5.4a4.2 4.2 0 0 0 8.4 0v-3l4.6-4.6"/></svg>
+    <h2>İşaret ne söylüyor</h2>
+    <p class="intro">İşaret, içine U kazınmış bir mühür. Üç parçasının her biri uygulamanın yaptığı bir şeyi anlatır ve her birine içeride yeniden rastlarsın.</p>
+    <ol class="parts">
+      <li>
+        <svg viewBox="0 0 32 32" aria-hidden="true"><path class="g" d="M16 4h12v12A12 12 0 1 1 16 4z"/><path class="h" d="M28 16A12 12 0 1 1 16 4"/></svg>
+        <h3>Basıldığı yerde yuvarlak.</h3>
+        <p>Mühür bilerek basılır. Uygulamada Onayla bir mühürdür: bastığında işaret, cevapladığın sorunun üstüne düşer. İz bırakan komut iki mühür ister.</p>
+      </li>
+      <li>
+        <svg viewBox="0 0 32 32" aria-hidden="true"><path class="g" d="M16 4h12v12A12 12 0 1 1 16 4z"/><path class="h" d="M16 4h12v12"/></svg>
+        <h3>Tek keskin köşe: cevabın çıktığı yer.</h3>
+        <p>Seni bekleyen her şey o köşeyi taşır: sana ihtiyacı olan kart, Onayla düğmesi, bu sayfadaki çerçeveler. Çıkış oradandır.</p>
+      </li>
+      <li>
+        <svg viewBox="0 0 32 32" aria-hidden="true"><path class="g" d="M16 4h12v12A12 12 0 1 1 16 4z"/><path class="f" d="M11.5 11.5v5.4a4.2 4.2 0 0 0 8.4 0v-3"/><path class="h" d="M19.9 13.9l4.6-4.6"/></svg>
+        <h3>Evet çizgisi.</h3>
+        <p>Ulak'ın U'su kapanmaz. Son çizgisi köşeden dışarı, ajana doğru gider. Ulağın taşıdığı bundan ibarettir: senin sözün, sorana.</p>
       </li>
     </ol>
   </div>

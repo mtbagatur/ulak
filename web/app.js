@@ -125,6 +125,23 @@ const ICONS = {
   refresh: '<path d="M19 12a7 7 0 1 1-2.05-4.95"/><path d="M19 4.5V8h-3.5"/>',
   timer: '<circle cx="12" cy="13" r="7.5"/><path d="M12 9v4l2.5 2M9.5 2.5h5"/>',
 };
+// The seal you pressed, left on the question it answered. `fresh` plays the press once; a redraw of the same question keeps the mark still.
+const sealMark = '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 4h12v12A12 12 0 1 1 16 4z"/><path d="M11.5 11.5v5.4a4.2 4.2 0 0 0 8.4 0v-3l4.6-4.6"/></svg>';
+const isSealed = (pane, p) => !!p && state.sealed?.pane === pane && state.sealed.fingerprint === p.fingerprint;
+const stampHtml = p => `<span class="stamp">${sealMark}${p.destructive ? sealMark : ''}</span>`;
+function pressSeal(pane, p, el) {
+  state.sealed = {pane, fingerprint: p.fingerprint};
+  if (!el || el.querySelector('.stamp')) return;
+  state.sealHold = performance.now() + 1000;  // agents often move on at once; the seal stays long enough to be seen
+  el.insertAdjacentHTML('beforeend', stampHtml(p));
+  el.classList.add('stamped', 'pressing');
+  if (navigator.vibrate) navigator.vibrate(18);
+}
+// The answer could not be seen leaving: take the seal back, the question is still open.
+function liftSeal() {
+  state.sealed = null; state.sealHold = 0;
+  document.querySelectorAll('.stamp').forEach(el => { el.parentElement.classList.remove('stamped', 'pressing'); el.remove(); });
+}
 const icon = (name, size = 18) => `<svg class="ic" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
 function cardHtml(s) {
   const dup = [...state.sessions.values()].some(o => o !== s && o.project === s.project);
@@ -138,7 +155,7 @@ function cardHtml(s) {
   return `<button class="card-open" type="button" aria-label="${esc(t('openSession', {project: s.project}))}"></button><div class="c-top"><span class="proj">${esc(s.project)}</span>${dup && s.workspace_label ? `<span class="ws">${esc(s.workspace_label)}</span>` : ''}<span class="chip ${esc(s.agent)}">${esc(TOOLNAME[s.agent] || s.agent)}</span><span class="model">${esc(s.model)}</span><button class="pin ${pinned ? 'on' : ''}" data-pin aria-label="${esc(t(pinned ? 'unpin' : 'pin'))}" aria-pressed="${pinned}">${icon('pin', 16)}</button></div>
     <div class="state"><span class="d"></span>${esc(stateText)}</div>
     ${s.title ? `<div class="c-title">${esc(s.title)}</div>` : ''}${p && p.destructive ? `<div class="seals">${icon('seal', 14)}${icon('seal', 14)}<span>${esc(t('destructive'))}</span></div>` : ''}${body}
-    ${inline ? `<div class="c-act"><button class="deny" data-act="deny">${esc(t('deny'))}</button><button class="seal" data-act="approve">${icon('seal', 17)}${esc(t('approve'))}</button></div>` : ''}`;
+    ${inline ? `<div class="c-act"><button class="deny" data-act="deny">${esc(t('deny'))}</button><button class="seal" data-act="approve">${icon('seal', 17)}${esc(t('approve'))}</button></div>` : ''}${isSealed(s.pane_id, p) ? stampHtml(p) : ''}`;
 }
 function patch(container, items, keyOf, htmlOf, make) {
   const existing = new Map([...container.children].map(el => [el.dataset.key, el]));
@@ -158,6 +175,8 @@ function patch(container, items, keyOf, htmlOf, make) {
   existing.forEach(el => el.remove());
 }
 function renderHome() {
+  const hold = (state.sealHold || 0) - performance.now();
+  if (hold > 0 && $('#groups .stamp')) { clearTimeout(renderHome.held); renderHome.held = setTimeout(renderHome, hold); return; }
   const all = sorted();
   const blocked = all.filter(s => s.bucket === 'blocked').length;
   const unknown = all.filter(s => s.bucket === 'unknown').length;
@@ -187,7 +206,7 @@ function renderHome() {
       toggle.querySelector('span').textContent = t(state.idleOpen ? 'hide' : 'show');
     }
     patch(box, g.items, s => s.pane_id, cardHtml, s => { const b = document.createElement('div'); b._base = 'card'; return b; });
-    for (const el of box.children) { const s = state.sessions.get(el.dataset.key); el.className = `card b-${s.bucket}${s.pending?.destructive ? ' two-seals' : ''}`; }
+    for (const el of box.children) { const s = state.sessions.get(el.dataset.key); el.className = `card b-${s.bucket}${s.pending?.destructive ? ' two-seals' : ''}${isSealed(s.pane_id, s.pending) ? ' stamped' : ''}`; }
   }
   for (const pane of state.busy) setPaneActionsBusy(pane, true);
 }
@@ -206,7 +225,10 @@ async function inlineDecide(pane, decision, btn) {
   const unlock = beginPaneAction(pane); if (!unlock) return;
   try {
     const r = await act(btn, () => api(`/api/sessions/${encodeURIComponent(pane)}/approve`, {decision, fingerprint}));
-    if (r?.ok) await watchApprovalReply(pane, fingerprint, view);
+    if (r?.ok) {
+      if (decision !== 'deny') pressSeal(pane, s.pending, btn.closest('.card'));
+      if (!await watchApprovalReply(pane, fingerprint, view)) liftSeal();
+    }
     else {
       if (r?.confirm_required) toast(t('reviewInSession'), 'err');
       loadList();
@@ -521,8 +543,14 @@ function renderPrompt(p, status) {
   const sig = p ? p.fingerprint + (p.options || []).map(o => o.checked).join() : status === 'blocked' ? 'unknown' : '';
   const confirmation = $('#sheet [data-confirm-approval]');
   if (confirmation && confirmation.dataset.fingerprint !== p?.fingerprint) hideSheet();
-  state.prompt = p;
+  state.prompt = p; state.promptStatus = status;
   if (zone.dataset.sig === sig) return;
+  const hold = (state.sealHold || 0) - performance.now(), pane = state.current;
+  if (hold > 0 && pane === state.sealed?.pane && zone.querySelector('.stamp')) {
+    clearTimeout(renderPrompt.held);
+    renderPrompt.held = setTimeout(() => { if (state.current === pane) renderPrompt(state.prompt, state.promptStatus); }, hold);
+    return;
+  }
   zone.dataset.sig = sig;
   const promptAnnouncement = !p
     ? status === 'blocked' ? t('unknownScreen') : ''
@@ -539,9 +567,9 @@ function renderPrompt(p, status) {
   if (p.kind === 'approval') {
     const roles = Object.fromEntries(p.options.map(o => [o.role, o]));
     const denyOnly = p.cut;
-    zone.innerHTML = `<div class="prompt${two}"><h3>${p.destructive ? `${icon('seal', 15)}${icon('seal', 15)}<span>${esc(t('destructive'))}</span>` : esc(t('waitingApproval'))}</h3><pre>${esc(p.details)}</pre>${p.hook_note ? `<p class="hook-note">${esc(p.hook_note)}</p>` : ''}${denyOnly ? `<p class="q">${esc(t('cutNote'))}</p>` : ''}${p.destructive && !denyOnly ? `<p class="hook-note two-note">${esc(t('twoSealsNote'))}</p>` : ''}
+    zone.innerHTML = `<div class="prompt${two}${isSealed(state.current, p) ? ' stamped' : ''}"><h3>${p.destructive ? `${icon('seal', 15)}${icon('seal', 15)}<span>${esc(t('destructive'))}</span>` : esc(t('waitingApproval'))}</h3><pre>${esc(p.details)}</pre>${p.hook_note ? `<p class="hook-note">${esc(p.hook_note)}</p>` : ''}${denyOnly ? `<p class="q">${esc(t('cutNote'))}</p>` : ''}${p.destructive && !denyOnly ? `<p class="hook-note two-note">${esc(t('twoSealsNote'))}</p>` : ''}
       <div class="acts"><button class="deny" data-d="deny">${esc(t('deny'))}</button>${denyOnly ? '' : p.destructive ? `<button class="seal red" data-d="approve">${esc(t('review'))}</button>` : `<button class="seal" data-d="approve">${icon('seal', 18)}${esc(t('approve'))}</button>`}</div>
-      ${!denyOnly && roles.always && !p.destructive ? `<details class="more"><summary>${esc(t('otherAnswers'))}</summary><p>${esc(t('alwaysNote'))}</p><button class="also" data-d="always">${esc(t('alwaysAllow'))}</button></details>` : ''}</div>`;
+      ${!denyOnly && roles.always && !p.destructive ? `<details class="more"><summary>${esc(t('otherAnswers'))}</summary><p>${esc(t('alwaysNote'))}</p><button class="also" data-d="always">${esc(t('alwaysAllow'))}</button></details>` : ''}${isSealed(state.current, p) ? stampHtml(p) : ''}</div>`;
     zone.querySelectorAll('[data-d]').forEach(b => b.onclick = () => decide(b.dataset.d, b));
     return;
   }
@@ -568,7 +596,7 @@ function renderReceipt(r) {
   el.setAttribute('aria-label', label);
   const lost = r.delivered === false;
   el.className = 'receipt' + (r.delivered ? ' ok' : lost ? ' unk' : '');
-  el.innerHTML = `<span class="leg on">${esc(sent)}</span><i class="on"></i><span class="leg on">${esc(r.delivered ? '' : arrival(r))}</span><i class="${r.delivered ? 'on' : ''}"></i><span class="leg${r.delivered ? ' on' : ''}">${r.delivered ? icon('seal', 14) + esc(arrival(r)) : ''}</span>`;
+  el.innerHTML = `<span class="leg on">${r.decision === 'deny' ? '' : icon('seal', 14)}${esc(sent)}</span><i class="on"></i><span class="leg on">${esc(r.delivered ? '' : arrival(r))}</span><i class="${r.delivered ? 'on' : ''}"></i><span class="leg${r.delivered ? ' on' : ''}">${r.delivered ? icon('seal', 14) + esc(arrival(r)) : ''}</span>`;
 }
 function afterDecision(r, view) {
   if (!r || state.view !== view) return;
@@ -615,7 +643,9 @@ async function decide(decision, btn, confirmation) {
     const r = await act(btn, () => api(url, body));
     if (r?.ok) {
       if (confirmation && state.view === view) hideSheet();
+      if (decision !== 'deny') pressSeal(pane, p, state.current === pane && state.prompt?.fingerprint === p.fingerprint ? $('#promptZone .prompt') : null);
       const observed = await watchApprovalReply(pane, p.fingerprint, view);
+      if (!observed) liftSeal();
       if (state.current === pane) loadChat();
       if (observed === 'cleared') {
         const next = state.sessions.get(r.next)?.status === 'blocked' ? r.next : null;
@@ -1064,7 +1094,7 @@ function settingsSheet() {
   const bell = bellState === 'off' ? `<button id="bell" class="row">${icon('bell', 20)}<span>${esc(t('enableBell'))}</span></button>` : `<div class="row quiet">${icon('bell', 20)}<span>${esc(t(bellState === 'on' ? 'bellOn' : 'bellNone'))}</span></div>`;
   showSheet(`<h3 data-settings>${esc(t('settings'))}</h3><div class="rows">${bell}
     <button id="lang" class="row"><b class="lang">${LANG.toUpperCase()}</b><span>${esc(t('language'))}</span><small>${LANG === 'tr' ? 'English' : 'Türkçe'}</small></button>
-    <button class="row" data-theme-toggle><svg class="moon" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><defs><mask id="hilal2"><rect x="-4" y="-4" width="32" height="32" fill="#fff"/><circle class="bite" cx="16.4" cy="8.6" r="7.2" fill="#000"/></mask></defs><circle class="halo" cx="12" cy="12" r="9.5"/><circle class="disc" cx="12" cy="12" r="8.2" fill="currentColor" mask="url(#hilal2)"/></svg><span>${esc(t('appearance'))}</span><small><i class="when-dark">${esc(t('themeDark'))}</i><i class="when-light">${esc(t('themeLight'))}</i></small></button>
+    <button class="row" data-theme-toggle><svg class="moon" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><defs><mask id="hilal2"><rect x="-4" y="-4" width="32" height="32" fill="#fff"/><circle class="bite" cx="16.4" cy="8.6" r="7.2" fill="#000"/></mask></defs><path class="halo" d="M12 2.5h9.5V12A9.5 9.5 0 1 1 12 2.5z"/><circle class="disc" cx="12" cy="12" r="8.2" fill="currentColor" mask="url(#hilal2)"/></svg><span>${esc(t('appearance'))}</span><small><i class="when-dark">${esc(t('themeDark'))}</i><i class="when-light">${esc(t('themeLight'))}</i></small></button>
     <button id="refresh" class="row">${icon('refresh', 20)}<span>${esc(t('refresh'))}</span></button>
     ${approvalTimeout ? `<div class="row quiet timeout">${icon('timer', 20)}<span>${esc(t('timeoutOn', {n: approvalTimeout}))}</span></div>` : ''}</div>`);
   $('#sheet #lang').onclick = toggleLang;
@@ -1072,5 +1102,6 @@ function settingsSheet() {
   const b = $('#sheet #bell'); if (b) b.onclick = e => enableBell(e.currentTarget);
 }
 $('#settings').onclick = settingsSheet;
+setTimeout(() => $('#home .mark').classList.remove('draw'), 1300);  // drawn once per opening, not each time the home screen comes back
 refreshLang();
 loadLimits();

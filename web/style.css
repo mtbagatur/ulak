@@ -46,9 +46,13 @@ button.loading::after{content:"";position:absolute;left:calc(50% - 8px);top:calc
 .top h1{margin:0;font:700 27px/1 var(--display);color:var(--strong);flex:1;display:flex;align-items:center;gap:9px}
 .top h1 .mark{flex:none;width:30px;height:30px;color:var(--seal)}
 .top h1 .mark path+path{stroke:var(--bg)}
+/* Opening: the seal is pressed, then the U is written and its last stroke, the yes, leaves through the sharp corner. Once. */
+.mark.draw path:first-child{transform-box:fill-box;transform-origin:center;animation:press .34s var(--ease-out) both}
+.mark.draw path+path{stroke-dasharray:1 2;animation:yes .6s var(--ease-out) .26s both}
+@keyframes yes{from{stroke-dashoffset:1.05}}
 .demo-tag{font:600 11px/1 -apple-system,system-ui,sans-serif;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:4px 6px;margin-left:2px}
 .icon{background:transparent;padding:6px;min-width:44px;font-size:22px;line-height:1;color:var(--muted);display:grid;place-items:center}
-/* Night is a crescent, day is the full disc inside its ring. One shape turning into the other. */
+/* Night is a crescent. Day is the disc inside the seal's own outline: round, with the one sharp corner. One shape turning into the other. */
 .moon{display:block;color:var(--seal);overflow:visible}
 .moon .bite{transition:transform .5s var(--ease-out)}
 .moon .disc{transform-origin:12px 12px;transition:transform .5s var(--ease-out)}
@@ -155,6 +159,17 @@ details.tool pre{margin:6px 0 0;padding:8px 10px;background:var(--bg2);border-ra
 .receipt.ok .leg:last-child{color:var(--ok)}
 .receipt.ok .leg:last-child svg{animation:press .32s var(--ease-out)}
 @keyframes press{from{transform:scale(1.7);opacity:0}}
+/* Your yes, pressed onto the question it answered. Two of them for a command that needed two. */
+.stamp{position:absolute;top:7px;right:12px;z-index:2;display:flex;pointer-events:none;transform:rotate(-9deg)}
+.card .stamp{right:50px}
+.stamp svg{flex:none;width:46px;height:46px;filter:drop-shadow(0 3px 4px var(--shadow))}
+.stamp svg+svg{margin-left:-20px}
+.stamp path:first-child{fill:var(--seal)}
+.stamp path+path{fill:none;stroke:var(--zer-ink);stroke-width:2.9;stroke-linecap:round;stroke-linejoin:round}
+.two-seals .stamp path:first-child{fill:var(--lal)}.two-seals .stamp path+path{stroke:#fff}
+.pressing .stamp svg{animation:press .28s var(--ease-out) both}
+.pressing .stamp svg+svg{animation-delay:.14s}
+.stamped>:not(.stamp):not(.card-open){opacity:.5;transition:opacity .2s ease}
 .receipt.unk .leg:nth-child(3){color:var(--zer)}
 .tabs{display:flex;gap:6px;margin:2px 0 12px}
 .tabs button{flex:1;min-height:40px;padding:8px 10px;background:transparent;color:var(--muted);border:1px solid var(--line)}
@@ -166,7 +181,7 @@ details.tool pre{margin:6px 0 0;padding:8px 10px;background:var(--bg2);border-ra
 .jump{position:absolute;right:14px;bottom:150px;z-index:5;border-radius:999px;background:var(--seal);color:var(--zer-ink);font-weight:650;min-height:36px;padding:6px 14px;box-shadow:0 4px 14px var(--shadow)}
 #promptZone{min-height:0;max-height:55%;overflow-y:auto;overscroll-behavior-y:contain}
 #promptZone:empty{display:none}
-.prompt{margin:0 10px 8px;background:var(--card);border:1px solid var(--seal);border-radius:18px 4px 18px 18px;padding:13px;box-shadow:0 -10px 30px -20px var(--shadow);animation:pop .18s var(--ease-out)}
+.prompt{position:relative;margin:0 10px 8px;background:var(--card);border:1px solid var(--seal);border-radius:18px 4px 18px 18px;padding:13px;box-shadow:0 -10px 30px -20px var(--shadow);animation:pop .18s var(--ease-out)}
 .prompt h3{margin:0 0 9px;font:600 17px/1.2 var(--display);color:var(--zer);display:flex;flex-wrap:wrap;gap:4px;align-items:center;overflow-wrap:anywhere}
 .prompt.two-seals{border:3px double var(--lal);padding:10px}
 .prompt.two-seals h3{color:var(--lal-t)}.prompt.two-seals h3 span{margin-left:4px}
@@ -243,7 +258,7 @@ details.tool pre{margin:6px 0 0;padding:8px 10px;background:var(--bg2);border-ra
 .toast.out{opacity:0;transform:translateY(-6px);transition:opacity .18s,transform .18s var(--ease-out)}
 @media (prefers-reduced-motion:reduce){
   #session,.card,.prompt,.sheet-back,.sheet,.toast{animation:fade .15s ease-out both!important}
-  .b-working .state .d,.hint,details.sub .sub-mark,.receipt .leg,.receipt svg,button.loading::after{animation:none!important}
+  .b-working .state .d,.hint,details.sub .sub-mark,.receipt .leg,.receipt svg,.mark.draw path,.stamp svg,button.loading::after{animation:none!important}
   button{transition:opacity .15s ease,background .15s ease!important}
   button:active{transform:none!important}
   .sheet{transition:opacity .15s ease-out!important}

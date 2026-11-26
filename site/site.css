@@ -28,6 +28,10 @@ code,pre{font-family:var(--mono);font-size:.86em}
 .brand{display:flex;align-items:center;gap:10px;font:700 1.55rem/1 var(--display);color:var(--strong);text-decoration:none;margin-right:auto}
 .mark{flex:none;width:34px;height:34px;color:var(--seal)}
 .mark path+path{stroke:var(--bg)}
+/* Opening: the seal is pressed, then the U is written and its last stroke, the yes, leaves through the sharp corner. Once. */
+.mark.draw path:first-child{transform-box:fill-box;transform-origin:center;animation:press .34s var(--ease-out) both}
+.mark.draw path+path{stroke-dasharray:1 2;animation:yes .6s var(--ease-out) .26s both}
+@keyframes yes{from{stroke-dashoffset:1.05}}
 .top a:not(.brand){font-size:.94rem;color:var(--muted);text-decoration:none;padding:12px 0}
 .top a:not(.brand):hover{color:var(--strong)}
 /* Night is a crescent, day is the full disc inside its ring. */
@@ -116,6 +120,19 @@ section>.wrap>.intro{margin-top:14px;max-width:38em;color:var(--muted)}
   .road li::before{top:3px}
   .road figure{width:100%}
 }
+
+/* what the mark says: the whole seal, then each of its three parts lit on its own */
+.sign{display:block;width:88px;height:88px;margin-bottom:26px}
+.sign path:first-child{fill:var(--seal)}
+.sign path+path{fill:none;stroke:var(--bg);stroke-width:2.9;stroke-linecap:round;stroke-linejoin:round}
+.parts{list-style:none;margin:44px 0 0;padding:0;display:grid;gap:38px}
+.parts svg{display:block;width:60px;height:60px;overflow:visible}
+.parts .g{fill:var(--line)}
+.parts .h,.parts .f{fill:none;stroke-width:2.9;stroke-linecap:round}
+.parts .h{stroke:var(--zer)}.parts .f{stroke:var(--muted)}
+.parts h3{font-size:1.4rem;line-height:1.15;margin-top:16px;font-weight:600}
+.parts p{margin-top:10px;font-size:.98rem}
+@media (min-width:760px){.parts{grid-template-columns:repeat(3,minmax(0,1fr));gap:32px}}
 
 /* honest part: a plain list, and the one row that is ours carries the seal's corner */
 .choices{display:grid;margin-top:34px;padding:0;list-style:none;border-top:1px solid var(--line)}

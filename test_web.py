@@ -1016,3 +1016,39 @@ def test_a_plain_shell_pane_has_nothing_to_write_with(api_fixture):
     api.cards = [card("idle")]
     api.events.append({"type": "session", "session": api.cards[0]})
     chrome.wait("!document.querySelector('#composer').hidden && document.querySelector('#plainNote').hidden")
+
+
+def test_approving_presses_the_seal_onto_the_question_and_the_road_starts_from_it(api_fixture):
+    chrome, api, url = api_fixture
+    open_first(chrome, url)
+    assert chrome.js("document.querySelector('#promptZone .stamp')") is None
+    api.receipt = {"id": "r1", "ts": time.time(), "decision": "approve", "delivered": None, "destructive": False}
+    chrome.click(APPROVE)
+    chrome.wait("document.querySelector('#promptZone .prompt.stamped .stamp svg') !== null")
+    # The same question arriving again keeps its one seal.
+    api.publish_prompt({**APPROVAL})
+    time.sleep(.6)
+    assert chrome.js("document.querySelectorAll('#promptZone .prompt.stamped .stamp').length") == 1
+    chrome.wait("document.querySelector('#receipt .leg:first-child svg') !== null")
+    # A different question has not been answered: no seal on it.
+    api.publish_prompt(OTHER_APPROVAL)
+    chrome.wait("document.querySelector('#promptZone pre')?.textContent === 'pytest -q test_web.py'")
+    assert chrome.js("document.querySelector('#promptZone .stamp')") is None
+
+
+def test_refusing_leaves_no_seal(api_fixture):
+    chrome, api, url = api_fixture
+    open_first(chrome, url)
+    api.receipt = {"id": "r1", "ts": time.time(), "decision": "deny", "delivered": None, "destructive": False}
+    chrome.click('#promptZone [data-d="deny"]')
+    chrome.wait("document.querySelector('#receipt')?.textContent.includes('on its way')")
+    assert chrome.js("document.querySelector('.stamp')") is None
+    assert chrome.js("document.querySelector('#receipt .leg:first-child svg')") is None
+
+
+def test_the_mark_is_drawn_once_when_the_app_opens(api_fixture):
+    chrome, api, url = api_fixture
+    assert 'class="mark draw"' in (WEB / "index.html").read_text()
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelector('.card-open') !== null")
+    wait_for(lambda: chrome.js("!document.querySelector('#home .mark').classList.contains('draw')"), "the mark finished drawing", timeout=4)
