@@ -660,7 +660,9 @@ def test_close_is_two_step(monkeypatch):
 
 def test_start_session_validates_and_runs_fixed_command(monkeypatch, tmp_path):
     fake, c, h = _setup2(monkeypatch, "")
-    home = Path.home() / "projeler"
+    monkeypatch.setenv("HOME", str(tmp_path))
+    home = tmp_path / "projects"
+    home.mkdir()
     assert c.post("/api/sessions", headers=h, json={"cwd": "/etc", "tool": "claude", "model": ""}).status_code == 400
     assert c.post("/api/sessions", headers=h, json={"cwd": str(home), "tool": "claude", "model": "x; rm -rf ~"}).status_code == 400
     assert c.post("/api/sessions", headers=h, json={"cwd": str(home), "tool": "bash", "model": ""}).status_code == 400

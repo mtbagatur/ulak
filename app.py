@@ -36,6 +36,7 @@ CONFIG = load_config()
 RULES = CONFIG.get("rules_file") or None
 QUICK_TARGETS = {str(x).lower() for x in CONFIG.get("quick_targets", [])}
 QUICK_LABEL = CONFIG.get("quick_label", "")
+PROJECT_ROOTS = [str(x) for x in CONFIG.get("project_roots", ["~"])]  # folders whose subfolders are offered for new sessions
 MIN_WORK = float(CONFIG.get("min_work_seconds", 120))  # no "finished" push for turns shorter than this
 sessions = {}       # pane -> card (what the phone shows)
 raw_agents = {}     # pane -> last agent record from herdr
@@ -714,7 +715,7 @@ def project_dirs():
         if c and c not in seen and Path(c).is_dir():
             seen.add(c)
             out.append(c)
-    for base in (home, home / "projeler"):
+    for base in (Path(os.path.expanduser(r)) for r in PROJECT_ROOTS):
         try:
             for p in sorted(base.iterdir()):
                 if p.is_dir() and not p.name.startswith(".") and str(p) not in seen:
