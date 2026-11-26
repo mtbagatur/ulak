@@ -17,7 +17,7 @@ def build(out):
     shutil.copytree(ROOT / "site", out, dirs_exist_ok=True)
     shutil.copytree(ROOT / "docs" / "screenshots", out / "shots", dirs_exist_ok=True)
     shutil.copy2(ROOT / "docs" / "demo.gif", out / "demo.gif")
-    for name in ("icon.svg", "icon-512.png", "apple-touch-icon.png"):
+    for name in ("icon.svg", "icon-512.png", "apple-touch-icon.png", "theme.js", "elmessiri.woff2", "elmessiri-OFL.txt"):
         shutil.copy2(ROOT / "web" / name, out / name)
     demo_server.build(out / "demo")
     return out

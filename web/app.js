@@ -118,7 +118,7 @@ const pinKey = s => `${s.workspace_label}|${s.project}`;
 const isPinned = s => pins.has(pinKey(s));
 // One stroke weight for every mark; the seal (a ring around the U) is the only one that carries meaning.
 const ICONS = {
-  seal: '<circle cx="12" cy="12" r="9"/><path d="M8.5 8.5v4a3.5 3.5 0 0 0 7 0v-4"/>',
+  seal: '<path d="M12 3.5h8.5V12A8.5 8.5 0 1 1 12 3.5z"/><path d="M8.8 9v3.6a3 3 0 0 0 6 0v-2l2.9-2.9"/>',
   pin: '<path d="M9 4h6l-1 6 3 3.5H7l3-3.5z"/><path d="M12 13.5V20"/>',
   close: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
   bell: '<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
@@ -1064,6 +1064,7 @@ function settingsSheet() {
   const bell = bellState === 'off' ? `<button id="bell" class="row">${icon('bell', 20)}<span>${esc(t('enableBell'))}</span></button>` : `<div class="row quiet">${icon('bell', 20)}<span>${esc(t(bellState === 'on' ? 'bellOn' : 'bellNone'))}</span></div>`;
   showSheet(`<h3 data-settings>${esc(t('settings'))}</h3><div class="rows">${bell}
     <button id="lang" class="row"><b class="lang">${LANG.toUpperCase()}</b><span>${esc(t('language'))}</span><small>${LANG === 'tr' ? 'English' : 'Türkçe'}</small></button>
+    <button class="row" data-theme-toggle><svg class="moon" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><defs><mask id="hilal2"><rect x="-4" y="-4" width="32" height="32" fill="#fff"/><circle class="bite" cx="16.4" cy="8.6" r="7.2" fill="#000"/></mask></defs><circle class="halo" cx="12" cy="12" r="9.5"/><circle class="disc" cx="12" cy="12" r="8.2" fill="currentColor" mask="url(#hilal2)"/></svg><span>${esc(t('appearance'))}</span><small><i class="when-dark">${esc(t('themeDark'))}</i><i class="when-light">${esc(t('themeLight'))}</i></small></button>
     <button id="refresh" class="row">${icon('refresh', 20)}<span>${esc(t('refresh'))}</span></button>
     ${approvalTimeout ? `<div class="row quiet timeout">${icon('timer', 20)}<span>${esc(t('timeoutOn', {n: approvalTimeout}))}</span></div>` : ''}</div>`);
   $('#sheet #lang').onclick = toggleLang;

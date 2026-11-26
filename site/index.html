@@ -6,7 +6,7 @@
 <title>Ulak: a courier for your coding agents</title>
 <meta name="description" content="Answer your coding agents from your phone. Every yes is bound to the question you read. Served from your own computer over Tailscale: no terminal, no account, no relay.">
 <meta name="theme-color" content="#1c1520" media="(prefers-color-scheme: dark)">
-<meta name="theme-color" content="#f3ecdf" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#f2ecf0" media="(prefers-color-scheme: light)">
 <link rel="canonical" href="https://ulak.tahabagatur.com/">
 <link rel="alternate" hreflang="en" href="https://ulak.tahabagatur.com/">
 <link rel="alternate" hreflang="tr" href="https://ulak.tahabagatur.com/tr/">
@@ -17,28 +17,32 @@
 <meta property="og:image" content="https://ulak.tahabagatur.com/icon-512.png">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preload" href="elmessiri.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="site.css">
+<script src="theme.js"></script>
 </head>
 <body>
 <header class="wrap top">
-  <a class="brand" href="./"><img src="icon.svg" alt="" width="34" height="34">Ulak</a>
+  <a class="brand" href="./"><svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 4h12v12A12 12 0 1 1 16 4z" fill="currentColor"/><path d="M11.5 11.5v5.4a4.2 4.2 0 0 0 8.4 0v-3l4.6-4.6" fill="none" stroke-width="2.9" stroke-linecap="round" stroke-linejoin="round"/></svg>Ulak</a>
   <a href="tr/" lang="tr" hreflang="tr">Türkçe</a>
   <a href="https://github.com/mtbagatur/ulak">GitHub</a>
+  <button class="theme" type="button" data-theme-toggle aria-pressed="true" aria-label="Dark theme"><svg class="moon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><defs><mask id="hilal"><rect x="-4" y="-4" width="32" height="32" fill="#fff"/><circle class="bite" cx="16.4" cy="8.6" r="7.2" fill="#000"/></mask></defs><circle class="halo" cx="12" cy="12" r="9.5"/><circle class="disc" cx="12" cy="12" r="8.2" fill="currentColor" mask="url(#hilal)"/></svg></button>
 </header>
 <main>
 <div class="wrap hero">
   <div>
     <h1>A courier for your coding agents, not a key to your machine.</h1>
     <p class="sub">The yes goes to the question you read.</p>
+    <p class="route" role="img" aria-label="An answer on its way: approved, on its way, the agent received it"><span>Approved</span><i></i><span class="mid">on its way</span><i></i><span class="end"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5h8.5V12A8.5 8.5 0 1 1 12 3.5z"/><path d="M8.8 9v3.6a3 3 0 0 0 6 0v-2l2.9-2.9"/></svg>agent received it</span></p>
     <p class="lead">An agent stops and asks: <em>run this?</em> You are not at your desk. The usual fix is a terminal on your phone, which puts the whole machine on your phone. Ulak carries one thing between you and your agents: the answer.</p>
     <div class="cta">
-      <a class="btn seal" href="demo/"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke-dasharray="50 6.5" transform="rotate(-62 12 12)"/><path d="M9 8.5v4a3 3 0 0 0 6 0v-4"/></svg>Try it in your browser</a>
+      <a class="btn seal" href="demo/"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5h8.5V12A8.5 8.5 0 1 1 12 3.5z"/><path d="M8.8 9v3.6a3 3 0 0 0 6 0v-2l2.9-2.9"/></svg>Try it in your browser</a>
       <a class="btn" href="https://github.com/mtbagatur/ulak">Read the source</a>
     </div>
     <ul class="facts"><li>Served from your own computer</li><li>Reached only over your Tailscale network</li><li>No account, no relay, no telemetry</li><li>For Claude Code, Codex and Antigravity in Herdr</li></ul>
   </div>
   <figure class="stage">
-    <a class="phone" href="demo/" data-demo="demo/" data-title="Ulak demo"><img src="demo.gif" alt="Ulak on a phone: an approval, a push that needs two seals, and an answer refused because the question changed" width="390" height="780"></a>
+    <a class="phone" href="demo/" data-demo="demo/" data-title="Ulak demo"><span class="glass"><span class="bar"><b>9:41</b><i></i></span><img src="demo.gif" alt="Ulak on a phone: an approval, a push that needs two seals, and an answer refused because the question changed" width="390" height="780"></span></a>
     <figcaption class="wide-only">This is the real app over a pretend machine that lives in this tab. Tap around; nothing is sent anywhere.</figcaption>
     <figcaption class="narrow-only">Recorded from the demo. Open it to play the three scenes yourself; nothing leaves your browser.</figcaption>
   </figure>

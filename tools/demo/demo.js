@@ -247,7 +247,6 @@ diff --git a/tests/test_retry.py b/tests/test_retry.py
   try { Object.defineProperty(navigator, 'serviceWorker', {value: {register: () => Promise.reject(new Error('demo')), addEventListener() {}}, configurable: true}); } catch {}
   addEventListener('DOMContentLoaded', () => {
     const tag = Object.assign(document.createElement('small'), {textContent: 'demo', title: 'Fake sessions. Nothing leaves this tab.', className: 'demo-tag'});
-    tag.style.cssText = 'margin-left:10px;padding:2px 7px;border:1px solid currentColor;border-radius:999px;font:600 11px/1.4 system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase;opacity:.55;vertical-align:middle';
     document.querySelector('.top h1')?.append(tag);
   });
 })();

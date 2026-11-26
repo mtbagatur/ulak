@@ -575,7 +575,7 @@ def test_open_chat_retains_draft_and_waits_for_fresh_data_after_sse_ready(api_fi
 def test_sse_update_survives_a_late_list_snapshot(api_fixture):
     chrome, api, url = api_fixture
     chrome.cdp("Page.navigate", url=url)
-    chrome.wait("document.querySelector('#conn').hidden && document.querySelector('.g-blocked .card') !== null")
+    chrome.wait("document.querySelector('#conn')?.hidden && document.querySelector('.g-blocked .card') !== null")
     api.list_started.clear()
     api.list_respond.clear()
     open_settings(chrome)
@@ -592,7 +592,7 @@ def test_sse_update_survives_a_late_list_snapshot(api_fixture):
 def test_stalled_snapshot_recovers_without_reopening_the_stream(api_fixture):
     chrome, api, url = api_fixture
     chrome.cdp("Page.navigate", url=url)
-    chrome.wait("document.querySelector('#conn').hidden && document.querySelector('.g-blocked .card') !== null")
+    chrome.wait("document.querySelector('#conn')?.hidden && document.querySelector('.g-blocked .card') !== null")
     chrome.js("""(() => {
         const schedule = window.setTimeout;
         window.setTimeout = (callback, delay, ...args) => schedule(callback, delay === 15000 ? 150 : delay, ...args);
@@ -606,7 +606,7 @@ def test_stalled_snapshot_recovers_without_reopening_the_stream(api_fixture):
     chrome.wait("!document.querySelector('#conn').hidden")
     api.cards = [card("unknown")]
     api.list_respond.set()
-    chrome.wait("document.querySelector('#conn').hidden && document.querySelector('.g-unknown .card') !== null")
+    chrome.wait("document.querySelector('#conn')?.hidden && document.querySelector('.g-unknown .card') !== null")
     assert not api.ready.is_set()
 
 
@@ -714,7 +714,7 @@ def test_theme_colour_is_the_same_everywhere():
 def _palettes():
     css = (WEB / "style.css").read_text()
     dark = dict(re.findall(r"--([a-z0-9-]+):(#[0-9a-fA-F]{6})\b", css.split("{", 1)[1].split("}", 1)[0]))
-    block = re.search(r"@media \(prefers-color-scheme: ?light\)\{:root\{([^}]*)\}", css).group(1)
+    block = re.search(r":root\[data-theme=light\]\{([^}]*)\}", css).group(1)
     return dark, dict(re.findall(r"--([a-z0-9-]+):(#[0-9a-fA-F]{6})\b", block))
 
 
@@ -734,7 +734,8 @@ def test_both_themes_define_the_same_colours_and_stay_readable():
         for ink in ("text", "strong", "muted", "zer", "lal-t", "ok"):
             for ground in ("bg", "bg2", "card", "card2"):
                 assert _contrast(p[ink], p[ground]) >= 4.5, f"{name}: --{ink} on --{ground} is {_contrast(p[ink], p[ground]):.2f}"
-        assert _contrast(p["zer-ink"], p["zer"]) >= 4.5 and _contrast("#ffffff", p["lal"]) >= 4.5, name
+        # Gold as a filled surface (the seal) carries dark ink in both themes; ruby carries white.
+        assert _contrast(p["zer-ink"], p["seal"]) >= 4.5 and _contrast("#ffffff", p["lal"]) >= 4.5, name
 
 
 def test_light_theme_follows_the_system_setting(api_fixture):
@@ -748,9 +749,41 @@ def test_light_theme_follows_the_system_setting(api_fixture):
         assert chrome.js("getComputedStyle(document.body).color") == rgb(light["text"])
         assert chrome.js("getComputedStyle(document.documentElement).colorScheme") == "light"
         chrome.cdp("Emulation.setEmulatedMedia", features=[{"name": "prefers-color-scheme", "value": "dark"}])
-        assert chrome.js("getComputedStyle(document.body).backgroundColor") == rgb(dark["bg"])
+        chrome.wait(f"getComputedStyle(document.body).backgroundColor === '{rgb(dark['bg'])}'")  # theme.js hears the change a moment later
         assert chrome.js("getComputedStyle(document.documentElement).colorScheme") == "dark"
     finally:
+        chrome.cdp("Emulation.setEmulatedMedia", features=[])
+
+
+def test_theme_button_overrides_the_system_and_gives_way_when_they_agree(api_fixture):
+    chrome, api, url = api_fixture
+    dark, light = _palettes()
+    rgb = lambda h: "rgb({}, {}, {})".format(*(int(h[i:i + 2], 16) for i in (1, 3, 5)))
+    ground = "getComputedStyle(document.body).backgroundColor"
+    chrome.cdp("Emulation.setEmulatedMedia", features=[{"name": "prefers-color-scheme", "value": "dark"}])
+    try:
+        open_first(chrome, url)
+        chrome.js("document.querySelector('#back').click()")
+        assert chrome.js("document.documentElement.dataset.theme") == "dark"
+        assert chrome.js("document.querySelector('#theme').getAttribute('aria-pressed')") == "true"
+        chrome.click("#theme")
+        chrome.wait(f"{ground} === '{rgb(light['bg'])}'")
+        assert chrome.js("localStorage.getItem('theme')") == "light"
+        assert chrome.js("document.querySelector('#theme').getAttribute('aria-pressed')") == "false"
+        assert chrome.js("document.querySelector('meta[name=theme-color]').content").lower() == light["bg"].lower()
+        # The choice outlives a reload, and the first paint is already light.
+        chrome.cdp("Page.reload")
+        chrome.wait(f"document.readyState === 'complete' && {ground} === '{rgb(light['bg'])}'")
+        # The system turns light too: the override has nothing left to say, so the next press follows the system again.
+        chrome.cdp("Emulation.setEmulatedMedia", features=[{"name": "prefers-color-scheme", "value": "light"}])
+        chrome.click("#theme")
+        chrome.wait(f"{ground} === '{rgb(dark['bg'])}'")
+        assert chrome.js("localStorage.getItem('theme')") == "dark"
+        chrome.click("#theme")
+        chrome.wait(f"{ground} === '{rgb(light['bg'])}'")
+        assert chrome.js("localStorage.getItem('theme')") is None
+    finally:
+        chrome.js("localStorage.removeItem('theme')")
         chrome.cdp("Emulation.setEmulatedMedia", features=[])
 
 
@@ -788,7 +821,7 @@ def test_header_keeps_the_ledger_and_moves_rare_actions_into_settings(api_fixtur
     chrome, api, url = api_fixture
     chrome.cdp("Page.navigate", url=url)
     chrome.wait("document.querySelector('.card') !== null")
-    assert chrome.js("[...document.querySelectorAll('#home .top button')].filter(b => !b.hidden).map(b => b.id)") == ["history", "settings"]
+    assert chrome.js("[...document.querySelectorAll('#home .top button')].filter(b => !b.hidden).map(b => b.id)") == ["theme", "history", "settings"]
     chrome.click("#settings")
     chrome.wait("document.querySelector('#sheet #lang') !== null")
     assert chrome.js("['#lang', '#refresh', '[data-close]'].every(q => document.querySelector('#sheet ' + q) !== null)")

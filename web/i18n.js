@@ -26,7 +26,7 @@ const I18N = {
     agentScreen: 'Agent screen', agentScreenNote: 'What the terminal shows right now. Read-only.', refreshSession: 'Refresh', closeSession: 'Close session…', closeAsk: 'Close this session?', closeWorking: ' is working right now; unfinished work may be lost.', closeIdle: ' will be closed.', cannotUndo: ' This cannot be undone.', yesClose: 'Yes, close', closed: 'Closed',
     notifications: 'Notifications', noNotifs: 'No notifications yet', bellOn: 'Notifications on', noPermission: 'Notification permission was not granted', noPushKey: 'No push key on the server',
     needsYouTitle: '{p} · needs you', doneTitle: '{p} · done', askBody: 'Waiting for approval', finishedBody: 'Finished',
-    language: 'Language', limits: 'Limits', limitsTitle: 'Usage limits', resets: 'resets {t}', resetsIn: 'in {t}', used: '{n}% used', stale: 'not updated for {t}', noLimits: 'No limit data configured.', left: '{n}% left',
+    language: 'Language', darkTheme: 'Dark theme', appearance: 'Appearance', themeDark: 'Dark', themeLight: 'Light', limits: 'Limits', limitsTitle: 'Usage limits', resets: 'resets {t}', resetsIn: 'in {t}', used: '{n}% used', stale: 'not updated for {t}', noLimits: 'No limit data configured.', left: '{n}% left',
     pane: 'pane', settings: 'Settings', install: 'Add to Home Screen for push notifications',
   },
   tr: {
@@ -54,7 +54,7 @@ const I18N = {
     agentScreen: 'Ajan ekranı', agentScreenNote: 'Terminalde şu an görünen. Salt okunur.', refreshSession: 'Yenile', closeSession: 'Oturumu kapat…', closeAsk: 'Oturum kapatılsın mı?', closeWorking: ' şu an çalışıyor; yarım iş kaybolabilir.', closeIdle: ' kapanacak.', cannotUndo: ' Geri alınamaz.', yesClose: 'Evet, kapat', closed: 'Kapatıldı',
     notifications: 'Bildirimler', noNotifs: 'Henüz bildirim yok', bellOn: 'Bildirimler açık', noPermission: 'Bildirim izni verilmedi', noPushKey: 'Sunucuda push anahtarı yok',
     needsYouTitle: '{p} · onay bekliyor', doneTitle: '{p} · bitti', askBody: 'Onay bekliyor', finishedBody: 'İş bitti',
-    language: 'Dil', limits: 'Limitler', limitsTitle: 'Kullanım limitleri', resets: 'sıfırlanır {t}', resetsIn: '{t} sonra', used: '%{n} kullanıldı', stale: '{t} önce güncellendi', noLimits: 'Limit verisi ayarlanmamış.', left: '%{n} kaldı',
+    language: 'Dil', darkTheme: 'Koyu tema', appearance: 'Görünüm', themeDark: 'Koyu', themeLight: 'Açık', limits: 'Limitler', limitsTitle: 'Kullanım limitleri', resets: 'sıfırlanır {t}', resetsIn: '{t} sonra', used: '%{n} kullanıldı', stale: '{t} önce güncellendi', noLimits: 'Limit verisi ayarlanmamış.', left: '%{n} kaldı',
     pane: 'panel', settings: 'Ayarlar', install: 'Bildirim için ana ekrana ekle',
   },
 };
@@ -75,6 +75,8 @@ const ERR_TR = {
 const detectLang = () => {
   let saved = null; try { saved = localStorage.getItem('lang'); } catch {}
   if (saved === 'tr' || saved === 'en') return saved;
+  const asked = new URLSearchParams(location.search).get('lang');  // a page that links here in one language can say so
+  if (asked === 'tr' || asked === 'en') return asked;
   return /^tr\b/i.test(navigator.language || '') ? 'tr' : 'en';
 };
 let LANG = detectLang();

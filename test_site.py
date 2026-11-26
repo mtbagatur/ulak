@@ -53,6 +53,7 @@ def test_every_local_link_and_picture_exists_in_the_build(out):
         local = [r for r in refs if not r.startswith(("http", "mailto:"))]
         assert len(local) > 10
         for ref in local:
+            ref = ref.split('?')[0]
             target = (out / page).parent / ref
             assert (target / "index.html").is_file() if ref.endswith("/") else target.is_file(), f"{page}: {ref}"
 
@@ -92,3 +93,28 @@ def test_wide_page_runs_the_demo_under_the_hosts_own_policy(served):
     chrome.wait("document.querySelector('.phone iframe').contentDocument.querySelectorAll('.card').length === 6")
     assert chrome.js("document.documentElement.scrollWidth <= innerWidth")
     assert not [path for path in seen if "/api" in path]
+
+
+def test_phone_frame_keeps_the_demo_at_phone_width_and_inside_the_glass(served):
+    chrome, url, seen = served
+    chrome.resize(1280, 900)
+    chrome.cdp("Page.navigate", url=url + "/tr/")
+    chrome.wait("document.querySelector('.phone.live iframe') !== null")
+    chrome.wait("document.querySelector('.phone iframe').contentDocument.querySelectorAll('.card').length === 6")
+    # The demo lays out as a 390 px phone and is scaled as a whole; its edges stay inside the glass with the bezel around it.
+    assert chrome.js("document.querySelector('.phone iframe').contentWindow.innerWidth") == 390
+    assert chrome.js("""(() => { const g = document.querySelector('.phone .glass').getBoundingClientRect(), f = document.querySelector('.phone iframe').getBoundingClientRect(), p = document.querySelector('.phone').getBoundingClientRect();
+        return f.left >= g.left - .5 && f.right <= g.right + .5 && f.bottom <= g.bottom + .5 && g.left - p.left >= 10 && p.right - g.right >= 10; })()""")
+    assert chrome.js("document.querySelector('.phone iframe').contentDocument.documentElement.lang || document.querySelector('.phone iframe').contentWindow.LANG") in ("tr", "TR")
+
+
+def test_theme_button_on_the_page_also_turns_the_demo(served):
+    chrome, url, seen = served
+    chrome.resize(1280, 900)
+    chrome.cdp("Page.navigate", url=url + "/")
+    chrome.wait("document.querySelector('.phone.live iframe') !== null")
+    before = chrome.js("document.documentElement.dataset.theme")
+    chrome.click(".theme")
+    chrome.wait(f"document.documentElement.dataset.theme !== '{before}'")
+    chrome.wait("document.querySelector('.phone iframe').contentDocument.documentElement.dataset.theme === document.documentElement.dataset.theme")
+    chrome.js("localStorage.removeItem('theme')")
