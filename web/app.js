@@ -377,16 +377,38 @@ function closedBanner() {
   $('#promptZone').innerHTML = `<div class="prompt"><p class="q">${esc(t('closedSession'))}</p><button class="primary" id="toList">${esc(t('backToList'))}</button></div>`;
   $('#toList').onclick = () => history.state ? history.back() : (location.hash = '', route());
 }
-const md = t => {
-  let h = esc(t);
-  h = h.replace(/```[^\n]*\n([\s\S]*?)```/g, (_, c) => `<pre><code>${c.replace(/\n$/, '')}</code></pre>`);
-  h = h.replace(/`([^`\n]+)`/g, '<code>$1</code>').replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
-  return h;
+const md = value => {
+  const held = [];
+  const hold = html => `\u0001${held.push(html) - 1}\u0002`;
+  const link = (label, href) => {
+    const external = /^https?:\/\//i.test(href);
+    let target = href;
+    if (!external) {
+      const suffix = href.split(/[?#]/, 1)[0].split('.').pop().toLowerCase();
+      if (!/^(pdf|png|jpe?g|webp|gif|heic|txt|md|csv|json)$/.test(suffix) || /^(?:[a-z]+:|\/\/)/i.test(href)) return null;
+      target = `/api/sessions/${encodeURIComponent(state.current)}/file?path=${encodeURIComponent(href)}`;
+    }
+    return `<a href="${esc(target)}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>`;
+  };
+  let source = String(value ?? '');
+  source = source.replace(/```[^\n]*\n([\s\S]*?)```/g, (_, code) => hold(`<pre><code>${esc(code.replace(/\n$/, ''))}</code></pre>`));
+  source = source.replace(/`([^`\n]+)`/g, (_, code) => hold(`<code>${esc(code)}</code>`));
+  source = source.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (whole, label, href) => {
+    const html = link(label, href);
+    return html ? hold(html) : whole;
+  });
+  let html = esc(source).replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
+  html = html.replace(/https?:\/\/[^\s<>"']+/gi, raw => {
+    let url = raw, trailing = '';
+    while (/[),.!?;:]$/.test(url)) { trailing = url.slice(-1) + trailing; url = url.slice(0, -1); }
+    return (link(url, url) || esc(url)) + trailing;
+  });
+  return html.replace(/\u0001(\d+)\u0002/g, (_, n) => held[Number(n)] || '');
 };
 function msgNode(m) {
   if (m.role === 'tool') {
     const d = document.createElement('details'); d.className = 'tool';
-    d.innerHTML = `<summary><b>${esc(m.tool || t('tool'))}</b><span>${esc(m.text.split('\n')[0])}</span></summary>${m.result || m.text.includes('\n') ? `<pre>${esc(m.result || m.text)}</pre>` : ''}`;
+    d.innerHTML = `<summary><b>${esc(m.tool || t('tool'))}</b><span>${md(m.text.split('\n')[0])}</span></summary>${m.result || m.text.includes('\n') ? `<pre>${md(m.result || m.text)}</pre>` : ''}`;
     return d;
   }
   const d = document.createElement('div'); d.className = `msg ${m.role}`; d.innerHTML = md(m.text); return d;

@@ -465,6 +465,16 @@ def test_last_line_of_long_reply_is_reachable_above_composer(ulak):
         })()""")
 
 
+def test_chat_urls_render_as_safe_clickable_links(ulak):
+    chrome, api, url = ulak
+    api.messages = [{"role": "assistant", "text": "Read [the guide](https://example.test/guide), https://example.test/docs and [the PDF](/home/user/project/notes.pdf)."}]
+    open_first(chrome, url)
+    chrome.wait("document.querySelector('#messages a[href*=example]') !== null")
+    assert chrome.js("document.querySelector('#messages a')?.getAttribute('href')") == "https://example.test/guide"
+    assert chrome.js("document.querySelector('#messages a')?.rel") == "noopener noreferrer"
+    assert chrome.js("new URL(document.querySelectorAll('#messages a')[2].href).searchParams.get('path')") == "/home/user/project/notes.pdf"
+
+
 def test_offline_refresh_retains_cards_and_sse_reconnect_loads_snapshot(ulak):
     chrome, api, url = ulak
     api.cards = [card("working")]

@@ -2,6 +2,7 @@ import asyncio
 import subprocess
 import getpass
 import json
+import mimetypes
 import os
 import re
 import secrets
@@ -804,6 +805,7 @@ def codex_limits():
 
 UPLOAD_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif", "image/heic": ".heic", "application/pdf": ".pdf", "text/plain": ".txt"}
 UPLOAD_MAX = 15 * 1024 * 1024
+VIEWABLE_SUFFIXES = {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".heic", ".txt", ".md", ".csv", ".json"}
 
 
 @app.post("/api/sessions/{pane}/upload")
@@ -829,6 +831,28 @@ async def upload(pane: str, request: Request):
     path = folder / f"{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(3)}{UPLOAD_TYPES[ctype]}"
     path.write_bytes(data)
     return {"ok": True, "path": str(path), "bytes": len(data)}
+
+
+@app.get("/api/sessions/{pane}/file")
+async def session_file(pane: str, path: str):
+    """Serve a viewable document only from this pane's workspace or Ulak uploads."""
+    item = must_exist(pane)
+    agent = raw_agents.get(pane, {})
+    cwd = Path(agent.get("cwd") or item.get("cwd") or ".").expanduser().resolve()
+    upload_dir = (STATE / "uploads").resolve()
+    requested = Path(path).expanduser()
+    candidate = (requested if requested.is_absolute() else cwd / requested).resolve()
+    if candidate.suffix.lower() not in VIEWABLE_SUFFIXES:
+        raise HTTPException(415, "Unsupported document type")
+    if not (candidate.is_relative_to(cwd) or candidate.is_relative_to(upload_dir)) or not candidate.is_file():
+        raise HTTPException(404, "Document not found in this workspace")
+    media_type = mimetypes.guess_type(candidate.name)[0] or "application/octet-stream"
+    if media_type in {"text/markdown", "application/json"}:
+        media_type = "text/plain"
+    response = FileResponse(candidate, media_type=media_type, filename=candidate.name, content_disposition_type="inline")
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.get("/api/limits")

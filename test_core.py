@@ -675,6 +675,21 @@ def test_upload_saves_file_and_rejects_bad_types(monkeypatch, tmp_path):
     assert c.post("/api/sessions/w9:p1/upload", content=b"x", headers={"Content-Type": "image/png"}).status_code == 403
 
 
+def test_session_file_route_serves_documents_within_workspace_only(monkeypatch, tmp_path):
+    fake, c, h = _setup(monkeypatch, CODEX)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "notes.md").write_text("# Notes")
+    outside = tmp_path / "outside.md"
+    outside.write_text("private")
+    monkeypatch.setattr(ulak, "raw_agents", {"w9:p1": {"pane_id": "w9:p1", "cwd": str(workspace)}})
+    response = c.get("/api/sessions/w9:p1/file", headers=h, params={"path": "notes.md"})
+    assert response.status_code == 200 and response.text == "# Notes"
+    assert response.headers["content-disposition"].startswith("inline")
+    assert c.get("/api/sessions/w9:p1/file", headers=h, params={"path": str(outside)}).status_code == 404
+    assert c.get("/api/sessions/w9:p1/file", headers=h, params={"path": "missing.exe"}).status_code == 415
+
+
 def test_limits_order_claude_codex_agy(monkeypatch, tmp_path):
     fake, c, h = _setup(monkeypatch, CODEX)
     f = tmp_path / "a.json"; f.write_text('{"h5": {"used_percentage": 1, "resets_at": 5}}')
