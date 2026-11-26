@@ -1185,3 +1185,15 @@ def test_placeholder_text_is_as_readable_as_other_quiet_text(api_fixture):
             "(() => { const el = document.createElement('i'); el.style.color = 'var(--muted)'; document.body.append(el);"
             " return [getComputedStyle(document.querySelector('#message'), '::placeholder').color, getComputedStyle(el).color]; })()")
         assert placeholder == muted, scheme
+
+
+
+def test_jump_to_new_message_button_speaks_the_chosen_language(api_fixture):
+    chrome, _api, url = api_fixture
+    for lang, label in (("en", "↓ New"), ("tr", "↓ Yeni")):
+        chrome.cdp("Page.navigate", url=f"{url}/?{lang}")
+        chrome.wait("document.querySelector('#jump') !== null && document.readyState === 'complete'")
+        chrome.js(f"localStorage.setItem('lang', '{lang}')")
+        chrome.cdp("Page.navigate", url=f"{url}/?{lang}2")
+        chrome.wait(f"document.readyState === 'complete' && document.documentElement.lang === '{lang}'")
+        assert chrome.js("document.querySelector('#jump').textContent") == label
