@@ -69,6 +69,7 @@ const ERR_TR = {
   'The full command is not visible; it can only be denied': 'Komutun tamamı görünmüyor; yalnız reddedilebilir',
   'Session-wide allow is disabled for destructive commands': 'Yıkıcı komutta oturum boyu izin kapalı', 'Session is no longer waiting for anything': 'Oturum artık bir şey beklemiyor',
   'No menu to choose from on screen': 'Ekranda seçilecek bir menü yok', 'The screen changed; refresh': 'Ekran değişti; yenile', 'No such option': 'Böyle bir seçenek yok',
+  'Herdr is not reachable': 'Herdr yanıt vermiyor',
   'Invalid key': 'Geçersiz tuş', 'Destructive command: approve from the approval card (two steps)': 'Yıkıcı komut: onay kartından iki adımla onayla',
   'Invalid tool or model': 'Araç ya da model geçersiz', 'Invalid folder': 'Klasör geçersiz', 'Invalid pin list': 'Geçersiz pin listesi', 'Tailscale identity required': 'Tailscale kimliği gerekli',
 };

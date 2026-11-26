@@ -1223,3 +1223,43 @@ def test_herdr_event_longer_than_the_default_line_limit_arrives(tmp_path):
             await client.close()
             return event
     assert asyncio.run(scenario()).get("event") == "pane.created"
+
+
+@pytest.mark.parametrize("reply", [lambda m: None, lambda m: "", lambda m: "{half a reply\n"], ids=["silent", "closed", "garbled"])
+def test_herdr_that_cannot_answer_is_reported_as_unreachable(tmp_path, reply):
+    with pytest.raises(HerdrUnavailable, match="Herdr is not reachable"):
+        _herdr_call(tmp_path, reply, timeout=.2)
+
+
+def test_a_missing_herdr_socket_is_reported_as_unreachable(tmp_path):
+    with pytest.raises(HerdrUnavailable, match="Herdr is not reachable"):
+        asyncio.run(HerdrClient(str(tmp_path / "nothing.sock")).call("agent.list"))
+
+
+@pytest.mark.parametrize("method,path,body", [
+    ("get", "/api/sessions", None), ("get", "/api/sessions/w9:p1/screen", None), ("get", "/api/sessions/w9:p1/chat", None),
+    ("post", "/api/sessions/w9:p1/prompt", {"text": "hello"}), ("post", "/api/sessions/w9:p1/keys", {"keys": ["esc"]}),
+    ("post", "/api/sessions/w9:p1/choose", {"n": 1, "fingerprint": "x"}),
+    ("post", "/api/sessions/w9:p1/approve", {"decision": "approve", "fingerprint": "x"}),
+])
+@pytest.mark.parametrize("error,status,detail", [
+    (HerdrUnavailable(), 503, "Herdr is not reachable"), (HerdrError("pane not found"), 502, "pane not found")], ids=["down", "refusing"])
+def test_the_phone_is_told_what_went_wrong_with_herdr(monkeypatch, method, path, body, error, status, detail):
+    _, c, h = _setup2(monkeypatch, ASK)
+    api.read_cache.clear()
+
+    class Broken:
+        async def call(self, method, params=None):
+            raise error
+
+    monkeypatch.setattr(api, "client", Broken())
+    r = c.request(method, path, headers=h, json=body)
+    if path.endswith("approve") and status == 502:
+        status, detail = 409, "No recognised approval on screen; use the terminal"  # Herdr answered: there is just nothing to approve
+    assert (r.status_code, r.json()) == (status, {"detail": detail})
+    if path.endswith("approve"):
+        assert api.read_audit()[-1]["outcome"] == "refused"
+
+
+def test_the_herdr_outage_has_turkish_words():
+    assert "'Herdr is not reachable':" in (Path(__file__).parent / "web/i18n.js").read_text()

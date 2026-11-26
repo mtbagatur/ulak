@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 from chat import claude_chat, claude_path, detect_model, preview_from_screen, screen_chat, SPINNER, strip_ansi
 from core import NotificationGate, tidy_details, bucket, build_push, is_destructive, parse_approval, parse_codex_limits, parse_limits, parse_prompt, project_name, status_rank, slash_commands, changes
-from herdr_client import HerdrClient, HerdrError
+from herdr_client import HerdrClient, HerdrError, HerdrUnavailable
 
 ROOT = Path(__file__).parent
 WEB = ROOT / "web"
@@ -644,6 +644,12 @@ async def require_identity(request, call_next):
     return response
 
 
+@app.exception_handler(HerdrError)
+async def herdr_failed(request, exc):
+    """Herdr being down or saying no is something the phone can put into words, not a crash."""
+    return JSONResponse({"detail": str(exc)}, status_code=503 if isinstance(exc, HerdrUnavailable) else 502)
+
+
 @app.get("/")
 async def index():
     return FileResponse(WEB / "index.html")
@@ -693,6 +699,8 @@ def next_blocked(exclude=None):
 async def list_sessions():
     try:
         return await load_all()
+    except HerdrError:
+        raise
     except Exception as exc:
         raise HTTPException(503, str(exc))
 
@@ -799,6 +807,8 @@ async def approve(pane: str, action: Action, request: Request):
 async def _approve(pane, item, action, request, seen):
     try:
         pending = await fresh_pending(pane)
+    except HerdrUnavailable as exc:
+        raise HTTPException(503, str(exc))
     except Exception:
         pending = None
     discard_changed_confirmation(pane, (pending or {}).get("fingerprint"))

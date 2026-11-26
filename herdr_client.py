@@ -33,22 +33,25 @@ class HerdrClient:
     async def call(self, method, params=None, timeout=15):
         self.counter += 1
         msg_id = f"ulak:{self.counter}"
-        reader, writer = await asyncio.open_unix_connection(self.socket_path, limit=LINE_LIMIT)
         try:
-            writer.write((json.dumps({"id": msg_id, "method": method, "params": params or {}}) + "\n").encode())
-            await writer.drain()
-            while True:
-                line = await asyncio.wait_for(reader.readline(), timeout)
-                if not line:
-                    raise HerdrError("Herdr socket closed")
-                msg = json.loads(line)
-                if msg.get("id") != msg_id:
-                    continue
-                if "error" in msg:
-                    raise HerdrError(msg["error"].get("message", "Herdr error"))
-                return msg.get("result", {})
-        finally:
-            writer.close()
+            reader, writer = await asyncio.open_unix_connection(self.socket_path, limit=LINE_LIMIT)
+            try:
+                writer.write((json.dumps({"id": msg_id, "method": method, "params": params or {}}) + "\n").encode())
+                await writer.drain()
+                while True:
+                    line = await asyncio.wait_for(reader.readline(), timeout)
+                    if not line:
+                        raise HerdrUnavailable()
+                    msg = json.loads(line)
+                    if msg.get("id") != msg_id:
+                        continue
+                    if "error" in msg:
+                        raise HerdrError(msg["error"].get("message", "Herdr error"))
+                    return msg.get("result", {})
+            finally:
+                writer.close()
+        except (OSError, ValueError, asyncio.TimeoutError) as exc:
+            raise HerdrUnavailable() from exc
 
     request = call
 
