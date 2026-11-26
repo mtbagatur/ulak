@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 
 from chat import claude_chat, claude_path, detect_model, preview_from_screen, screen_chat, SPINNER, strip_ansi
@@ -669,6 +670,8 @@ async def lifespan(app):
 
 app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=WEB), name="static")
+# A phone on mobile data asks for the conversation every second or two. Event streams are left alone (starlette 0.46 and later).
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
 def host_name(value):

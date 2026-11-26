@@ -1724,3 +1724,44 @@ def test_every_fixed_refusal_the_api_can_send_has_turkish_words():
     sent = set(re.findall(r'(?:HTTPException\(\d+, |"detail": )"([^"{]+)"', source))
     words = (Path(__file__).parent / "web/i18n.js").read_text()
     assert sent and sorted(m for m in sent if f"'{m}':" not in words) == []
+
+
+def test_pages_and_answers_travel_compressed(monkeypatch):
+    with TestClient(api.app).stream("GET", "/static/app.js", headers={"Accept-Encoding": "gzip"}) as r:
+        sent = b"".join(r.iter_raw())
+    assert r.headers["content-encoding"] == "gzip" and len(sent) < (Path(__file__).parent / "web/app.js").stat().st_size / 2
+
+
+def test_the_live_event_stream_is_never_compressed_or_held_back(monkeypatch):
+    monkeypatch.setattr(api, "allowed_login", "user@example.test")
+    scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "GET", "scheme": "http", "path": "/api/events",
+             "raw_path": b"/api/events", "root_path": "", "query_string": b"", "server": ("127.0.0.1", 8765), "client": ("127.0.0.1", 1),
+             "headers": [(b"host", b"127.0.0.1:8765"), (b"accept-encoding", b"gzip"), (b"tailscale-user-login", b"user@example.test")]}
+
+    async def first_bytes():
+        sent, got, requested = [], asyncio.Event(), False
+
+        async def receive():
+            nonlocal requested
+            if not requested:
+                requested = True
+                return {"type": "http.request", "body": b"", "more_body": False}
+            await asyncio.Event().wait()
+
+        async def send(message):
+            sent.append(message)
+            if message.get("body"):
+                got.set()
+
+        task = asyncio.create_task(api.app(scope, receive, send))
+        try:
+            await asyncio.wait_for(got.wait(), 3)
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        return sent
+
+    sent = asyncio.run(first_bytes())
+    headers = dict(sent[0]["headers"])
+    assert sent[0]["status"] == 200 and b"content-encoding" not in headers
+    assert next(m["body"] for m in sent if m.get("body")).endswith(b"event: ready\ndata: {}\n\n")
