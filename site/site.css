@@ -52,14 +52,15 @@ code,pre{font-family:var(--mono);font-size:.86em}
 [data-theme=light] .moon .halo{transform:none;opacity:1}
 
 /* hero */
-.hero{display:grid;gap:44px;padding-block:28px 72px;align-items:center}
+.hero{display:grid;grid-template-columns:minmax(0,1fr);gap:44px;padding-block:28px 72px;align-items:center}
 .hero h1{font-size:clamp(2.5rem,7.4vw,4.3rem);line-height:1.02;letter-spacing:-.01em}
 .hero .sub{font:500 1.4rem/1.3 var(--display);color:var(--zer);margin-top:18px}
 /* The road one answer travels, the same line the app draws above the keyboard. It is drawn once, when the page opens. */
-.route{display:flex;align-items:center;gap:10px;max-width:27em;margin-top:22px;font:.8rem var(--mono);color:var(--muted)}
+/* On a small phone the type shrinks with the screen, so the whole road stays on one line inside the gutter. */
+.route{display:flex;align-items:center;gap:8px;max-width:27em;margin-top:22px;font:min(.8rem,calc((100vw - 116px)/21)) var(--mono);color:var(--muted)}
 .route span{flex:none;display:flex;align-items:center;gap:6px;white-space:nowrap}
 .route span:first-child,.route .end{color:var(--strong)}
-.route i{flex:1;min-width:14px;height:2px;border-radius:1px;background:repeating-linear-gradient(90deg,var(--line) 0 5px,transparent 5px 9px);position:relative;overflow:hidden}
+.route i{flex:1;min-width:10px;height:2px;border-radius:1px;background:repeating-linear-gradient(90deg,var(--line) 0 5px,transparent 5px 9px);position:relative;overflow:hidden}
 .route i::after{content:"";position:absolute;inset:0;background:var(--ok);transform-origin:0 50%;animation:leg .7s .5s both cubic-bezier(.4,0,.2,1)}
 .route i+span+i::after{animation-delay:1.3s}
 .route .mid{animation:show .3s 1.2s both}
@@ -78,7 +79,7 @@ code,pre{font-family:var(--mono);font-size:.86em}
 .btn svg{flex:none}
 .facts{list-style:none;display:grid;gap:7px;padding:0;margin:30px 0 0;font-size:.92rem;color:var(--muted)}
 .facts li{display:flex;gap:10px;align-items:baseline}
-.facts li::before{content:"";flex:none;width:7px;height:7px;border-radius:50% 1px 50% 50%;background:var(--seal);transform:translateY(-1px)}
+.facts li::before{content:"";flex:none;width:7px;height:7px;border-radius:50%;background:var(--seal);transform:translateY(-1px)}
 
 /* The phone. The demo runs at a real phone's width (390) and is scaled down as a whole, so nothing inside sits against the glass. */
 .stage{margin:0;display:grid;justify-items:center;gap:16px}
@@ -109,7 +110,7 @@ section>.wrap>.intro{margin-top:14px;max-width:38em;color:var(--muted)}
 .road{list-style:none;margin:44px 0 0;padding:0;display:grid;gap:48px;position:relative}
 .road::before{content:"";position:absolute;left:8px;top:8px;bottom:0;width:2px;background:var(--line)}
 .road li{position:relative;padding-left:40px}
-.road li::before{content:"";position:absolute;left:0;top:3px;width:18px;height:18px;border-radius:50% 2px 50% 50%;background:var(--seal);box-shadow:0 0 0 5px var(--bg)}
+.road li::before{content:"";position:absolute;left:0;top:3px;width:18px;height:18px;border-radius:50%;background:var(--seal);box-shadow:0 0 0 5px var(--bg)}
 .road li.two::before{background:var(--lal);box-shadow:0 0 0 3px var(--bg),0 0 0 5px var(--lal),0 0 0 9px var(--bg)}
 .road li.done::before{background:var(--ok)}
 .stop{font:600 1rem/1.2 var(--display);color:var(--zer)}
@@ -121,7 +122,8 @@ section>.wrap>.intro{margin-top:14px;max-width:38em;color:var(--muted)}
 @media (min-width:900px){
   .road{grid-template-columns:repeat(4,minmax(0,1fr));gap:28px}
   .road::before{left:0;right:0;top:11px;bottom:auto;width:auto;height:2px}
-  .road li{padding:40px 0 0}
+  /* Each stop is label, heading, words, picture; the words take the slack so the four pictures start on one line. */
+  .road li{padding:40px 0 0;display:grid;grid-template-rows:auto auto 1fr auto}
   .road li::before{top:3px}
   .road figure{width:100%}
 }
@@ -155,6 +157,12 @@ section>.wrap>.intro{margin-top:14px;max-width:38em;color:var(--muted)}
 pre{margin:26px 0 0;padding:20px 22px;background:var(--bg2);border:1px solid var(--line);border-radius:18px;overflow-x:auto;line-height:1.75;color:var(--strong);max-width:100%}
 .need{margin-top:14px;max-width:44em}
 .after{margin-top:18px;max-width:44em}
+
+/* the page for a wrong address */
+.lost{padding-block:56px 96px}
+.lost h1{font-size:clamp(2.2rem,6.4vw,3.4rem);line-height:1.05}
+.lost .sub{font:500 1.3rem/1.3 var(--display);color:var(--zer);margin-top:16px}
+.lost .lead{margin-top:34px;color:var(--muted)}
 
 footer{border-top:1px solid var(--line);padding:28px 0 44px;font-size:.9rem;color:var(--muted)}
 footer .wrap{display:flex;flex-wrap:wrap;gap:8px 22px}

@@ -144,3 +144,44 @@ def test_both_pages_say_what_the_mark_means(out):
         assert part.count("<li") == 3 and part.count("<svg") == 4, page
         # pressed wax, the ring the press leaves, the U: nothing about a corner any more
         assert part.count('href="#wax"') == 4 and "corner" not in part and "köşe" not in part, page
+
+
+def test_the_host_cannot_rewrite_the_install_command(out):
+    # Cloudflare's e-mail obfuscation swaps anything shaped like an address for a script-decoded link, even inside <pre>.
+    for page in PAGES:
+        html = (out / page).read_text()
+        assert "<!--email_off--><pre>" in html and "</pre><!--/email_off-->" in html, page
+        assert html.count("@") == html.split("<!--email_off-->")[1].split("<!--/email_off-->")[0].count("@"), page
+
+
+def test_small_phones_do_not_scroll_sideways(served):
+    chrome, url, seen = served
+    for path in ("/", "/tr/"):
+        for width in (375, 360, 320):
+            chrome.resize(width, 700)
+            chrome.cdp("Page.navigate", url=url + path)
+            chrome.wait("document.readyState === 'complete' && document.querySelector('.route .end') !== null")
+            assert chrome.js("document.documentElement.scrollWidth <= innerWidth"), (path, width)
+            # the road line under the heading ends inside the page gutter (layout box: the opening animation scales it)
+            assert chrome.js("(() => { const e = document.querySelector('.route .end'); return e.offsetLeft + e.offsetWidth <= document.documentElement.clientWidth - 16; })()"), (path, width)
+
+
+def test_no_marker_keeps_a_sharp_corner(out):
+    assert not re.search(r"border-radius:50% \d+px 50% 50%", (out / "site.css").read_text())
+
+
+def test_the_four_stops_line_up_on_a_wide_screen(served):
+    chrome, url, seen = served
+    for path in ("/", "/tr/"):
+        chrome.resize(1280, 900)
+        chrome.cdp("Page.navigate", url=url + path)
+        chrome.wait("document.readyState === 'complete' && document.querySelectorAll('.road figure').length === 4")
+        tops = chrome.js("[...document.querySelectorAll('.road figure')].map(f => Math.round(f.getBoundingClientRect().top + scrollY))")
+        assert len(set(tops)) == 1, (path, tops)
+
+
+def test_a_wrong_address_gets_a_page_that_says_so(out):
+    # Without 404.html the host answers every unknown path with the landing page and a 200.
+    html = (out / "404.html").read_text()
+    assert 'href="/"' in html and 'href="/site.css"' in html and 'name="robots" content="noindex"' in html
+    assert not re.findall(r'(?:src|href)="(?!/|https://github\.com/)', html)  # served at any depth, so every path is absolute
