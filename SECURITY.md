@@ -4,9 +4,11 @@ Ulak lets a phone answer the coding agents on your computer. This page says what
 
 ## The model in one paragraph
 
-Ulak listens on `127.0.0.1:8765` and nowhere else. The phone reaches it through [Tailscale Serve](https://tailscale.com/kb/1312/serve), which terminates TLS inside your tailnet and adds a `Tailscale-User-Login` header that a client cannot set through the proxy. Every API request must carry that header with exactly the login in `ULAK_ALLOWED_LOGIN`; anything else gets 403. There is no account, no relay, no telemetry, and the only outbound traffic is Web Push to the push service your browser chose.
+Ulak listens on `127.0.0.1:8765` and nowhere else. The phone reaches it through [Tailscale Serve](https://tailscale.com/kb/1312/serve), which terminates TLS inside your tailnet and adds a `Tailscale-User-Login` header that a client cannot set through the proxy. Every API request must carry that header with exactly the login in `ULAK_ALLOWED_LOGIN`; anything else gets 403. The one exception is `/api/push/public`, which returns the public half of the push key, like the app shell itself. There is no account, no relay, no telemetry, and the only outbound traffic is Web Push to the push service your browser chose.
 
 ## What each check does
+
+**Only Ulak's own page may act.** The identity header says whose device sent a request, not which page asked the browser to send it. So a request that changes anything is refused when the browser says it comes from another site (`Sec-Fetch-Site`, or `Origin` in a browser without it). And Ulak answers only to its own names (`localhost`, `127.0.0.1`, `*.ts.net`, names without a dot, and `allowed_hosts` from your config), so a web page cannot point a name of its own at `127.0.0.1` and write the header itself.
 
 **The fingerprint: your yes goes to the question you read.** When Ulak shows an approval it also sends a hash of that prompt. The phone returns the hash with the decision. Before any key is sent, the server reads the agent's screen again and compares. If the prompt changed (the agent moved on, someone answered at the keyboard, a second question replaced the first) the request is refused with 409 and nothing is typed. One answer at a time is allowed per pane, so two taps cannot race each other.
 

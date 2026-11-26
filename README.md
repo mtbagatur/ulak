@@ -144,6 +144,7 @@ Optional, in `.secrets/config.json` (untracked):
 - `quick_targets` / `quick_label`: workspace or project names that get the quick-send button.
 - `limit_files`: usage-limit files shown in the limits strip. Two formats are understood: JSON `{"h5": {"used_percentage": 4, "resets_at": 1795200600}, "d7": {...}, "ts": 1795183857}` (epoch seconds), or tab-separated text `name<TAB>window<TAB>NN%<TAB>ISO-reset` where NN% is what is *remaining*.
 - `project_roots`: folders whose subfolders appear in the new-session picker (default `["~"]`). New sessions can only start inside your home folder.
+- `allowed_hosts`: extra host names Ulak answers to. `localhost`, `127.0.0.1`, names without a dot and `*.ts.net` already work; any other name gets 403.
 - `min_work_seconds`: a "finished" push is skipped when the turn took less than this (default 120).
 - `approval_timeout_minutes`: off by default (`0`), so an approval waits for you however long that takes. Set it and Ulak denies an approval nobody answered in that many minutes. It can only deny, only the exact prompt it has been timing, and each one is written to the decision log as a timeout. The clock restarts when Ulak restarts.
 

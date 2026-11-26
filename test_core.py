@@ -1439,3 +1439,52 @@ def test_a_broken_event_stream_is_repaired_and_phones_are_told(monkeypatch, tmp_
     told = asyncio.run(scenario())
     assert fake.subscribed[-1] == ["w5:p1"]
     assert [(e["type"], e.get("pane") or e["session"]["pane_id"]) for e in told] == [("removed", "w1:p1"), ("session", "w5:p1")]
+
+
+# --- requests another web page makes with the phone's own identity ------------
+
+def _idle_agent(monkeypatch):
+    fake, c, h = _setup2(monkeypatch, "")
+    api.sessions["w9:p1"]["status"] = "idle"
+    return fake, c, h
+
+
+@pytest.mark.parametrize("browser", [
+    {"Sec-Fetch-Site": "cross-site", "Origin": "https://evil.example"},
+    {"Sec-Fetch-Site": "same-site", "Origin": "https://other.tail1234.ts.net"},
+    {"Origin": "https://evil.example"},  # an older browser that sends no fetch metadata
+    {"Origin": "null"},
+])
+def test_another_web_page_cannot_act_with_the_phones_identity(monkeypatch, browser):
+    fake, c, h = _idle_agent(monkeypatch)
+    r = c.post("/api/sessions/w9:p1/prompt", headers={**h, **browser}, content=b'{"text":"x"}')  # no Content-Type: no preflight
+    assert r.status_code == 403
+    assert not any(m == "agent.prompt" for m, _ in fake.calls)
+
+
+@pytest.mark.parametrize("browser", [
+    {},  # curl and other programs
+    {"Sec-Fetch-Site": "same-origin", "Origin": "https://laptop.tail1234.ts.net"},
+    {"Origin": "https://laptop.tail1234.ts.net", "Host": "laptop.tail1234.ts.net"},
+    {"Origin": "https://laptop.tail1234.ts.net", "Host": "127.0.0.1:8765", "X-Forwarded-Host": "laptop.tail1234.ts.net"},
+])
+def test_ulaks_own_page_still_acts(monkeypatch, browser):
+    fake, c, h = _idle_agent(monkeypatch)
+    assert c.post("/api/sessions/w9:p1/prompt", headers={**h, **browser}, json={"text": "x"}).status_code == 200
+
+
+@pytest.mark.parametrize("host,status", [
+    ("attacker.example:8765", 403),  # a name rebound to 127.0.0.1 can set any header, the identity too
+    ("ts.net.attacker.example", 403),
+    ("127.0.0.1:8765", 200), ("localhost:8765", 200), ("[::1]:8765", 200),
+    ("laptop.tail1234.ts.net", 200), ("laptop", 200),
+])
+def test_only_the_names_ulak_is_reached_by_are_answered(monkeypatch, host, status):
+    fake, c, h = _setup2(monkeypatch, "")
+    assert c.get("/api/config", headers={**h, "Host": host}).status_code == status
+
+
+def test_an_extra_host_name_can_be_configured(monkeypatch):
+    fake, c, h = _setup2(monkeypatch, "")
+    monkeypatch.setattr(api, "ALLOWED_HOSTS", {"ulak.home.example"})
+    assert c.get("/api/config", headers={**h, "Host": "ulak.home.example"}).status_code == 200

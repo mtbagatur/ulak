@@ -9,6 +9,7 @@ import secrets
 import time
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -25,7 +26,7 @@ STATE = ROOT / ".state"
 
 
 def load_config():
-    """Optional local config (gitignored): .secrets/config.json. Keys: rules_file, quick_targets, quick_label, limit_files."""
+    """Optional local config (gitignored): .secrets/config.json. Keys: rules_file, quick_targets, quick_label, limit_files, allowed_hosts."""
     try:
         return json.loads((ROOT / ".secrets/config.json").read_text())
     except (OSError, ValueError):
@@ -70,6 +71,7 @@ recovered_at = 0.0
 RECOVER_EVERY = 10  # seconds between two repairs of the event stream
 client = HerdrClient()
 allowed_login = os.environ.get("ULAK_ALLOWED_LOGIN", "")
+ALLOWED_HOSTS = {str(x).lower() for x in CONFIG.get("allowed_hosts", [])}  # names besides localhost and *.ts.net
 
 TOOLS = {
     "claude": {"cmd": "claude", "models": {"": "", "sonnet": " --model sonnet", "opus": " --model opus", "haiku": " --model haiku"}},
@@ -668,9 +670,38 @@ app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 
 
+def host_name(value):
+    try:
+        return (urlsplit("//" + (value or "")).hostname or "").rstrip(".")
+    except ValueError:
+        return ""
+
+
+def known_host(request):
+    """A web page can point its own name at 127.0.0.1 and then send any header it likes, so Ulak answers only to its own names."""
+    name = host_name(request.headers.get("host"))
+    return name in ALLOWED_HOSTS or name in ("127.0.0.1", "::1") or name.endswith(".ts.net") or bool(name) and "." not in name and ":" not in name
+
+
+def from_another_page(request):
+    """Tailscale signs whatever the phone's browser sends, including a request that some other web page asked it to send."""
+    site = request.headers.get("sec-fetch-site")
+    if site:
+        return site not in ("same-origin", "none")
+    origin = request.headers.get("origin")
+    if origin is None:
+        return False  # not a browser acting for a page
+    own = {request.headers.get("host"), request.headers.get("x-forwarded-host")}
+    return urlsplit(origin).netloc not in own
+
+
 @app.middleware("http")
 async def require_identity(request, call_next):
     path = request.url.path
+    if not known_host(request):
+        return JSONResponse({"detail": "Unknown host name"}, status_code=403)
+    if request.method not in ("GET", "HEAD") and from_another_page(request):
+        return JSONResponse({"detail": "Request from another web page refused"}, status_code=403)
     if path.startswith("/static") or path in ("/", "/manifest.webmanifest", "/sw.js", "/api/push/public"):
         response = await call_next(request)
     else:
