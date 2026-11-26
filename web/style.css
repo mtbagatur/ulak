@@ -244,6 +244,7 @@ details.tool pre{margin:6px 0 0;padding:8px 10px;background:var(--bg2);border-ra
 .row .lang{min-width:20px;text-align:center}
 #settings{position:relative}
 #settings.dot::after{content:"";position:absolute;top:9px;right:9px;width:8px;height:8px;border-radius:50%;background:var(--zer);border:2px solid var(--bg)}
+.sheet .scroll{padding-right:10px}
 .sheet h3{margin:2px 44px 10px 0;color:var(--strong);font:650 20px/1.25 var(--display)}
 .sheet p{margin:0 0 10px}
 .sheet input[type=search],.sheet textarea,.sheet select{width:100%;font:16px -apple-system,system-ui,"Segoe UI",sans-serif;background:var(--card);color:var(--strong);border:1px solid var(--line);border-radius:12px;padding:11px 13px;margin-bottom:10px;outline:none}

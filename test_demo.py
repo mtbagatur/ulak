@@ -183,3 +183,13 @@ def test_all_three_limits_fit_the_narrowest_phone(site, lang):
     chrome.js(f"if (LANG !== {json.dumps(lang)}) toggleLang()")
     chrome.wait("document.querySelectorAll('#limits .lim').length === 3")
     assert chrome.js("(() => { const box = document.querySelector('#limits'); return box.scrollWidth - box.clientWidth; })()") <= 0
+
+
+def test_limit_figures_stay_clear_of_the_sheet_scrollbar(site):
+    chrome = site
+    chrome.click("#limits")
+    chrome.wait("document.querySelector('#sheet .lt') !== null")
+    time.sleep(.5)  # the sheet slides up
+    room = chrome.js("""(() => { const box = document.querySelector('#sheet .scroll').getBoundingClientRect();
+        return Math.min(...[...document.querySelectorAll('#sheet .lt span:last-child, #sheet .lv.big')].map(el => box.right - el.getBoundingClientRect().right)); })()""")
+    assert room >= 10, room
