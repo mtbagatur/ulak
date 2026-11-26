@@ -600,3 +600,17 @@ def test_stalled_snapshot_recovers_without_reopening_the_stream(api_fixture):
     api.list_respond.set()
     chrome.wait("document.querySelector('#conn').hidden && document.querySelector('.g-unknown .card') !== null")
     assert not api.ready.is_set()
+
+
+def test_dock_button_stays_tappable_over_scrolled_cards(api_fixture):
+    chrome, api, url = api_fixture
+    api.cards = [card("working", pane_id=f"fake:p{index}", project=f"project-{index}") for index in range(12)]
+    chrome.resize(360, 640)
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelectorAll('.card').length === 12 && document.getAnimations().every(a => a.animationName === 'pulse')")
+    assert chrome.js("""(() => {
+        const button = document.querySelector('#newSession');
+        const box = button.getBoundingClientRect();
+        return [0.1, 0.5, 0.9].every(x => [0.2, 0.5, 0.8].every(y =>
+            document.elementFromPoint(box.left + box.width * x, box.top + box.height * y) === button));
+    })()""")
