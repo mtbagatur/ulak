@@ -1236,3 +1236,21 @@ def test_command_suggestions_are_named_in_the_chosen_language(api_fixture):
     chrome.cdp("Page.navigate", url=f"{url}/?lang=tr")
     chrome.wait("document.readyState === 'complete' && document.documentElement.lang === 'tr'")
     assert chrome.js("document.querySelector('#slashOptions').getAttribute('aria-label')") == "Eğik çizgi komutları"
+
+
+def test_a_tap_does_not_leave_a_focus_ring_on_the_next_screen(api_fixture):
+    chrome, _api, url = api_fixture
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelector('.card-open') !== null")
+
+    def tap(selector):
+        x, y = chrome.js(f"(r => [r.left + 20, r.top + r.height / 2])(document.querySelector({json.dumps(selector)}).getBoundingClientRect())")
+        for kind in ("mousePressed", "mouseReleased"):
+            chrome.cdp("Input.dispatchMouseEvent", type=kind, x=x, y=y, button="left", clickCount=1)
+
+    tap(".card-open")
+    chrome.wait("!document.querySelector('#session').hidden")
+    assert chrome.js("document.querySelector(':focus-visible') === null")
+    tap("#back")
+    chrome.wait("!document.querySelector('#home').hidden")
+    assert chrome.js("document.querySelector(':focus-visible') === null")
