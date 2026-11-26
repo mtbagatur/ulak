@@ -3,6 +3,7 @@ from pathlib import Path
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 from core import NotificationGate, is_destructive, quiet_hours, status_rank, bucket
+import re
 import asyncio, json, os, subprocess, tempfile
 from herdr_client import HerdrClient, HerdrError, HerdrUnavailable
 import pytest
@@ -1716,3 +1717,10 @@ def test_keys_that_meet_a_reply_in_progress_are_recorded(monkeypatch):
     assert c.post("/api/sessions/w9:p1/keys", headers=h, json={"keys": ["esc"]}).status_code == 409
     [entry] = api.read_audit()
     assert entry["outcome"] == "refused" and entry["decision"] == "keys" and fake.sent == []
+
+
+def test_every_fixed_refusal_the_api_can_send_has_turkish_words():
+    source = (Path(__file__).parent / "app.py").read_text()
+    sent = set(re.findall(r'(?:HTTPException\(\d+, |"detail": )"([^"{]+)"', source))
+    words = (Path(__file__).parent / "web/i18n.js").read_text()
+    assert sent and sorted(m for m in sent if f"'{m}':" not in words) == []

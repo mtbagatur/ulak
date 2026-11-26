@@ -70,6 +70,10 @@ const ERR_TR = {
   'Session-wide allow is disabled for destructive commands': 'Yıkıcı komutta oturum boyu izin kapalı', 'Session is no longer waiting for anything': 'Oturum artık bir şey beklemiyor',
   'No menu to choose from on screen': 'Ekranda seçilecek bir menü yok', 'The screen changed; refresh': 'Ekran değişti; yenile', 'No such option': 'Böyle bir seçenek yok',
   'Herdr is not reachable': 'Herdr yanıt vermiyor',
+  'Document not found in this workspace': 'Bu çalışma alanında belge bulunamadı', 'Unsupported document type': 'Desteklenmeyen belge türü',
+  'Invalid client id': 'Geçersiz istemci kimliği', 'Invalid content length': 'Geçersiz içerik uzunluğu', 'Request body must be a JSON object': 'İstek gövdesi bir JSON nesnesi olmalı',
+  'Request from another web page refused': 'Başka bir web sayfasından gelen istek geri çevrildi', 'Unknown host name': 'Tanınmayan sunucu adı',
+  'decision must be approve, deny, or always': 'Karar onayla, reddet ya da hep izin ver olmalı',
   'Invalid key': 'Geçersiz tuş', 'Destructive command: approve from the approval card (two steps)': 'Yıkıcı komut: onay kartından iki adımla onayla',
   'Invalid tool or model': 'Araç ya da model geçersiz', 'Invalid folder': 'Klasör geçersiz', 'Invalid pin list': 'Geçersiz pin listesi', 'Tailscale identity required': 'Tailscale kimliği gerekli',
 };
