@@ -850,3 +850,57 @@ def test_audit_keeps_a_bounded_history(monkeypatch):
     for _ in range(5):
         api.audit("w9:p1", "approve", "refused", reason="x")
     assert len(api.read_audit()) == 3
+
+
+# --- slash commands read from the machine ---
+
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+
+
+def test_slash_commands_list_builtins_then_user_and_project_files(tmp_path):
+    from core import slash_commands
+    home, cwd = tmp_path / "home", tmp_path / "home/work/app"
+    _write(home / ".claude/commands/review.md", "---\ndescription: Review the current diff\n---\nSECRET BODY")
+    _write(home / ".claude/commands/git/sync.md", "Rebase on main and push.\n")
+    _write(home / ".claude/skills/deploy/SKILL.md", "---\nname: deploy\ndescription: \"Ship the panel\"\n---\nsteps")
+    _write(cwd / ".claude/commands/review.md", "---\ndescription: Project review rules\n---\n")
+    _write(cwd / ".claude/commands/bad name;rm.md", "x")
+    _write(home / ".codex/prompts/plan.md", "# Plan\nWrite a plan first.\n")
+    got = slash_commands("claude", str(cwd), home)
+    names = [c["name"] for c in got]
+    assert names[:2] == ["/clear", "/compact"] and got[0]["source"] == "builtin"
+    assert names.count("/review") == 1
+    by = {c["name"]: c for c in got}
+    assert by["/review"] == {"name": "/review", "description": "Project review rules", "source": "project"}
+    assert by["/git:sync"]["description"] == "Rebase on main and push."
+    assert by["/deploy"] == {"name": "/deploy", "description": "Ship the panel", "source": "user"}
+    assert not any(";" in n or " " in n for n in names)
+    assert "SECRET BODY" not in json.dumps(got)
+    assert "/prompts:plan" not in names
+    codex = {c["name"]: c for c in slash_commands("codex", str(cwd), home)}
+    assert codex["/prompts:plan"]["description"] == "Write a plan first." and "/review" not in codex
+
+
+def test_slash_commands_survive_missing_folders_and_cap_long_text(tmp_path):
+    from core import slash_commands
+    assert [c["name"] for c in slash_commands("agy", str(tmp_path / "nope"), tmp_path)] == ["/clear", "/help"]
+    assert slash_commands("unknown", "", tmp_path) == []
+    _write(tmp_path / ".claude/commands/a-long.md", "---\ndescription: " + "x" * 400 + "\n---\n")
+    for i in range(300):
+        _write(tmp_path / f".claude/commands/c{i}.md", "")
+    got = slash_commands("claude", "", tmp_path)
+    assert len(got) <= 200
+    assert len(next(c for c in got if c["name"] == "/a-long")["description"]) <= 120
+
+
+def test_commands_endpoint_reads_the_session_folder_and_needs_identity(monkeypatch, tmp_path):
+    fake, c, h = _setup2(monkeypatch, ASK)
+    _write(tmp_path / ".claude/commands/ship.md", "---\ndescription: Ship it\n---\n")
+    monkeypatch.setattr(api, "raw_agents", {"w9:p1": {"cwd": str(tmp_path)}})
+    monkeypatch.setattr(api.Path, "home", lambda: tmp_path / "empty-home")
+    items = c.get("/api/sessions/w9:p1/commands", headers=h).json()["commands"]
+    assert {"name": "/ship", "description": "Ship it", "source": "project"} in items
+    assert c.get("/api/sessions/w9:p1/commands").status_code == 403
+    assert c.get("/api/sessions/nope/commands", headers=h).status_code == 404

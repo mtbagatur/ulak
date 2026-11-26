@@ -420,3 +420,79 @@ def parse_codex_limits(lines, mtime=None):
         if items:
             return {"id": "codex", "label": "Codex", "updated": mtime, "items": items}
     return None
+
+
+# --- slash commands -------------------------------------------------------
+# The phone gets names and a one-line description. File bodies stay on the machine.
+BUILTIN_SLASH = {
+    "claude": ["/clear", "/compact", "/help", "/model", "/config"],
+    "codex": ["/clear", "/compact", "/help", "/model", "/status"],
+    "agy": ["/clear", "/help"],
+}
+SLASH_PART = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+SLASH_LIMIT = 200
+
+
+def _slash_description(path):
+    try:
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            head = handle.read(4096)
+    except OSError:
+        return ""
+    lines = head.splitlines()
+    if lines and lines[0].strip() == "---":
+        end = next((i for i, line in enumerate(lines[1:], 1) if line.strip() == "---"), len(lines))
+        for line in lines[1:end]:
+            key, _, value = line.partition(":")
+            if key.strip() == "description":
+                return " ".join(value.strip().strip("\"'").split())[:120]
+        lines = lines[end + 1:]
+    body = next((line.strip() for line in lines if line.strip() and not line.lstrip().startswith("#")), "")
+    return " ".join(body.split())[:120]
+
+
+def _slash_files(base, source, prefix=""):
+    """Markdown files under base become /name, files in a subfolder become /folder:name."""
+    try:
+        files = sorted(p for p in base.rglob("*.md") if p.is_file())[:SLASH_LIMIT * 2]
+    except OSError:
+        return
+    for path in files:
+        parts = [*path.relative_to(base).parts[:-1], path.stem]
+        if all(SLASH_PART.match(part) for part in parts):
+            yield {"name": "/" + prefix + ":".join(parts), "description": _slash_description(path), "source": source}
+
+
+def _slash_skills(base, source):
+    try:
+        folders = sorted(p for p in base.iterdir() if p.is_dir())
+    except OSError:
+        return
+    for folder in folders:
+        manifest = folder / "SKILL.md"
+        if SLASH_PART.match(folder.name) and manifest.is_file():
+            yield {"name": "/" + folder.name, "description": _slash_description(manifest), "source": source}
+
+
+def slash_commands(agent, cwd, home):
+    """Built-in commands first, then what is installed for this user and this project. A project entry replaces a user entry of the same name."""
+    from pathlib import Path
+    builtin = BUILTIN_SLASH.get(agent)
+    if builtin is None:
+        return []
+    home = Path(home)
+    found = {name: {"name": name, "description": "", "source": "builtin"} for name in builtin}
+    extra = []
+    if agent == "claude":
+        roots = [(home / ".claude", "user")]
+        if cwd and Path(cwd).is_dir() and Path(cwd).resolve() != home.resolve():
+            roots.append((Path(cwd) / ".claude", "project"))
+        for root, source in roots:
+            extra += [*_slash_files(root / "commands", source), *_slash_skills(root / "skills", source)]
+    elif agent == "codex":
+        extra += _slash_files(home / ".codex/prompts", "user", prefix="prompts:")
+    for item in extra:
+        if found.get(item["name"], {}).get("source") != "builtin":
+            found.pop(item["name"], None)
+            found[item["name"]] = item
+    return list(found.values())[:SLASH_LIMIT]

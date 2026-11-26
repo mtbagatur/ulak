@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from chat import claude_chat, claude_path, detect_model, preview_from_screen, screen_chat, SPINNER, strip_ansi
-from core import NotificationGate, tidy_details, bucket, build_push, is_destructive, parse_approval, parse_codex_limits, parse_limits, parse_prompt, project_name, status_rank
+from core import NotificationGate, tidy_details, bucket, build_push, is_destructive, parse_approval, parse_codex_limits, parse_limits, parse_prompt, project_name, status_rank, slash_commands
 from herdr_client import HerdrClient, HerdrError
 
 ROOT = Path(__file__).parent
@@ -620,6 +620,13 @@ async def list_sessions():
         return await load_all()
     except Exception as exc:
         raise HTTPException(503, str(exc))
+
+
+@app.get("/api/sessions/{pane}/commands")
+async def commands(pane: str):
+    item = must_exist(pane)
+    cwd = raw_agents.get(pane, {}).get("cwd") or item.get("cwd") or ""
+    return {"commands": await asyncio.to_thread(slash_commands, item.get("agent", ""), cwd, Path.home())}
 
 
 @app.get("/api/sessions/{pane}/chat")

@@ -50,6 +50,7 @@ class FakeAPI:
         self.replies = []
         self.receipt = None
         self.audit = []
+        self.commands = None
         self.presence = []
         self.respond = threading.Event()
         self.respond.set()
@@ -114,6 +115,8 @@ class Handler(SimpleHTTPRequestHandler):
                 "messages": self.api.messages, "source": "transcript", "prompt": self.api.approval,
                 "status": item["status"], "session": item, "receipt": self.api.receipt,
             })
+        elif self.path == "/api/sessions/fake%3Ap1/commands" and self.api.commands is not None:
+            self.json({"commands": self.api.commands})
         elif self.path == "/api/audit":
             self.json({"items": self.api.audit})
         elif self.path == "/api/notifications":
@@ -765,3 +768,22 @@ def test_very_old_sessions_show_a_date_instead_of_a_day_count(api_fixture):
     assert chrome.js("ago(Date.now() / 1000 - 3 * 86400)") == "3 d"
     old = chrome.js("ago(Date.parse('2023-09-25T12:00:00Z') / 1000)")
     assert "2023" in old and " d" not in old
+
+
+def test_slash_menu_offers_commands_installed_on_the_machine(api_fixture):
+    chrome, api, url = api_fixture
+    api.commands = [
+        {"name": "/clear", "description": "", "source": "builtin"},
+        {"name": "/ship", "description": "<img src=x onerror=window.pwned=1>Ship it", "source": "project"},
+        {"name": "/git:sync", "description": "Rebase and push", "source": "user"},
+    ]
+    open_first(chrome, url)
+    chrome.wait("slashCommands().some(c => c.name === '/ship')")
+    chrome.js("(() => { const input=document.querySelector('#message'); input.value='/sy'; input.dispatchEvent(new Event('input',{bubbles:true})); })()")
+    chrome.wait("!document.querySelector('#slashOptions').hidden")
+    assert chrome.js("[...document.querySelectorAll('#slashOptions [data-slash-cmd]')].map(b => b.dataset.slashCmd)") == ["/git:sync"]
+    chrome.js("(() => { const input=document.querySelector('#message'); input.value='/s'; input.dispatchEvent(new Event('input',{bubbles:true})); })()")
+    assert chrome.js("document.querySelector('#slashOptions [data-slash-cmd=\"/ship\"] small').textContent") == "<img src=x onerror=window.pwned=1>Ship it"
+    assert chrome.js("window.pwned") is None
+    chrome.click("#slashOptions [data-slash-cmd='/ship']")
+    assert chrome.js("document.querySelector('#message').value") == "/ship "

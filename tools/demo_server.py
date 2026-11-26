@@ -102,6 +102,16 @@ async def chat(pane: str):
             "receipt": next((a for a in AUDIT if a["pane"] == pane and a["outcome"] == "sent"), None)}
 
 
+@app.get("/api/sessions/{pane}/commands")
+async def commands(pane: str):
+    builtin = [{"name": n, "description": "", "source": "builtin"} for n in ("/clear", "/compact", "/help", "/model")]
+    return {"commands": builtin + [
+        {"name": "/review", "description": "Review the current diff before it ships", "source": "project"},
+        {"name": "/release-notes", "description": "Draft release notes from merged changes", "source": "project"},
+        {"name": "/git:sync", "description": "Rebase on main and rerun the tests", "source": "user"},
+    ]}
+
+
 @app.get("/api/config")
 async def config():
     return {"quick_label": ""}

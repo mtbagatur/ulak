@@ -375,6 +375,7 @@ function openSession(pane) {
   hideSheet();
   state.view++;
   state.current = pane; state.chatHash = ''; state.rendered = 0; state.prompt = null;
+  loadSlash(pane);
   $('#home').hidden = true; $('#session').hidden = false;
   $('#messages').innerHTML = `<div class="empty">${t('loading')}</div>`; $('#promptZone').innerHTML = ''; $('#keybar').hidden = true;
   delete $('#promptZone').dataset.sig;
@@ -661,19 +662,28 @@ $('#keysBtn').onclick = () => { buildKeybar(); const kb = $('#keybar'); kb.hidde
 const ta = $('#message');
 const slashMenu = $('#slashOptions');
 let slashIndex = 0;
+// Commands come from the machine (built-ins, ~/.claude, the project's .claude, Codex prompts); the short list is the fallback while offline or on an older server.
+const SLASH_FALLBACK = {claude: ['/clear', '/compact', '/help', '/model', '/config'], codex: ['/clear', '/compact', '/help', '/model', '/status'], agy: ['/clear', '/help']};
+const slashCache = new Map();
 function slashCommands() {
-  const agent = state.sessions.get(state.current)?.agent;
-  if (agent === 'claude') return ['/clear', '/compact', '/help', '/model', '/config'];
-  if (agent === 'codex') return ['/clear', '/compact', '/help', '/model', '/status'];
-  if (agent === 'agy') return ['/clear', '/help'];
-  return [];
+  return slashCache.get(state.current) || (SLASH_FALLBACK[state.sessions.get(state.current)?.agent] || []).map(name => ({name, description: ''}));
+}
+async function loadSlash(pane) {
+  if (slashCache.has(pane)) return;
+  try {
+    const r = await fetch(`/api/sessions/${encodeURIComponent(pane)}/commands`);
+    if (r.ok) slashCache.set(pane, (await r.json()).commands.filter(c => /^\/[\w.:-]+$/.test(c.name)));
+  } catch {}
 }
 function updateSlashOptions() {
   const match = ta.value.match(/^\/([^\s]*)$/);
-  const commands = match ? slashCommands().filter(command => command.slice(1).startsWith(match[1].toLowerCase())) : [];
+  const q = match ? match[1].toLowerCase() : '';
+  const all = match ? slashCommands() : [];
+  const starts = all.filter(c => c.name.slice(1).toLowerCase().startsWith(q));
+  const commands = [...starts, ...(q ? all.filter(c => !starts.includes(c) && c.name.toLowerCase().includes(q)) : [])].slice(0, 40);
   if (!commands.length) { slashMenu.hidden = true; slashMenu.replaceChildren(); return; }
   slashIndex = Math.min(slashIndex, commands.length - 1);
-  slashMenu.innerHTML = commands.map((command, i) => `<button type="button" role="option" aria-selected="${i === slashIndex}" data-slash-cmd="${command}">${command}</button>`).join('');
+  slashMenu.innerHTML = commands.map((command, i) => `<button type="button" role="option" aria-selected="${i === slashIndex}" data-slash-cmd="${esc(command.name)}"><span>${esc(command.name)}</span>${command.description ? `<small>${esc(command.description)}</small>` : ''}</button>`).join('');
   slashMenu.hidden = false;
 }
 function chooseSlash(command) {
