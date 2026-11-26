@@ -17,7 +17,7 @@
 
 An agent stops and asks: *run this?* You are not at your desk. The usual answer is to put a terminal on your phone, which also puts your whole machine on your phone, and a tap on a small screen can land on a question that changed a second ago.
 
-Ulak carries one thing between you and your agents: the answer. It is a small web app (PWA) served from your own computer that shows your [Herdr](https://herdr.dev) panes (Claude Code, Codex, Antigravity) as cards and conversations. It has no terminal. It is reachable only through your own [Tailscale](https://tailscale.com) network: no account, no relay server, no app store, no build step, no telemetry.
+Ulak carries one thing between you and your agents: the answer. It is a small web app (PWA) served from your own computer that shows your [Herdr](https://herdr.dev) panes (Claude Code, Codex, Antigravity) as cards and conversations. It has no terminal, and a pane with no agent in it can be read but not written to. It is reachable only through your own [Tailscale](https://tailscale.com) network: no account, no relay server, no app store, no build step, no telemetry.
 
 ## What it does differently
 
@@ -160,7 +160,7 @@ State (`.state/`: pins, notification history, the decision log) lives on the ser
 - `GET /api/sessions`: enriched cards, ordered blocked > working > done (five minutes) > unknown > idle.
 - `GET /api/sessions/{pane}/chat`: cleaned screen split into blocks (Claude JSONL when available).
 - Read-only views: `GET /api/sessions/{pane}/screen` (the pane as text), `.../changes` (`git status` and a size-capped diff of the session's own folder; the phone sends no path), `.../commands` (names and one-line descriptions of the slash commands on the machine).
-- `POST /api/sessions/{pane}/prompt`: send text. `POST /api/sessions/{pane}/upload`: raw file body (image, PDF or text), returns its server path. `GET /api/sessions/{pane}/file`: open a supported document inside that workspace. `POST /api/quick`: quick send to a configured pane (see Configuration). `GET/PUT /api/pins`: server-side pins, shared across devices.
+- `POST /api/sessions/{pane}/prompt`: send text (409 for a pane with no agent in it, as for `.../keys` and `/api/quick`). `POST /api/sessions/{pane}/upload`: raw file body (image, PDF or text), returns its server path. `GET /api/sessions/{pane}/file`: open a supported document inside that workspace. `POST /api/quick`: quick send to a configured pane (see Configuration). `GET/PUT /api/pins`: server-side pins, shared across devices.
 - `POST /api/sessions/{pane}/approve`: approve/always/deny, bound to the screen fingerprint (409 if it changed; destructive = two steps).
 - `POST /api/sessions/{pane}/choose`: pick a menu option (single/multi, trust dialog). `POST .../keys`: raw keys (Enter/approve keys refused on destructive prompts).
 - `POST /api/sessions/{pane}/close`: two-step close. `GET /api/projects`, `POST /api/sessions`: start a new session.

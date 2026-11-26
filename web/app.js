@@ -389,7 +389,12 @@ function updateSessionHeader() {
   const s = state.sessions.get(state.current); if (!s) return;
   $('#sTitle').textContent = s.project;
   $('#sSub').textContent = [TOOLNAME[s.agent] || s.agent, s.model, statusText(s.status), ago(s.since)].filter(Boolean).join(' · ');
+  // A pane with no agent in it is a shell: it can be read, the server refuses to type into it.
+  const plain = isPlain(s);
+  $('#composer').hidden = plain; $('#plainNote').hidden = !plain;
+  if (plain) $('#keybar').hidden = true;
 }
+const isPlain = s => !!s && (s.agent || 'terminal') === 'terminal';
 function closedBanner() {
   chatRequest = null;
   if ($('#sheet [data-confirm-approval]')) hideSheet();
@@ -528,7 +533,7 @@ function renderPrompt(p, status) {
   const promptStatus = $('#promptStatus');
   if (promptStatus.textContent !== promptAnnouncement) promptStatus.textContent = promptAnnouncement;
   if (!p && status !== 'blocked') { zone.innerHTML = ''; return; }
-  if (!p) { zone.innerHTML = `<div class="prompt"><h3>${esc(t('unknownScreen'))}</h3><p class="q">${esc(t('unknownHelp'))}</p></div>`; $('#keybar').hidden = false; buildKeybar(); return; }
+  if (!p) { zone.innerHTML = `<div class="prompt"><h3>${esc(t('unknownScreen'))}</h3><p class="q">${esc(t('unknownHelp'))}</p></div>`; $('#keybar').hidden = isPlain(state.sessions.get(state.current)); buildKeybar(); return; }
   const two = p.destructive ? ' two-seals' : '';
   const tag = p.destructive ? `<span class="tag">${esc(t('destructive'))}</span>` : '';
   if (p.kind === 'approval') {

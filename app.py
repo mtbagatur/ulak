@@ -665,6 +665,23 @@ def must_exist(pane):
     return sessions.get(pane) or {"pane_id": pane, "status": "unknown", "agent": "terminal"}
 
 
+async def must_be_agent(pane):
+    """Ulak carries messages to agents. A pane with no agent in it is a shell, and nothing is typed into a shell."""
+    item = must_exist(pane)
+    if (item.get("agent") or "terminal") != "terminal":
+        return item
+    # Herdr can name the agent a moment after the pane appears: ask once before refusing.
+    try:
+        info = await client.call("agent.get", {"target": pane})
+        named = info.get("agent") if isinstance(info.get("agent"), dict) else info
+    except Exception:
+        named = {}
+    if (named.get("agent") or "terminal") == "terminal":
+        raise HTTPException(409, "No agent is running in this pane; Ulak does not type into a plain shell")
+    raw_agents[pane] = {**raw_agents.get(pane, {}), **named, "pane_id": pane}
+    return await refresh_pane(pane) or item
+
+
 def next_blocked(exclude=None):
     for s in sorted(sessions.values(), key=status_rank):
         if s["status"] == "blocked" and s["pane_id"] != exclude:
@@ -739,6 +756,7 @@ async def prompt(pane: str, action: Action):
     must_exist(pane)
     if not action.text or not action.text.strip():
         raise HTTPException(400, "Message is empty")
+    await must_be_agent(pane)
     return await client.call("agent.prompt", {"target": pane, "text": action.text})
 
 
@@ -754,6 +772,7 @@ async def to_quick(action: Action):
         raise HTTPException(404, "Quick-send target not found")
     if not action.text or not action.text.strip():
         raise HTTPException(400, "Message is empty")
+    await must_be_agent(target["pane_id"])
     await client.call("agent.prompt", {"target": target["pane_id"], "text": action.text})
     return {"ok": True, "pane": target["pane_id"]}
 
@@ -846,6 +865,7 @@ async def send_keys(pane: str, action: Action):
     keys = [ALLOWED_KEYS.get(str(k).lower()) for k in (action.keys or [])]
     if not keys or len(keys) > 4 or None in keys:
         raise HTTPException(400, "Invalid key")
+    item = await must_be_agent(pane)
     with exclusive_prompt_reply(pane):
         if item.get("status") == "blocked":
             pending = await fresh_pending(pane)

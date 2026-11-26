@@ -14,6 +14,7 @@ const I18N = {
     refresh: 'Refresh', refreshed: 'Refreshed', pullRelease: 'Release to refresh', pull: 'Pull…',
     quickSend: 'Quick send', quickTo: 'Send to {x}', quickPh: 'A note, task or question…', cancel: 'Cancel', send: 'Send',
     newSession: '+ New session', newTitle: 'New session', folderSearch: 'Search folders…', noFolder: 'No matching folder', defaultModel: 'default', modelLabel: 'Model', start: 'Start', starting: 'Session starting',
+    plainPane: 'This pane has no agent in it. Ulak does not type into a plain shell; the menu still shows its screen.',
     back: 'Back', menu: 'Menu', keys: 'Keys', attach: 'Attach file', attached: 'File attached. Add a note and send.', composerPh: 'Write to the session…', sendAria: 'Send',
     loading: 'Loading…', noChat: 'Nothing said yet.', tool: 'tool', subagent: 'Subagent', subRunning: 'Working', subDone: 'Done', subFailed: 'Failed', working: 'Working…', newMsgs: '↓ New',
     closedSession: 'This session has closed.', backToList: 'Back to list',
@@ -41,6 +42,7 @@ const I18N = {
     refresh: 'Yenile', refreshed: 'Yenilendi', pullRelease: 'Bırak, yenilensin', pull: 'Çek…',
     quickSend: 'Hızlı yaz', quickTo: 'Yaz: {x}', quickPh: 'Not, görev ya da soru…', cancel: 'Vazgeç', send: 'Gönder',
     newSession: '+ Yeni oturum', newTitle: 'Yeni oturum', folderSearch: 'Klasör ara…', noFolder: 'Eşleşen klasör yok', defaultModel: 'varsayılan', modelLabel: 'Model', start: 'Başlat', starting: 'Oturum başlıyor',
+    plainPane: 'Bu panelde ajan yok. Ulak düz kabuğa yazmaz; ekranını menüden okuyabilirsin.',
     back: 'Geri', menu: 'Menü', keys: 'Tuşlar', attach: 'Dosya ekle', attached: 'Dosya eklendi. Not yazıp gönder.', composerPh: 'Oturuma yaz…', sendAria: 'Gönder',
     loading: 'Yükleniyor…', noChat: 'Henüz konuşma yok.', tool: 'araç', subagent: 'Alt ajan', subRunning: 'Çalışıyor', subDone: 'Bitti', subFailed: 'Başarısız', working: 'Çalışıyor…', newMsgs: '↓ Yeni',
     closedSession: 'Bu oturum kapandı.', backToList: 'Listeye dön',
@@ -59,6 +61,7 @@ const I18N = {
 // Server error strings (English on the wire) -> Turkish.
 const ERR_TR = {
   'Unsupported file type': 'Desteklenmeyen dosya türü', 'File too large (15 MB max)': 'Dosya çok büyük (en çok 15 MB)',
+  'No agent is running in this pane; Ulak does not type into a plain shell': 'Bu panelde ajan yok; Ulak düz kabuğa yazmaz',
   'Session is closed or unknown': 'Oturum kapalı ya da bilinmiyor', 'Message is empty': 'Mesaj boş', 'Quick-send target not found': 'Hedef oturum bulunamadı',
   'Session is no longer waiting for approval': 'Oturum artık onay beklemiyor', 'No recognised approval on screen; use the terminal': 'Ekranda tanınan bir onay yok; terminali kullan',
   'The approval screen changed; refresh': 'Onay ekranı değişti; yenile', 'This prompt has no such option': 'Bu istemde böyle bir seçenek yok',

@@ -967,3 +967,19 @@ def test_relative_paths_link_whole_and_links_follow_the_theme(api_fixture):
     links = chrome.js("[...document.querySelectorAll('#messages a')].map(a => [a.textContent, new URL(a.href).searchParams.get('path')])")
     assert links == [["docs/releases/2.4.md", "docs/releases/2.4.md"], ["./notes.md", "./notes.md"], ["https://example.test/a.md", None]]
     assert chrome.js("getComputedStyle(document.querySelector('#messages a')).color === getComputedStyle(document.querySelector('#messages a').parentElement).color")
+
+
+def test_a_plain_shell_pane_has_nothing_to_write_with(api_fixture):
+    chrome, api, url = api_fixture
+    api.approval = None
+    api.cards = [dict(card("idle"), agent="terminal")]
+    open_first(chrome, url)
+    chrome.wait("document.querySelector('#composer').hidden && !document.querySelector('#plainNote').hidden")
+    assert chrome.js("document.querySelector('#keybar').hidden")
+    assert "no agent" in chrome.js("document.querySelector('#plainNote').textContent")
+    # #session slides in, so measure the note against its own screen, not the window
+    assert chrome.js("(() => { const n=document.querySelector('#plainNote').getBoundingClientRect(), s=document.querySelector('#session').getBoundingClientRect(); return n.height > 0 && n.left >= s.left && n.right <= s.right && n.bottom <= s.bottom; })()")
+    # The moment Herdr names the agent, the composer is back.
+    api.cards = [card("idle")]
+    api.events.append({"type": "session", "session": api.cards[0]})
+    chrome.wait("!document.querySelector('#composer').hidden && document.querySelector('#plainNote').hidden")

@@ -361,7 +361,8 @@ def test_prompt_replies_are_exclusive_per_pane_while_in_flight(monkeypatch):
         _, _, headers = _setup(monkeypatch, CODEX)
         fake = PausedHerdr()
         monkeypatch.setattr(api, "client", fake)
-        api.sessions["w9:p2"] = {"pane_id": "w9:p2", "status": "idle"}
+        api.sessions["w9:p1"]["agent"] = "codex"
+        api.sessions["w9:p2"] = {"pane_id": "w9:p2", "status": "idle", "agent": "codex"}
         root = "/api/sessions/w9:p1"
         action = {"decision": "approve", "fingerprint": parse_approval(CODEX)["fingerprint"]}
         async with AsyncClient(transport=ASGITransport(api.app), base_url="http://testserver", headers=headers) as c:
@@ -716,7 +717,7 @@ def test_start_session_validates_and_runs_fixed_command(monkeypatch, tmp_path):
 def test_quick_send(monkeypatch):
     fake, c, h = _setup2(monkeypatch, "")
     assert c.post("/api/quick", headers=h, json={"text": "selam"}).status_code == 404
-    api.sessions["wB:p1"] = {"pane_id": "wB:p1", "quick": True, "status": "idle"}
+    api.sessions["wB:p1"] = {"pane_id": "wB:p1", "quick": True, "status": "idle", "agent": "claude"}
     assert c.post("/api/quick", headers=h, json={"text": "selam"}).status_code == 200
     assert ("agent.prompt", {"target": "wB:p1", "text": "selam"}) in fake.calls
 
@@ -1097,3 +1098,46 @@ def test_a_timeout_steps_aside_for_a_reply_in_progress_and_for_questions(monkeyp
     monkeypatch.setattr(api, "replying_panes", set())
     api.sessions["w9:p1"]["pending"]["kind"] = "question"   # a menu is a question, not a permission
     assert asyncio.run(api.expire_approvals(now=1200)) == [] and fake.sent == []
+
+
+class NamingHerdr(FakeHerdr2):
+    """Herdr answers agent.get with whatever name it has for the pane right now."""
+    def __init__(self, text, name): super().__init__(text); self.name = name
+    async def call(self, method, params=None):
+        if method == "agent.get":
+            self.calls.append((method, params))
+            return {"agent": {"pane_id": params["target"], "agent": self.name, "agent_status": "idle"}}
+        return await super().call(method, params)
+
+
+def _plain(monkeypatch, name):
+    fake, c, h = _setup2(monkeypatch, "user@host:~$ ", agent="terminal")
+    fake = NamingHerdr("user@host:~$ ", name)
+    monkeypatch.setattr(api, "client", fake)
+    monkeypatch.setattr(api, "raw_agents", {"w9:p1": {"pane_id": "w9:p1"}})
+    monkeypatch.setattr(api, "read_cache", {})
+    api.sessions["w9:p1"]["status"] = "idle"
+    return fake, c, h
+
+
+def test_a_plain_shell_pane_takes_no_message_and_no_key(monkeypatch):
+    fake, c, h = _plain(monkeypatch, None)
+    r = c.post("/api/sessions/w9:p1/prompt", headers=h, json={"text": "rm -rf ~"})
+    assert r.status_code == 409 and "agent" in r.json()["detail"]
+    assert c.post("/api/sessions/w9:p1/keys", headers=h, json={"keys": ["Enter"]}).status_code == 409
+    api.sessions["w9:p1"]["quick"] = True
+    assert c.post("/api/quick", headers=h, json={"text": "ls"}).status_code == 409
+    assert fake.sent == [] and not any(m in ("agent.prompt", "agent.send_keys", "pane.send_text", "pane.send_keys") for m, _ in fake.calls)
+
+
+def test_a_pane_herdr_has_only_just_named_is_not_refused(monkeypatch):
+    fake, c, h = _plain(monkeypatch, "claude")  # the card still says "terminal"; Herdr already knows better
+    assert c.post("/api/sessions/w9:p1/prompt", headers=h, json={"text": "hello"}).status_code == 200
+    assert ("agent.prompt", {"target": "w9:p1", "text": "hello"}) in fake.calls
+    assert api.sessions["w9:p1"]["agent"] == "claude"
+    assert c.post("/api/sessions/w9:p1/keys", headers=h, json={"keys": ["esc"]}).status_code == 200
+
+
+def test_reading_a_plain_shell_pane_still_works(monkeypatch):
+    fake, c, h = _plain(monkeypatch, None)
+    assert c.get("/api/sessions/w9:p1/screen", headers=h).status_code == 200
