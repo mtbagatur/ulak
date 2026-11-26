@@ -91,3 +91,12 @@ def test_demo_never_serves_a_stale_app():
     client = TestClient(demo.app)
     for path in ("/", "/static/app.js", "/static/i18n.js", "/static/demo.js"):
         assert client.get(path).headers["cache-control"] == "no-cache", path
+
+
+def test_back_after_moving_to_the_next_waiting_session_goes_home(site):
+    chrome = site
+    open_card(chrome, "d1:p1")
+    chrome.click(APPROVE)
+    chrome.wait("location.hash === '#/s/d2:p1' && document.querySelector('#promptZone .two-seals') !== null")
+    chrome.click("#back")  # not back into the session that was just answered
+    chrome.wait("!document.querySelector('#home').hidden && location.hash === ''")

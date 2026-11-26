@@ -356,7 +356,7 @@ window.addEventListener('online', resumeConnection);
 setInterval(() => { if (!document.hidden) { renderHome(); if (state.current) loadChat(); } }, 1500);
 
 // ---------- routing ----------
-function go(pane) { history.pushState({pane}, '', `#/s/${pane}`); route(); }
+function go(pane, replace) { history[replace ? 'replaceState' : 'pushState']({pane}, '', `#/s/${pane}`); route(); }
 function route() {
   const m = location.hash.match(/^#\/s\/(.+)$/);
   if (m) openSession(decodeURIComponent(m[1])); else showHome();
@@ -571,7 +571,7 @@ function afterDecision(r, view) {
   if (next === state.current) return;
   if (!next) return;  // nothing else is waiting: stay and watch the answer reach the agent
   toast(t('nextBlocked'), '');
-  setTimeout(() => { if (state.view === view) go(next); }, 350);
+  setTimeout(() => { if (state.view === view) go(next, !!state.current); }, 350);  // from a session: take its place, so back still leads home
 }
 async function watchApprovalReply(pane, fingerprint, view) {
   toast(t('replySent'), 'ok');
