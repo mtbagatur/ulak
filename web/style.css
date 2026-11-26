@@ -1,9 +1,9 @@
 /* Palette: aubergine ground, paper ink. Gold (zer) means "waiting for you" and the seal; ruby (lal) only ever means a command that needs two seals; green only means "it arrived". */
-:root{color-scheme:dark;--bg:#1c1520;--bg2:#140f17;--card:#261d2b;--card2:#31263a;--line:#3f3149;--text:#d6cbc4;--strong:#f1e8d9;--muted:#a99caa;--zer:#d4ad62;--zer-ink:#241a08;--seal:#d4ad62;--lal:#d0434a;--lal-t:#ee8a8f;--ok:#8fbf9a;--shade:rgba(0,0,0,.28);--veil:rgba(255,255,255,.08);--shadow:rgba(0,0,0,.45);--back:rgba(0,0,0,.55);
+:root{color-scheme:dark;--bg:#1c1520;--bg2:#140f17;--card:#261d2b;--card2:#31263a;--line:#3f3149;--text:#d6cbc4;--strong:#f1e8d9;--muted:#a99caa;--zer:#d4ad62;--zer-ink:#241a08;--seal:#d4ad62;--ink:#f1e8d9;--lal:#d0434a;--lal-t:#ee8a8f;--ok:#8fbf9a;--shade:rgba(0,0,0,.28);--veil:rgba(255,255,255,.08);--shadow:rgba(0,0,0,.45);--back:rgba(0,0,0,.55);
   --display:"El Messiri",ui-serif,"New York","Iowan Old Style",Georgia,serif;--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
   --ease-out:cubic-bezier(.23,1,.32,1);--ease-drawer:cubic-bezier(.32,.72,0,1);--safe-t:env(safe-area-inset-top);--safe-r:env(safe-area-inset-right);--safe-b:env(safe-area-inset-bottom);--safe-l:env(safe-area-inset-left);font:16px/1.4 -apple-system,system-ui,"Segoe UI",sans-serif}
 /* Daylight: the same aubergine thinned to paper, not a second palette. Gold and ruby darken so they still read as text. theme.js sets data-theme from the system, or from your choice. */
-:root[data-theme=light]{color-scheme:light;--bg:#f2ecf0;--bg2:#e9e1e7;--card:#fcf9fb;--card2:#e6dde4;--line:#d2c5d0;--text:#3b2f40;--strong:#1c1520;--muted:#5f5163;--zer:#775007;--zer-ink:#241a08;--seal:#d2a550;--lal:#b3262e;--lal-t:#a0212a;--ok:#27603a;--shade:rgba(60,40,70,.09);--veil:rgba(60,40,70,.08);--shadow:rgba(50,30,55,.2);--back:rgba(40,25,45,.38)}
+:root[data-theme=light]{color-scheme:light;--bg:#f2ecf0;--bg2:#e9e1e7;--card:#fcf9fb;--card2:#e6dde4;--line:#d2c5d0;--text:#3b2f40;--strong:#1c1520;--muted:#5f5163;--zer:#775007;--zer-ink:#241a08;--seal:#d2a550;--ink:#47294f;--lal:#b3262e;--lal-t:#a0212a;--ok:#27603a;--shade:rgba(60,40,70,.09);--veil:rgba(60,40,70,.08);--shadow:rgba(50,30,55,.2);--back:rgba(40,25,45,.38)}
 @font-face{font-family:"El Messiri";src:url(elmessiri.woff2) format("woff2");font-weight:400 700;font-display:swap}
 /* Changing theme: the new colours spread from the button that was pressed. */
 .theme-turn::view-transition-old(root){animation:none;mix-blend-mode:normal}
@@ -52,8 +52,8 @@ button.loading::after{content:"";position:absolute;left:calc(50% - 8px);top:calc
 @keyframes yes{from{stroke-dashoffset:1.05}}
 .demo-tag{font:600 11px/1 -apple-system,system-ui,sans-serif;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:4px 6px;margin-left:2px}
 .icon{background:transparent;padding:6px;min-width:44px;font-size:22px;line-height:1;color:var(--muted);display:grid;place-items:center}
-/* Night is a crescent. Day is the disc inside the seal's own outline: round, with the one sharp corner. One shape turning into the other. */
-.moon{display:block;color:var(--seal);overflow:visible}
+/* Night is a crescent, day a plain sun, both in ink. Gold and the sharp corner belong to the mark, so the two never read as twins. */
+.moon{display:block;color:var(--text);overflow:visible}
 .moon .bite{transition:transform .5s var(--ease-out)}
 .moon .disc{transform-origin:12px 12px;transition:transform .5s var(--ease-out)}
 .moon .halo{fill:none;stroke:currentColor;stroke-width:1.5;transform-origin:12px 12px;transform:scale(.6);opacity:0;transition:transform .5s var(--ease-out),opacity .3s}
@@ -71,8 +71,8 @@ button.loading::after{content:"";position:absolute;left:calc(50% - 8px);top:calc
 .scroll{scrollbar-width:thin;scrollbar-color:var(--line) transparent;flex:1;overflow-y:auto;overscroll-behavior-y:contain;-webkit-overflow-scrolling:touch;position:relative}
 .ptr{height:0;overflow:hidden;text-align:center;color:var(--muted);font-size:13px;line-height:34px;transition:height .15s}
 .ptr.show{height:34px}
-#groups{padding:0 12px 104px}
-.group h2{font:600 15px/1.2 var(--display);color:var(--muted);margin:22px 4px 8px;display:flex;align-items:center;gap:12px}
+#groups{padding:0 12px 110px}
+.group h2{font:600 15px/1.2 var(--display);color:var(--muted);margin:20px 4px 6px;display:flex;align-items:center;gap:12px}
 .group h2::after{content:"";flex:1;height:1px;background:var(--line)}
 .group.g-idle h2::after{display:none}
 .idle-toggle{display:flex;justify-content:space-between;align-items:center;width:100%;padding:0;background:none;font:inherit;color:inherit;border-radius:0}
@@ -109,11 +109,13 @@ button.loading::after{content:"";position:absolute;left:calc(50% - 8px);top:calc
 .c-act button{flex:1;padding:10px}
 .c-act button.loading{pointer-events:auto}
 .empty{padding:40px 24px;text-align:center;color:var(--muted)}
-.dock{z-index:2;display:flex;gap:10px;padding:10px 12px calc(10px + var(--safe-b));background:linear-gradient(transparent,var(--bg) 30%);position:absolute;left:0;right:0;bottom:0}
+/* The list is fully faded by the time it reaches the buttons; the fade itself lets taps through. */
+.dock{z-index:2;display:flex;gap:10px;padding:24px 12px calc(10px + var(--safe-b));background:linear-gradient(transparent,var(--bg) 24px);position:absolute;left:0;right:0;bottom:0;pointer-events:none}
+.dock>*{pointer-events:auto}
 .pill-btn{flex:1;border-radius:999px;background:var(--card);color:var(--strong);box-shadow:0 8px 22px -12px var(--shadow)}
 .pill-btn{border:1px solid var(--line)}
-/* Gold is kept for what waits on you, so starting something new is ink on paper instead. */
-.pill-btn.primary{background:var(--strong);color:var(--bg);border-color:transparent;font-weight:650;--load:var(--bg)}
+/* Gold is kept for what waits on you, so starting something new is ink on paper instead: mürdüm by day, not black. */
+.pill-btn.primary{background:var(--ink);color:var(--bg);border-color:transparent;font-weight:650;--load:var(--bg)}
 .s-title{flex:1;min-width:0;display:flex;flex-direction:column}
 .s-title b{color:var(--strong);font:600 19px/1.2 var(--display);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .s-title span{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -267,7 +269,8 @@ details.tool pre{margin:6px 0 0;padding:8px 10px;background:var(--bg2);border-ra
 }
 
 .ws{font-size:11px;opacity:.7;background:var(--veil);border-radius:8px;padding:1px 6px;margin-left:6px;min-width:0;flex:0 1 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.pin{background:transparent;margin-left:auto;padding:2px 6px;min-width:44px;color:var(--muted);opacity:.6;display:grid;place-items:center}
+/* A full 44px target that does not make the title row 44px tall. */
+.pin{background:transparent;margin:-11px 0 -11px auto;padding:2px 6px;min-width:44px;color:var(--muted);opacity:.6;display:grid;place-items:center}
 .pin.on{opacity:1;color:var(--zer)}.pin.on svg path:first-child{fill:currentColor}
 
 .lang{font-size:13px;font-weight:700;letter-spacing:.4px;min-width:44px;color:var(--muted)}

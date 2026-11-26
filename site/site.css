@@ -35,8 +35,8 @@ code,pre{font-family:var(--mono);font-size:.86em}
 .top a:not(.brand){font-size:.94rem;color:var(--muted);text-decoration:none;padding:12px 0}
 .top a:not(.brand):hover{color:var(--strong)}
 /* Night is a crescent, day is the full disc inside its ring. */
-.theme{display:grid;place-items:center;width:44px;height:44px;margin-right:-10px;padding:0;border:0;border-radius:50%;background:none;color:var(--seal);cursor:pointer;transition:transform .16s var(--ease-out)}
-.theme:hover{background:color-mix(in srgb,var(--seal) 12%,transparent)}
+.theme{display:grid;place-items:center;width:44px;height:44px;margin-right:-10px;padding:0;border:0;border-radius:50%;background:none;color:var(--text);cursor:pointer;transition:transform .16s var(--ease-out)}
+.theme:hover{background:color-mix(in srgb,var(--strong) 10%,transparent)}
 .theme:active{transform:scale(.92)}
 .moon{display:block;overflow:visible}
 .moon .bite,.moon .disc{transition:transform .5s var(--ease-out)}

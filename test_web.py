@@ -1052,3 +1052,45 @@ def test_the_mark_is_drawn_once_when_the_app_opens(api_fixture):
     chrome.cdp("Page.navigate", url=url)
     chrome.wait("document.querySelector('.card-open') !== null")
     wait_for(lambda: chrome.js("!document.querySelector('#home .mark').classList.contains('draw')"), "the mark finished drawing", timeout=4)
+
+
+def test_card_without_a_known_time_does_not_end_in_a_dangling_dot(api_fixture):
+    chrome, api, url = api_fixture
+    api.cards = [card("working", since=0), card("done", pane_id="fake:p2", bucket="idle", since=0)]
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelectorAll('.card').length === 2")
+    assert chrome.js("[...document.querySelectorAll('.card .state')].map(e => e.textContent)") == ["Working", "Done"]
+
+
+def test_card_title_row_is_as_tall_as_its_text_and_the_pin_stays_a_full_target(api_fixture):
+    chrome, api, url = api_fixture
+    api.cards = [card("working")]
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelector('.card .pin') !== null")
+    assert chrome.js("document.querySelector('.card .c-top').getBoundingClientRect().height") <= 26
+    assert chrome.js("(() => { const b = document.querySelector('.card .pin').getBoundingClientRect(); return Math.min(b.width, b.height); })()") >= 44
+    assert chrome.js("(() => { const p = document.querySelector('.card .pin'), b = p.getBoundingClientRect(); return document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2) === p || p.contains(document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)); })()")
+
+
+def test_list_has_faded_out_before_it_reaches_the_dock_buttons(api_fixture):
+    chrome, api, url = api_fixture
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelector('.card') !== null")
+    assert chrome.js("document.querySelector('#newSession').getBoundingClientRect().top - document.querySelector('.dock').getBoundingClientRect().top") >= 20
+    # the fade above the buttons must not swallow taps meant for the list
+    assert chrome.js("(() => { const d = document.querySelector('.dock').getBoundingClientRect(); return !document.elementFromPoint(d.left + d.width / 2, d.top + 4).closest('.dock'); })()")
+
+
+def test_theme_button_is_not_a_second_logo():
+    # Day is a plain round sun. The seal outline with its sharp corner belongs to the mark alone.
+    for path in ("web/index.html", "web/app.js", "site/index.html", "site/tr/index.html"):
+        text = (WEB.parent / path).read_text()
+        assert '<circle class="halo"' in text and 'class="halo" d=' not in text, path
+
+
+def test_starting_something_new_is_ink_not_black_and_not_gold():
+    dark, light = _palettes()
+    for p in (dark, light):
+        assert p["ink"] != p["seal"] and _contrast(p["bg"], p["ink"]) >= 4.5
+    assert light["ink"] != light["strong"]
+    assert ".pill-btn.primary{background:var(--ink)" in (WEB.parent / "web/style.css").read_text()

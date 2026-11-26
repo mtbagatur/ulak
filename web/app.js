@@ -149,7 +149,7 @@ function cardHtml(s) {
   // Inline actions include the full command. Longer commands require opening the session.
   const shown = p ? (p.details || p.question || '') : '';
   const inline = p && p.kind === 'approval' && !p.destructive && !p.cut && p.roles.includes('approve') && shown.length <= 160 && shown.split('\n').length <= 3;
-  const stateText = s.bucket === 'idle' && s.status === 'done' ? t('doneAgo', {t: ago(s.since)}) : `${statusText(s.status)}${s.status === 'unknown' ? '' : ' · ' + ago(s.since)}`;
+  const stateText = s.bucket === 'idle' && s.status === 'done' ? (ago(s.since) ? t('doneAgo', {t: ago(s.since)}) : statusText('done')) : [statusText(s.status), s.status === 'unknown' ? '' : ago(s.since)].filter(Boolean).join(' · ');
   const body = p ? `<pre class="c-cmd${inline ? ' full-command' : ''}">${esc(p.details || p.question)}</pre>` : (s.preview ? `<div class="c-prev">${esc(s.preview)}</div>` : '');
   const pinned = isPinned(s);
   return `<button class="card-open" type="button" aria-label="${esc(t('openSession', {project: s.project}))}"></button><div class="c-top"><span class="proj">${esc(s.project)}</span>${dup && s.workspace_label ? `<span class="ws">${esc(s.workspace_label)}</span>` : ''}<span class="chip ${esc(s.agent)}">${esc(TOOLNAME[s.agent] || s.agent)}</span><span class="model">${esc(s.model)}</span><button class="pin ${pinned ? 'on' : ''}" data-pin aria-label="${esc(t(pinned ? 'unpin' : 'pin'))}" aria-pressed="${pinned}">${icon('pin', 16)}</button></div>
@@ -1094,7 +1094,7 @@ function settingsSheet() {
   const bell = bellState === 'off' ? `<button id="bell" class="row">${icon('bell', 20)}<span>${esc(t('enableBell'))}</span></button>` : `<div class="row quiet">${icon('bell', 20)}<span>${esc(t(bellState === 'on' ? 'bellOn' : 'bellNone'))}</span></div>`;
   showSheet(`<h3 data-settings>${esc(t('settings'))}</h3><div class="rows">${bell}
     <button id="lang" class="row"><b class="lang">${LANG.toUpperCase()}</b><span>${esc(t('language'))}</span><small>${LANG === 'tr' ? 'English' : 'Türkçe'}</small></button>
-    <button class="row" data-theme-toggle><svg class="moon" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><defs><mask id="hilal2"><rect x="-4" y="-4" width="32" height="32" fill="#fff"/><circle class="bite" cx="16.4" cy="8.6" r="7.2" fill="#000"/></mask></defs><path class="halo" d="M12 2.5h9.5V12A9.5 9.5 0 1 1 12 2.5z"/><circle class="disc" cx="12" cy="12" r="8.2" fill="currentColor" mask="url(#hilal2)"/></svg><span>${esc(t('appearance'))}</span><small><i class="when-dark">${esc(t('themeDark'))}</i><i class="when-light">${esc(t('themeLight'))}</i></small></button>
+    <button class="row" data-theme-toggle><svg class="moon" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><defs><mask id="hilal2"><rect x="-4" y="-4" width="32" height="32" fill="#fff"/><circle class="bite" cx="16.4" cy="8.6" r="7.2" fill="#000"/></mask></defs><circle class="halo" cx="12" cy="12" r="9.5"/><circle class="disc" cx="12" cy="12" r="8.2" fill="currentColor" mask="url(#hilal2)"/></svg><span>${esc(t('appearance'))}</span><small><i class="when-dark">${esc(t('themeDark'))}</i><i class="when-light">${esc(t('themeLight'))}</i></small></button>
     <button id="refresh" class="row">${icon('refresh', 20)}<span>${esc(t('refresh'))}</span></button>
     ${approvalTimeout ? `<div class="row quiet timeout">${icon('timer', 20)}<span>${esc(t('timeoutOn', {n: approvalTimeout}))}</span></div>` : ''}</div>`);
   $('#sheet #lang').onclick = toggleLang;
