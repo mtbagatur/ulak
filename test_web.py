@@ -377,25 +377,6 @@ def test_changed_prompt_cannot_be_approved_by_old_confirmation_sheet(api_fixture
     assert len(api.requests) == 1 and api.requests[0]["fingerprint"] == DESTRUCTIVE["fingerprint"]
 
 
-def test_delayed_approval_navigation_does_not_interrupt_another_pane(api_fixture):
-    chrome, api, url = api_fixture
-    open_first(chrome, url)
-    chrome.js("""(() => {
-        const schedule = window.setTimeout;
-        window.setTimeout = (callback, delay, ...args) => {
-            if (delay !== 450) return schedule(callback, delay, ...args);
-            window.finishApprovalNavigation = () => callback(...args);
-            return 0;
-        };
-    })()""")
-    chrome.click(APPROVE)
-    chrome.wait("document.querySelector('#toasts .ok') !== null")
-    api.publish_session("working")
-    chrome.wait("typeof window.finishApprovalNavigation === 'function'")
-    chrome.js("go('fake:p2'); window.finishApprovalNavigation()")
-    assert chrome.js("location.hash") == "#/s/fake:p2"
-
-
 def test_unknown_after_reply_times_out_without_resending_or_leaving_chat(api_fixture):
     chrome, api, url = api_fixture
     open_first(chrome, url)
@@ -964,3 +945,15 @@ def test_subagents_show_as_cards_with_their_state(api_fixture):
     wait_for(lambda: chrome.js("document.querySelector('#messages details.sub').dataset.state") == "done", "running subagent turns done", timeout=4)
     assert chrome.js("document.querySelector('#messages details.sub') === window.firstSub")
     assert chrome.js("document.querySelector('#messages details.sub .sub-state').textContent") == "Done"
+
+
+def test_answer_stays_in_the_chat_when_nothing_else_is_waiting(api_fixture):
+    chrome, api, url = api_fixture
+    open_first(chrome, url)
+    api.receipt = {"id": "r1", "ts": time.time(), "decision": "approve", "delivered": None, "destructive": False}
+    chrome.click(APPROVE)
+    chrome.wait("document.querySelector('#receipt')?.textContent.includes('on its way')")
+    api.approval = None
+    api.cards = [card("working")]
+    time.sleep(4.5)  # it used to leave for the home screen once the agent moved on, so the road to the agent was never seen
+    assert chrome.js("!document.querySelector('#session').hidden && !document.querySelector('#receipt').hidden")

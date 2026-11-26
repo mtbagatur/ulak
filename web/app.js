@@ -568,13 +568,9 @@ function afterDecision(r, view) {
   if (!r || state.view !== view) return;
   const next = r.next;
   if (next === state.current) return;
-  if (next) toast(t('nextBlocked'), '');
-  setTimeout(() => {
-    if (state.view !== view) return;
-    if (next) go(next);
-    else if (history.state) history.back();
-    else { location.hash = ''; route(); }
-  }, next ? 350 : 450);
+  if (!next) return;  // nothing else is waiting: stay and watch the answer reach the agent
+  toast(t('nextBlocked'), '');
+  setTimeout(() => { if (state.view === view) go(next); }, 350);
 }
 async function watchApprovalReply(pane, fingerprint, view) {
   toast(t('replySent'), 'ok');
