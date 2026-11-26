@@ -43,6 +43,7 @@ def card(status, **fields):
 class FakeAPI:
     def __init__(self):
         self.cards = [card("blocked", pending=APPROVAL)]
+        self.limits = []
         self.messages = [{"role": "assistant", "text": "Example answer"}]
         self.approval = APPROVAL
         self.events = []
@@ -131,7 +132,7 @@ class Handler(SimpleHTTPRequestHandler):
         elif self.path == "/api/pins":
             self.json({"pins": []})
         elif self.path == "/api/limits":
-            self.json({"now": time.time(), "providers": []})
+            self.json({"now": time.time(), "providers": self.api.limits})
         elif self.path == "/api/config":
             self.json(self.api.config)
         else:
@@ -1094,3 +1095,23 @@ def test_starting_something_new_is_ink_not_black_and_not_gold():
         assert p["ink"] != p["seal"] and _contrast(p["bg"], p["ink"]) >= 4.5
     assert light["ink"] != light["strong"]
     assert ".pill-btn.primary{background:var(--ink)" in (WEB.parent / "web/style.css").read_text()
+
+
+def test_idle_heading_is_a_text_row_and_its_toggle_stays_a_full_target(api_fixture):
+    chrome, api, url = api_fixture
+    api.cards = [card("working"), card("idle", pane_id="fake:p2", bucket="idle")]
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelector('.idle-toggle') !== null")
+    assert chrome.js("document.querySelector('.g-idle h2').getBoundingClientRect().height") <= 24
+    assert chrome.js("document.querySelector('.idle-toggle').getBoundingClientRect().height") >= 44
+    assert chrome.js("(() => { const p = document.querySelector('.idle-toggle'), b = p.getBoundingClientRect(); const e = document.elementFromPoint(b.left + 40, b.top + b.height / 2); return e === p || p.contains(e); })()")
+
+
+def test_three_providers_fit_the_limit_strip_on_a_phone(api_fixture):
+    chrome, api, url = api_fixture
+    api.limits = [{"label": name, "updated": time.time(), "items": [{"label": "7d", "used": used, "resets": 0}]} for name, used in (("Claude", 12), ("Codex", 74), ("agy", 100))]
+    chrome.resize(390, 780)
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelectorAll('#limits .lim').length === 3")
+    assert chrome.js("(() => { const b = document.querySelector('#limits'); return b.scrollWidth <= b.clientWidth; })()")
+    assert chrome.js("[...document.querySelectorAll('#limits .lim')].map(e => e.textContent)") == ["Claude12%", "Codex74%", "agy100%"]

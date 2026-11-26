@@ -75,7 +75,8 @@ button.loading::after{content:"";position:absolute;left:calc(50% - 8px);top:calc
 .group h2{font:600 15px/1.2 var(--display);color:var(--muted);margin:20px 4px 6px;display:flex;align-items:center;gap:12px}
 .group h2::after{content:"";flex:1;height:1px;background:var(--line)}
 .group.g-idle h2::after{display:none}
-.idle-toggle{display:flex;justify-content:space-between;align-items:center;width:100%;padding:0;background:none;font:inherit;color:inherit;border-radius:0}
+/* A full 44px target that does not make the heading row 44px tall. */
+.idle-toggle{display:flex;justify-content:space-between;align-items:center;width:100%;padding:0;background:none;font:inherit;color:inherit;border-radius:0;margin:-13px 0}
 .idle-toggle span{font:500 13px -apple-system,system-ui,sans-serif}
 .group.g-blocked h2{color:var(--zer)}
 .card{display:block;width:100%;text-align:left;background:transparent;border-radius:0;padding:13px 4px;margin:0;position:relative;border:0;border-bottom:1px solid var(--line);animation:pop .18s var(--ease-out)}
@@ -280,6 +281,7 @@ details.tool pre{margin:6px 0 0;padding:8px 10px;background:var(--bg2);border-ra
 .lim+.lim{padding-left:10px;border-left:1px solid var(--line)}
 .lim b{color:var(--strong);font-weight:650}.lim em{font-style:normal;color:var(--muted);font-variant-numeric:tabular-nums}
 .lim.stale{opacity:.55}
+.limits.tight{gap:6px}.limits.tight .lim{gap:5px}.limits.tight .lim+.lim{padding-left:7px}.limits.tight .lv{width:26px}
 .lv{display:inline-block;width:34px;height:6px;border-radius:3px;background:var(--line);overflow:hidden;vertical-align:middle}
 .lv i{display:block;height:100%;border-radius:3px;background:var(--ok)}
 .lv.warn i{background:var(--seal)}.lv.hot i{background:var(--lal)}

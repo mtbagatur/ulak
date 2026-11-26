@@ -1052,10 +1052,13 @@ function renderLimits() {
   box.hidden = !ps.length;
   if (!ps.length) return;
   const now = Date.now() / 1000;
+  // Three or more providers do not fit a phone with the window name; the name stays one tap away.
+  const tight = ps.length > 2;
+  box.classList.toggle('tight', tight);
   box.innerHTML = ps.map(p => {
     const show = [[...p.items].sort((a, b) => b.used - a.used)[0]];  // the tightest window; details on tap
     const stale = p.updated && now - p.updated > 1800;
-    return `<span class="lim${stale ? ' stale' : ''}"><b>${esc(p.label)}</b>${show.map(i => `<span class="lv ${lvl(i.used)}" title="${esc(i.label)}"><i style="width:${Math.min(100, i.used)}%"></i></span><em>${esc(i.label.split(' · ').pop())} ${i.used}%</em>`).join('')}</span>`;
+    return `<span class="lim${stale ? ' stale' : ''}"><b>${esc(p.label)}</b>${show.map(i => `<span class="lv ${lvl(i.used)}" title="${esc(i.label)}"><i style="width:${Math.min(100, i.used)}%"></i></span><em>${tight ? '' : esc(i.label.split(' · ').pop()) + ' '}${i.used}%</em>`).join('')}</span>`;
   }).join('');
 }
 function limitsSheet() {
