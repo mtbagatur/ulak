@@ -3,7 +3,7 @@ from pathlib import Path
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 from core import NotificationGate, is_destructive, quiet_hours, status_rank, bucket
-import asyncio, json, os, tempfile
+import asyncio, json, os, subprocess, tempfile
 from herdr_client import HerdrClient, HerdrError, HerdrUnavailable
 import pytest
 from fastapi.testclient import TestClient
@@ -1657,3 +1657,62 @@ def test_uploads_older_than_a_week_go_at_start_up_too(monkeypatch, tmp_path):
             task.cancel()
     asyncio.run(start())
     assert not old.exists() and new.exists()
+
+
+# --- looking at changes runs nothing the repository configures --------------------
+
+@pytest.mark.parametrize("kind", ["clean", "process"])
+def test_changes_runs_no_filter_the_repository_configures(tmp_path, kind):
+    repo, marker = tmp_path / "repo", tmp_path / "ran"
+    repo.mkdir()
+    git = lambda *a: subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", *a], check=True, capture_output=True)
+    git("init", "-q")
+    (repo / "a.txt").write_text("one\n")
+    git("add", "a.txt")
+    git("commit", "-qm", "one")
+    (repo / ".gitattributes").write_text("*.txt filter=odd.name\n")
+    git("config", f"filter.odd.name.{kind}", f"touch '{marker}'; cat")
+    git("config", "filter.odd.name.required", "true")
+    (repo / "a.txt").write_text("two\n")
+    from core import changes
+    out = changes(str(repo))
+    assert not marker.exists()
+    assert "+two" in out["diff"] and any(f["path"] == "a.txt" for f in out["files"])
+
+
+# --- a refused answer is on the record --------------------------------------------
+
+@pytest.mark.parametrize("endpoint,body", [("approve", {"decision": "approve"}), ("choose", {"n": 1})])
+@pytest.mark.parametrize("busy", [False, True])
+def test_an_answer_that_comes_too_late_or_too_soon_is_recorded(monkeypatch, endpoint, body, busy):
+    fake, c, h = _setup2(monkeypatch, CLAUDE)
+    if busy:
+        monkeypatch.setattr(api, "replying_panes", {"w9:p1"})
+    else:
+        api.sessions["w9:p1"]["status"] = "working"
+    assert c.post(f"/api/sessions/w9:p1/{endpoint}", headers=h, json={**body, "fingerprint": "x"}).status_code == 409
+    [entry] = api.read_audit()
+    assert entry["outcome"] == "refused" and entry["login"] == "user@example.test" and entry["reason"]
+    assert entry["decision"] == (body.get("decision") or "choose") and fake.sent == []
+
+
+def test_changes_does_not_look_inside_submodules_where_their_own_filters_would_run(tmp_path):
+    from core import changes
+    inner, repo, marker = tmp_path / "inner", tmp_path / "repo", tmp_path / "ran"
+    inner.mkdir(), repo.mkdir()
+    _repo(inner), _repo(repo)
+    _git(repo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(inner), "sub")
+    _git(repo, "commit", "-qm", "sub")
+    (repo / ".git/modules/sub/info/attributes").write_text("*.txt filter=x\n")
+    _git(repo / "sub", "config", "filter.x.clean", f"touch '{marker}'; cat")
+    (repo / "sub/a.txt").write_text("one\ntwx\n")  # same size: git must read it to know
+    changes(str(repo))
+    assert not marker.exists()
+
+
+def test_keys_that_meet_a_reply_in_progress_are_recorded(monkeypatch):
+    fake, c, h = _setup2(monkeypatch, CLAUDE)
+    monkeypatch.setattr(api, "replying_panes", {"w9:p1"})
+    assert c.post("/api/sessions/w9:p1/keys", headers=h, json={"keys": ["esc"]}).status_code == 409
+    [entry] = api.read_audit()
+    assert entry["outcome"] == "refused" and entry["decision"] == "keys" and fake.sent == []

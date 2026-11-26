@@ -861,18 +861,18 @@ async def approve(pane: str, action: Action, request: Request):
     item = sessions.get(pane)
     if not item or pane not in pane_ids:
         raise HTTPException(404, "Session is closed or unknown")
-    if item.get("status") != "blocked":
-        discard_changed_confirmation(pane, None)
-        raise HTTPException(409, "Session is no longer waiting for approval")
     if action.decision not in ("approve", "deny", "always"):
         raise HTTPException(400, "decision must be approve, deny, or always")
-    with exclusive_prompt_reply(pane):
-        seen = {}  # what was on screen, so a refusal is recorded with its command
-        try:
+    seen = {}  # what was on screen, so a refusal is recorded with its command
+    try:
+        if item.get("status") != "blocked":
+            discard_changed_confirmation(pane, None)
+            raise HTTPException(409, "Session is no longer waiting for approval")
+        with exclusive_prompt_reply(pane):
             return await _approve(pane, item, action, request, seen)
-        except HTTPException as exc:
-            audit(pane, action.decision, "refused", login=who(request), reason=str(exc.detail), **seen)
-            raise
+    except HTTPException as exc:
+        audit(pane, action.decision, "refused", login=who(request), reason=str(exc.detail), **seen)
+        raise
 
 
 async def _approve(pane, item, action, request, seen):
@@ -924,11 +924,11 @@ async def choose(pane: str, action: Action, request: Request):
     item = sessions.get(pane)
     if not item or pane not in pane_ids:
         raise HTTPException(404, "Session is closed or unknown")
-    if item.get("status") != "blocked":
-        raise HTTPException(409, "Session is no longer waiting for anything")
-    with exclusive_prompt_reply(pane):
-        seen = {}  # the question on screen, so a refused choice is recorded with it
-        try:
+    seen = {}  # the question on screen, so a refused choice is recorded with it
+    try:
+        if item.get("status") != "blocked":
+            raise HTTPException(409, "Session is no longer waiting for anything")
+        with exclusive_prompt_reply(pane):
             p = await fresh_prompt(pane, item.get("agent", "claude"))
             if not p or p["kind"] in ("approval", "dismiss"):
                 raise HTTPException(409, "No menu to choose from on screen")
@@ -938,13 +938,13 @@ async def choose(pane: str, action: Action, request: Request):
             option = next((o for o in p["options"] if o["n"] == action.n), None)
             if not option:
                 raise HTTPException(409, "No such option")
-        except HTTPException as exc:
-            audit(pane, "choose", "refused", login=who(request), reason=str(exc.detail), plain=True, **seen)
-            raise
-        pending_confirm.pop(pane, None)
-        await client.call("agent.send_keys", {"target": pane, "keys": option["keys"]})
-        entry = audit(pane, "choose", "sent", login=who(request), command=f"{p.get('question', '')}\n> {option['label']}".strip(), plain=True)
-        track_delivery(pane, p["fingerprint"], entry)
+            pending_confirm.pop(pane, None)
+            await client.call("agent.send_keys", {"target": pane, "keys": option["keys"]})
+            entry = audit(pane, "choose", "sent", login=who(request), command=f"{p.get('question', '')}\n> {option['label']}".strip(), plain=True)
+            track_delivery(pane, p["fingerprint"], entry)
+    except HTTPException as exc:
+        audit(pane, "choose", "refused", login=who(request), reason=str(exc.detail), plain=True, **seen)
+        raise
     return {"ok": True, "next": next_blocked(pane)}
 
 
@@ -955,6 +955,8 @@ async def send_keys(pane: str, action: Action, request: Request):
     if not keys or len(keys) > 4 or None in keys:
         raise HTTPException(400, "Invalid key")
     item = await must_be_agent(pane)
+    if pane in replying_panes and item.get("status") == "blocked":
+        audit(pane, "keys", "refused", login=who(request), command=f"> {' '.join(keys)}", reason="A reply is already in progress", plain=True)
     with exclusive_prompt_reply(pane):
         waiting = None  # keys typed at a waiting agent answer it, so they go on the record like any decision
         if item.get("status") == "blocked":

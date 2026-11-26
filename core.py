@@ -510,9 +510,30 @@ def slash_commands(agent, cwd, home):
 GIT_READ = ["git", "--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.quotepath=false", "-c", "color.ui=false"]
 
 
-def _git_read(cwd, args, limit, timeout=6):
+def _without_filters(cwd, env):
+    """The environment that switches off every clean/smudge filter configured in the repository itself.
+    Your own global filters (git-lfs and the like) stay: the repository did not choose those commands."""
+    found = _git_read(cwd, ["config", "--show-scope", "--name-only", "--get-regexp", r"^filter\."], 100000, env=env)
+    names = set()
+    for line in (found[0].splitlines() if found else []):
+        scope, _, key = line.partition("\t")
+        if scope in ("local", "worktree"):
+            names.add(key.rsplit(".", 1)[0])
+    pairs = [(f"{name}.{key}", value) for name in sorted(names) for key, value in (("clean", ""), ("process", ""), ("required", "false"))]
+    start = int(env.get("GIT_CONFIG_COUNT") or 0)
+    extra = {"GIT_CONFIG_COUNT": str(start + len(pairs))}
+    for n, (key, value) in enumerate(pairs, start):
+        extra[f"GIT_CONFIG_KEY_{n}"], extra[f"GIT_CONFIG_VALUE_{n}"] = key, value
+    return {**env, **extra}
+
+
+def _git_env():
+    return {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0", "LC_ALL": "C"}
+
+
+def _git_read(cwd, args, limit, timeout=6, env=None):
     """Run a read-only git command and return at most `limit` bytes of output, or None when it fails."""
-    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0", "LC_ALL": "C"}
+    env = env or _git_env()
     try:
         proc = subprocess.Popen(GIT_READ + args, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
@@ -539,7 +560,9 @@ def changes(cwd, max_chars=60000, max_files=200):
     out = {"repo": False, "branch": "", "files": [], "more_files": 0, "diff": "", "truncated": False}
     if not cwd or not os.path.isdir(cwd):
         return out
-    status = _git_read(cwd, ["status", "--porcelain=v1", "-z", "--branch", "--untracked-files=normal"], 400000)
+    env = _without_filters(cwd, _git_env())
+    # A submodule has its own configuration, so only the commit it points at is compared.
+    status = _git_read(cwd, ["status", "--porcelain=v1", "-z", "--branch", "--untracked-files=normal", "--ignore-submodules=dirty"], 400000, env=env)
     if status is None:
         return out
     out["repo"] = True
@@ -559,8 +582,8 @@ def changes(cwd, max_chars=60000, max_files=200):
         skip = x in "RC"  # a rename is followed by the old path
         files.append({"code": "?" if x == "?" else (x if x != " " else y), "path": path})
     out["files"], out["more_files"] = files[:max_files], max(0, len(files) - max_files)
-    flags = ["--no-ext-diff", "--no-textconv", "--no-color"]
-    diff = _git_read(cwd, ["diff", "HEAD", *flags], max_chars) or _git_read(cwd, ["diff", "--cached", *flags], max_chars)
+    flags = ["--no-ext-diff", "--no-textconv", "--no-color", "--ignore-submodules=dirty"]
+    diff = _git_read(cwd, ["diff", "HEAD", *flags], max_chars, env=env) or _git_read(cwd, ["diff", "--cached", *flags], max_chars, env=env)
     if diff:
         text, cut = diff
         if cut:
