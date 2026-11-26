@@ -66,6 +66,8 @@ PRESENCE_TTL = 10
 AUDIT_KEEP = 500
 DELIVERY_DELAYS = (0.4, 0.8, 1.5, 2.5, 3.0)  # when to look for the answered prompt leaving the screen
 gate = NotificationGate()
+recovered_at = 0.0
+RECOVER_EVERY = 10  # seconds between two repairs of the event stream
 client = HerdrClient()
 allowed_login = os.environ.get("ULAK_ALLOWED_LOGIN", "")
 
@@ -357,9 +359,10 @@ async def load_all():
         async with sem:
             return await refresh_pane(pane, force=False)
     await asyncio.gather(*(one(p) for p in raw_agents), return_exceptions=True)
-    new_panes = panes - pane_ids
+    changed = panes != pane_ids  # a gone pane must leave the list too: Herdr rejects a subscription that names one
+    pane_ids.intersection_update(panes)
     pane_ids.update(panes)
-    if new_panes:
+    if changed:
         await resubscribe()
     return sorted(sessions.values(), key=status_rank)
 
@@ -389,7 +392,27 @@ async def event_loop():
             print(f"event handling failed: {exc}", flush=True)
 
 
+async def recover():
+    """The event stream broke. Look at what is really there (which also subscribes afresh) and tell open phones."""
+    global recovered_at
+    now = time.monotonic()
+    if now - recovered_at < RECOVER_EVERY:
+        return
+    before = set(sessions)
+    try:
+        cards = await load_all()
+    except HerdrError:
+        return  # still down; the stream will report again
+    recovered_at = now
+    for pane in sorted(before - set(sessions)):
+        await broadcast({"type": "removed", "pane": pane})
+    for card in cards:
+        await broadcast({"type": "session", "session": card})
+
+
 async def handle_event(msg):
+    if "_error" in msg:
+        return await recover()
     event = str(msg.get("event", "")).replace(".", "_")
     data = msg.get("data", {})
     pane = data.get("pane_id") or data.get("pane", {}).get("pane_id")

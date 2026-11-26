@@ -1362,3 +1362,80 @@ def test_a_limits_file_that_is_not_text_is_left_out(monkeypatch, tmp_path):
     monkeypatch.setattr(api, "codex_limits", lambda: None)
     r = TestClient(api.app).get("/api/limits", headers={"Tailscale-User-Login": "user@example.test"})
     assert r.status_code == 200 and [p["id"] for p in r.json()["providers"]] == ["claude"]
+
+
+def test_a_rejected_subscription_is_reported(tmp_path):
+    async def scenario():
+        path = str(tmp_path / "herdr.sock")
+
+        async def serve(reader, writer):
+            msg = json.loads(await reader.readline())
+            writer.write((json.dumps({"id": msg["id"], "error": {"code": "pane_not_found", "message": "pane w9:p9 not found"}}) + "\n").encode())
+            await writer.drain()
+            writer.close()
+
+        server = await asyncio.start_unix_server(serve, path)
+        async with server:
+            client = HerdrClient(path)
+            await client.subscribe([{"type": "pane.agent_status_changed", "pane_id": "w9:p9"}])
+            event = await asyncio.wait_for(client.events.get(), 1)
+            await client.close()
+            return event
+    assert asyncio.run(scenario()) == {"_error": "pane w9:p9 not found"}
+
+
+class SnapshotHerdr:
+    """A Herdr with exactly these agent panes; remembers what was subscribed to."""
+    def __init__(self, *panes): self.panes, self.subscribed, self.down = list(panes), [], False
+
+    async def subscribe(self, subscriptions):
+        self.subscribed.append(sorted(s["pane_id"] for s in subscriptions if "pane_id" in s))
+
+    async def call(self, method, params=None):
+        if self.down: raise HerdrUnavailable()
+        if method == "session.snapshot": return {"workspaces": [], "panes": [{"pane_id": p} for p in self.panes]}
+        if method == "agent.list": return {"agents": [{"pane_id": p, "agent": "codex", "agent_status": "idle"} for p in self.panes]}
+        return {"read": {"text": ""}}
+
+
+def _herd(monkeypatch, tmp_path, *panes):
+    fake = SnapshotHerdr(*panes)
+    monkeypatch.setattr(api, "client", fake)
+    monkeypatch.setattr(api, "STATE", tmp_path)
+    for name in ("sessions", "raw_agents", "since", "read_cache", "pending_confirm", "pushed", "work_started"):
+        monkeypatch.setattr(api, name, {})
+    monkeypatch.setattr(api, "pane_ids", set())
+    monkeypatch.setattr(api, "subscribers", set())
+    monkeypatch.setattr(api, "recovered_at", 0.0)
+    return fake
+
+
+def test_a_vanished_pane_is_no_longer_subscribed_to(monkeypatch, tmp_path):
+    fake = _herd(monkeypatch, tmp_path, "w1:p1", "w2:p1")
+
+    async def scenario():
+        await api.load_all()
+        fake.panes = ["w2:p1"]
+        await api.load_all()
+    asyncio.run(scenario())
+    assert fake.subscribed == [["w1:p1", "w2:p1"], ["w2:p1"]] and api.pane_ids == {"w2:p1"}
+
+
+def test_a_broken_event_stream_is_repaired_and_phones_are_told(monkeypatch, tmp_path):
+    fake = _herd(monkeypatch, tmp_path, "w1:p1")
+
+    async def scenario():
+        await api.load_all()
+        phone = asyncio.Queue()
+        api.subscribers.add(phone)
+        fake.down = True
+        await api.handle_event({"_error": "Connection refused"})  # still down: nothing to say, nothing to raise
+        assert phone.empty()
+        fake.down, fake.panes = False, ["w5:p1"]  # Herdr is back, with different panes
+        api.recovered_at = 0.0
+        await api.handle_event({"_error": "pane w1:p1 not found"})
+        await api.handle_event({"_error": "pane w1:p1 not found"})  # a burst repairs once
+        return [phone.get_nowait() for _ in range(phone.qsize())]
+    told = asyncio.run(scenario())
+    assert fake.subscribed[-1] == ["w5:p1"]
+    assert [(e["type"], e.get("pane") or e["session"]["pane_id"]) for e in told] == [("removed", "w1:p1"), ("session", "w5:p1")]

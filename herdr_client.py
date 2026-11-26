@@ -71,6 +71,8 @@ class HerdrClient:
                     while line := await reader.readline():
                         msg = json.loads(line)
                         if msg.get("id") == "ulak:events":
+                            if "error" in msg:  # all or nothing: one unknown pane and no event will ever arrive
+                                raise HerdrError(msg["error"].get("message", "Herdr error"))
                             continue
                         await self.events.put(msg)
                 finally:
