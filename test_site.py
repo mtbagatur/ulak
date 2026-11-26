@@ -185,3 +185,8 @@ def test_a_wrong_address_gets_a_page_that_says_so(out):
     html = (out / "404.html").read_text()
     assert 'href="/"' in html and 'href="/site.css"' in html and 'name="robots" content="noindex"' in html
     assert not re.findall(r'(?:src|href)="(?!/|https://github\.com/)', html)  # served at any depth, so every path is absolute
+
+
+def test_a_new_build_reaches_returning_visitors_at_once(out):
+    # The host's default lets a browser keep site.css and the demo's scripts for four hours, so a fresh page met a stale stylesheet.
+    assert ("Cache-Control", "public, max-age=0, must-revalidate") in host_headers(out)
