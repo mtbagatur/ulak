@@ -487,6 +487,14 @@ def test_slash_command_suggestions_filter_and_fill_composer(ulak):
     assert chrome.js("document.querySelector('#message').value") == "/compact "
 
 
+def test_open_chat_picks_up_new_message_without_manual_refresh(ulak):
+    chrome, api, url = ulak
+    open_first(chrome, url)
+    chrome.wait("document.querySelector('#messages .msg') !== null")
+    api.messages = [{"role": "assistant", "text": "Fresh event-free update"}]
+    wait_for(lambda: chrome.js("document.querySelector('#messages .msg')?.textContent === 'Fresh event-free update'"), "chat poll observes new message", timeout=3)
+
+
 def test_offline_refresh_retains_cards_and_sse_reconnect_loads_snapshot(ulak):
     chrome, api, url = ulak
     api.cards = [card("working")]

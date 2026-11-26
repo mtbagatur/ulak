@@ -263,7 +263,7 @@ async def make_card(agent, force=False):
         path = claude_path(agent.get("cwd"), sid)
         if path:
             try:
-                msgs, model = claude_chat(path, max_messages=30, tail_bytes=250_000)
+                msgs, model = await asyncio.to_thread(claude_chat, path, max_messages=30, tail_bytes=250_000)
                 texts = [m["text"] for m in msgs if m["role"] == "assistant"]
                 tools = [m for m in msgs if m["role"] == "tool"]
                 if texts:
@@ -319,15 +319,19 @@ async def load_all():
         async with sem:
             return await refresh_pane(pane, force=False)
     await asyncio.gather(*(one(p) for p in raw_agents), return_exceptions=True)
+    new_panes = panes - pane_ids
     pane_ids.update(panes)
+    if new_panes:
+        await resubscribe()
     return sorted(sessions.values(), key=status_rank)
 
 
 async def initialize():
     load_since()
     try:
-        await load_all()
-        await resubscribe()
+        # Subscribe to lifecycle events immediately; the first HTTP snapshot loads
+        # session details after the server can already serve the app shell.
+        await client.subscribe(BASE_EVENTS)
     except Exception as exc:
         print(f"Herdr initialization failed: {exc}", flush=True)
     asyncio.create_task(event_loop())
@@ -555,7 +559,7 @@ async def chat(pane: str, limit: int = 60):
         path = claude_path(agent.get("cwd"), sid)
         if path:
             try:
-                messages, _ = claude_chat(path, max_messages=max(10, min(limit, 200)))
+                messages, _ = await asyncio.to_thread(claude_chat, path, max_messages=max(10, min(limit, 200)))
                 source = "transcript"
             except OSError:
                 messages = None

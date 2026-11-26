@@ -333,7 +333,7 @@ window.addEventListener('offline', () => {
   beginRecovery();
 });
 window.addEventListener('online', resumeConnection);
-setInterval(() => { if (!document.hidden) { renderHome(); if (state.current) loadChat(); } }, 4000);
+setInterval(() => { if (!document.hidden) { renderHome(); if (state.current) loadChat(); } }, 1500);
 
 // ---------- routing ----------
 function go(pane) { history.pushState({pane}, '', `#/s/${pane}`); route(); }

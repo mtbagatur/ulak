@@ -118,6 +118,24 @@ def test_closed_pane_drops_ephemeral_state(monkeypatch):
     asyncio.run(scenario())
 
 
+def test_initialize_subscribes_before_http_requests_without_loading_every_session(monkeypatch):
+    async def scenario():
+        calls = []
+        class StartupClient:
+            async def subscribe(self, subscriptions): calls.append(subscriptions)
+        async def forbidden_load(): raise AssertionError("startup must not wait for every pane")
+        async def idle_event_loop(): return None
+        monkeypatch.setattr(ulak, "client", StartupClient())
+        monkeypatch.setattr(ulak, "load_all", forbidden_load)
+        monkeypatch.setattr(ulak, "event_loop", idle_event_loop)
+        monkeypatch.setattr(ulak, "load_since", lambda: None)
+        await asyncio.wait_for(ulak.initialize(), 0.1)
+        await asyncio.sleep(0)
+        assert calls == [ulak.BASE_EVENTS]
+
+    asyncio.run(scenario())
+
+
 # --- Review tests: real screens, fresh-read approval ---
 from core import parse_approval
 CLAUDE = (Path(__file__).parent / "fixtures/claude-bash-approval.txt").read_text()
@@ -153,6 +171,7 @@ def test_trust_dialog_not_an_approval():
 
 class FakeHerdr:
     def __init__(self, text): self.text, self.sent = text, []
+    async def subscribe(self, subscriptions): return None
     async def call(self, method, params=None):
         if method == "agent.read": return {"read": {"text": self.text}}
         if method == "agent.send_keys": self.sent.append(params["keys"]); return {"ok": True}
