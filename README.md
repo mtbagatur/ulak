@@ -44,7 +44,14 @@ pip install -r requirements.txt
 python tools/demo_server.py      # http://127.0.0.1:8766
 ```
 
-Run `python -m pytest -q` to verify the backend and the PWA. Browser cases use Chrome or Chromium with the `websockets` package and a loopback-only fake API. They skip when those browser dependencies are unavailable.
+Run the test suite with:
+
+```sh
+pip install -r requirements.txt -r requirements-dev.txt
+python -m pytest -q
+```
+
+Browser cases use Chrome or Chromium with a loopback-only fake API. They skip when a browser is unavailable.
 
 ## How it compares
 
@@ -123,7 +130,8 @@ State (`.state/`: pins, notification history) lives on the server, so every devi
 ## Tests
 
 ```sh
-pip install pytest && pytest
+pip install -r requirements.txt -r requirements-dev.txt
+python -m pytest -q
 ```
 
 ## License
