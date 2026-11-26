@@ -1,3 +1,4 @@
+import hashlib
 import re
 import threading
 from functools import partial
@@ -183,10 +184,22 @@ def test_the_four_stops_line_up_on_a_wide_screen(served):
 def test_a_wrong_address_gets_a_page_that_says_so(out):
     # Without 404.html the host answers every unknown path with the landing page and a 200.
     html = (out / "404.html").read_text()
-    assert 'href="/"' in html and 'href="/site.css"' in html and 'name="robots" content="noindex"' in html
+    assert 'href="/"' in html and 'href="/site.css?v=' in html and 'name="robots" content="noindex"' in html
     assert not re.findall(r'(?:src|href)="(?!/|https://github\.com/)', html)  # served at any depth, so every path is absolute
 
 
 def test_a_new_build_reaches_returning_visitors_at_once(out):
     # The host's default lets a browser keep site.css and the demo's scripts for four hours, so a fresh page met a stale stylesheet.
     assert ("Cache-Control", "public, max-age=0, must-revalidate") in host_headers(out)
+
+
+def test_every_stylesheet_and_script_address_changes_with_its_content(out):
+    # A host or browser that keeps site.css for hours still fetches a changed one: its address is new.
+    for page in PAGES + ("404.html", "demo/index.html"):
+        html = (out / page).read_text()
+        refs = re.findall(r'(?:href|src)="([^"]+\.(?:css|js)[^"]*)"', html)
+        assert len(refs) >= 2, page
+        for ref in refs:
+            path, _, stamp = ref.partition("?v=")
+            target = out / path.lstrip("/") if path.startswith("/") else (out / page).parent / path
+            assert stamp == hashlib.sha256(target.read_bytes()).hexdigest()[:8], f"{page}: {ref}"

@@ -3,6 +3,7 @@
     python tools/demo_server.py               # http://127.0.0.1:8766  (?speed=4 hurries the agents, ?worst loads worst-case data)
     python tools/demo_server.py --build DIR   # a static copy for any web host; works under a subpath
 """
+import hashlib
 import re
 import shutil
 import sys
@@ -26,6 +27,15 @@ def index_html():
     return html
 
 
+def stamp(page, root=None):
+    """Give every local stylesheet and script in a built page an address that changes with the file, so no cache serves an old one."""
+    def add(match):
+        ref = match.group(2)
+        target = (root / ref.lstrip("/")) if ref.startswith("/") else page.parent / ref
+        return f'{match.group(1)}"{ref}?v={hashlib.sha256(target.read_bytes()).hexdigest()[:8]}"'
+    page.write_text(re.sub(r'((?:href|src)=)"((?!https?:)[^"?]+\.(?:css|js))"', add, page.read_text()))
+
+
 def build(out):
     out = Path(out)
     static = out / "static"
@@ -35,6 +45,7 @@ def build(out):
             shutil.copy2(item, static / item.name)
     shutil.copy2(SHIM, static / "demo.js")
     (out / "index.html").write_text(index_html())
+    stamp(out / "index.html")
     return out
 
 

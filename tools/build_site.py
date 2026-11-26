@@ -20,6 +20,8 @@ def build(out):
     for name in ("icon.svg", "icon-512.png", "apple-touch-icon.png", "theme.js", "elmessiri.woff2", "elmessiri-OFL.txt"):
         shutil.copy2(ROOT / "web" / name, out / name)
     demo_server.build(out / "demo")
+    for page in ("index.html", "tr/index.html", "404.html"):
+        demo_server.stamp(out / page, out)
     return out
 
 
