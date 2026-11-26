@@ -809,13 +809,6 @@ async def commands(pane: str):
 async def chat(pane: str, limit: int = 60):
     item = must_exist(pane)
     status = item.get("status", "unknown")
-    screen = await read_screen(pane, status, max_age=1.0, history=True)
-    prompt = None
-    if status == "blocked":
-        prompt = parse_prompt(screen, item.get("agent", "claude"))
-        if prompt:
-            prompt["destructive"] = bool(prompt["kind"] == "approval" and is_destructive(prompt["details"], RULES))
-    discard_changed_confirmation(pane, (prompt or {}).get("fingerprint"))
     agent = raw_agents.get(pane, {})
     sid = (agent.get("agent_session") or {}).get("value")
     messages, source = None, "screen"
@@ -827,6 +820,14 @@ async def chat(pane: str, limit: int = 60):
                 source = "transcript"
             except OSError:
                 messages = None
+    # Long terminal history is slow to fetch from Herdr; it is only needed when there is no transcript to show.
+    screen = await read_screen(pane, status, max_age=1.0, history=messages is None)
+    prompt = None
+    if status == "blocked":
+        prompt = parse_prompt(screen, item.get("agent", "claude"))
+        if prompt:
+            prompt["destructive"] = bool(prompt["kind"] == "approval" and is_destructive(prompt["details"], RULES))
+    discard_changed_confirmation(pane, (prompt or {}).get("fingerprint"))
     if messages is None:
         messages = screen_chat(screen, max(10, min(limit, 200)))
     hint = next((l.strip() for l in reversed(strip_ansi(screen).splitlines()[-12:]) if SPINNER.match(l)), "") if status == "working" else ""

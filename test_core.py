@@ -1765,3 +1765,24 @@ def test_the_live_event_stream_is_never_compressed_or_held_back(monkeypatch):
     headers = dict(sent[0]["headers"])
     assert sent[0]["status"] == 200 and b"content-encoding" not in headers
     assert next(m["body"] for m in sent if m.get("body")).endswith(b"event: ready\ndata: {}\n\n")
+
+
+@pytest.mark.parametrize("transcript, source", [(True, "visible"), (False, "recent_unwrapped")], ids=["transcript", "screen only"])
+def test_terminal_history_is_read_only_when_the_conversation_has_to_come_from_it(monkeypatch, tmp_path, transcript, source):
+    # Herdr can take seconds to hand over a long history, and the phone asks for the conversation every second or two.
+    fake, c, h = _setup(monkeypatch, "words")
+    asked = []
+
+    async def call(method, params=None):
+        asked.append(params.get("source"))
+        return {"read": {"text": "words"}}
+
+    monkeypatch.setattr(fake, "call", call)
+    monkeypatch.setattr(api, "read_cache", {})
+    monkeypatch.setattr(api, "sessions", {"w9:p1": {"pane_id": "w9:p1", "status": "done", "agent": "claude"}})
+    monkeypatch.setattr(api, "raw_agents", {"w9:p1": {"cwd": str(tmp_path), "agent_session": {"value": "sid"}}})
+    log = tmp_path / "log.jsonl"
+    log.write_text('{"type": "user", "message": {"content": "hello"}}\n')
+    monkeypatch.setattr(api, "claude_path", lambda *a: log if transcript else None)
+    body = c.get("/api/sessions/w9:p1/chat", headers=h).json()
+    assert (body["source"], asked) == ("transcript" if transcript else "screen", [source])
