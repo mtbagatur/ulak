@@ -1197,3 +1197,13 @@ def test_jump_to_new_message_button_speaks_the_chosen_language(api_fixture):
         chrome.cdp("Page.navigate", url=f"{url}/?{lang}2")
         chrome.wait(f"document.readyState === 'complete' && document.documentElement.lang === '{lang}'")
         assert chrome.js("document.querySelector('#jump').textContent") == label
+
+
+
+def test_banner_says_why_the_session_list_could_not_be_read(api_fixture):
+    chrome, api, url = api_fixture
+    api.fail_list = True
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelector('#conn')?.textContent === 'Fixture snapshot unavailable'")
+    api.fail_list = False
+    chrome.wait("document.querySelector('#conn').hidden && document.querySelector('.card') !== null")

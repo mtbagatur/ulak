@@ -280,9 +280,10 @@ function updateConnection() {
     clearRetry();
   }
   const banner = $('#conn');
-  const text = state.live ? '' : t(offline ? 'offline' : streamReady ? 'syncing' : 'reconnecting');
+  if (state.live || listReady) failReason = '';
+  const text = state.live ? '' : offline ? t('offline') : failReason || t(streamReady ? 'syncing' : 'reconnecting');
   banner.hidden = state.live;
-  banner.classList.toggle('bad', offline);
+  banner.classList.toggle('bad', offline || !!failReason);
   if (banner.textContent !== text) banner.textContent = text;
 }
 function beginRecovery(network = false) {
@@ -296,6 +297,9 @@ function beginRecovery(network = false) {
 }
 function snapshotFailed(error) {
   beginRecovery(error.network);
+  // A server that answers with a reason (Herdr is down, say) is worth quoting; a bare status number is not.
+  failReason = error.status && !/^\d+$/.test(error.message) ? error.message : '';
+  updateConnection();
   if (streamReady) scheduleRetry();
 }
 function clearRetry() {
