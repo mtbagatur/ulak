@@ -127,17 +127,32 @@ class Presence(BaseModel):
 
 # --- helpers -------------------------------------------------------------
 
-def load_since():
+def save_file(path, text, mode=None):
+    """Write the whole file or nothing: a reader never meets half of it, and a failed write leaves the old one."""
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    temp = path.with_name(path.name + ".tmp")
+    temp.write_text(text)
+    if mode is not None:
+        temp.chmod(mode)
+    os.replace(temp, path)
+
+
+def read_json(path, kind):
+    """What `path` holds if it is a `kind` (list or dict), else an empty one."""
     try:
-        since.update(json.loads((STATE / "since.json").read_text()))
+        data = json.loads(path.read_text())
     except (OSError, ValueError):
-        pass
+        return kind()
+    return data if isinstance(data, kind) else kind()
+
+
+def load_since():
+    since.update({pane: entry for pane, entry in read_json(STATE / "since.json", dict).items() if isinstance(entry, dict)})
 
 
 def save_since():
     try:
-        STATE.mkdir(exist_ok=True)
-        (STATE / "since.json").write_text(json.dumps(since))
+        save_file(STATE / "since.json", json.dumps(since))
     except OSError:
         pass
 
@@ -460,24 +475,17 @@ def read_subs():
 
 
 def write_subs(subs):
-    path = ROOT / ".secrets/subscriptions.json"
-    path.parent.mkdir(mode=0o700, exist_ok=True)
-    path.write_text("".join(json.dumps(s) + "\n" for s in subs))
-    path.chmod(0o600)
+    save_file(ROOT / ".secrets/subscriptions.json", "".join(json.dumps(s) + "\n" for s in subs), mode=0o600)
 
 
 def log_notification(payload):
     """History keeps language-neutral fields; the phone composes the title in its own language."""
     path = STATE / "notifications.json"
     try:
-        STATE.mkdir(exist_ok=True)
-        try:
-            items = json.loads(path.read_text())
-        except (OSError, ValueError):
-            items = []
+        items = read_json(path, list)
         items.append({"ts": time.time(), "pane": payload.get("pane"), "status": payload.get("status"), "project": payload.get("project"),
                       "body": payload.get("raw", ""), "destructive": payload.get("destructive", False)})
-        path.write_text(json.dumps(items[-100:], ensure_ascii=False))
+        save_file(path, json.dumps(items[-100:], ensure_ascii=False))
     except OSError:
         pass
 
@@ -510,19 +518,27 @@ async def send_push(item, prompt=None, destructive=False):
 
 
 def read_audit():
+    path = STATE / "audit.json"
     try:
-        items = json.loads((STATE / "audit.json").read_text())
-        return items if isinstance(items, list) else []
-    except (OSError, ValueError):
+        text = path.read_text()
+    except (OSError, UnicodeDecodeError):
         return []
+    try:
+        items = json.loads(text)
+    except ValueError:
+        items = None
+    if isinstance(items, list):
+        return items
+    try:  # the next entry would write over it, and a record of decisions is not Ulak's to throw away
+        os.replace(path, path.with_name(f"audit.json.damaged-{time.time_ns()}"))
+    except OSError:
+        pass
+    return []
 
 
 def write_audit(items):
     try:
-        STATE.mkdir(exist_ok=True)
-        path = STATE / "audit.json"
-        path.write_text(json.dumps(items[-AUDIT_KEEP:], ensure_ascii=False))
-        path.chmod(0o600)
+        save_file(STATE / "audit.json", json.dumps(items[-AUDIT_KEEP:], ensure_ascii=False), mode=0o600)
     except OSError:
         pass
 
@@ -1008,19 +1024,11 @@ async def audit_log():
 
 @app.get("/api/notifications")
 async def notifications():
-    try:
-        items = json.loads((STATE / "notifications.json").read_text())
-    except (OSError, ValueError):
-        items = []
-    return {"items": list(reversed(items))}
+    return {"items": list(reversed(read_json(STATE / "notifications.json", list)))}
 
 
 def read_pins():
-    try:
-        items = json.loads((STATE / "pins.json").read_text())
-        return [x for x in items if isinstance(x, str)]
-    except (OSError, ValueError):
-        return []
+    return [x for x in read_json(STATE / "pins.json", list) if isinstance(x, str)]
 
 
 @app.get("/api/pins")
@@ -1035,8 +1043,7 @@ async def put_pins(request: Request):
     if not isinstance(pins, list) or len(pins) > 200 or not all(isinstance(x, str) and len(x) < 300 for x in pins):
         raise HTTPException(400, "Invalid pin list")
     pins = list(dict.fromkeys(pins))
-    STATE.mkdir(exist_ok=True)
-    (STATE / "pins.json").write_text(json.dumps(pins, ensure_ascii=False))
+    save_file(STATE / "pins.json", json.dumps(pins, ensure_ascii=False))
     return {"pins": pins}
 
 

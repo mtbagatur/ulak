@@ -1284,3 +1284,51 @@ def test_a_damaged_transcript_line_does_not_hide_the_conversation(tmp_path):
     messages, model = claude_chat(path)
     assert [(m["role"], m["text"]) for m in messages if m["role"] != "tool"] == [("user", "Find the bug"), ("assistant", "Found it.")]
     assert isinstance(model, str)
+
+
+# --- what Ulak keeps on disk ---
+
+def test_a_write_that_dies_halfway_leaves_the_record_as_it_was(monkeypatch, tmp_path):
+    monkeypatch.setattr(api, "STATE", tmp_path)
+    api.write_audit([{"id": "kept"}])
+    real = Path.write_text
+
+    def torn(self, text, *args, **kwargs):
+        real(self, text[:len(text) // 2], *args, **kwargs)
+        raise OSError("disk full")
+
+    with patch.object(Path, "write_text", torn):
+        api.write_audit([{"id": "kept"}, {"id": "new"}])
+    assert api.read_audit() == [{"id": "kept"}]
+    assert (tmp_path / "audit.json").stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize("damage", ['[{"id": "old"', '{"id": "old"}'], ids=["torn", "not-a-list"])
+def test_a_damaged_record_is_set_aside_not_overwritten(monkeypatch, tmp_path, damage):
+    monkeypatch.setattr(api, "STATE", tmp_path)
+    monkeypatch.setattr(api, "sessions", {})
+    (tmp_path / "audit.json").write_text(damage)
+    api.audit("w1:p1", "approve", "sent")
+    assert [e["decision"] for e in api.read_audit()] == ["approve"]
+    assert [p.read_text() for p in tmp_path.glob("audit.json.damaged-*")] == [damage]
+
+
+@pytest.mark.parametrize("damage", ['{"a": 1}', "7", "[torn"])
+def test_a_damaged_notification_history_starts_again(monkeypatch, tmp_path, damage):
+    monkeypatch.setattr(api, "STATE", tmp_path)
+    monkeypatch.setattr(api, "allowed_login", "user@example.test")
+    (tmp_path / "notifications.json").write_text(damage)
+    client, headers = TestClient(api.app), {"Tailscale-User-Login": "user@example.test"}
+    assert client.get("/api/notifications", headers=headers).json() == {"items": []}
+    api.log_notification({"pane": "w1:p1", "status": "done"})
+    assert [i["pane"] for i in client.get("/api/notifications", headers=headers).json()["items"]] == ["w1:p1"]
+
+
+@pytest.mark.parametrize("name", ["since.json", "pins.json"])
+@pytest.mark.parametrize("damage", ["7", "[torn", "null"])
+def test_other_damaged_state_is_ignored(monkeypatch, tmp_path, name, damage):
+    monkeypatch.setattr(api, "STATE", tmp_path)
+    monkeypatch.setattr(api, "since", {})
+    (tmp_path / name).write_text(damage)
+    api.load_since()
+    assert api.since == {} and api.read_pins() == []
