@@ -25,7 +25,7 @@ Ulak listens on `127.0.0.1:8765` and nowhere else. The phone reaches it through 
 
 **The timeout: off unless you turn it on.** With `approval_timeout_minutes` set, an approval nobody answered in that time is denied. The timeout can only deny, only the exact prompt it has been timing, and it writes a log entry. It never approves.
 
-**Read-only views stay read-only.** The agent screen, the changes view and the slash-command list are separate endpoints that send no keys. The changes view runs `git status` and `git diff` in the session's own folder with external diff tools, text conversion and filesystem monitors disabled; the phone cannot name a path. The file endpoint serves a short list of document types, only from the session's folder or from Ulak's own upload folder.
+**Read-only views stay read-only.** The agent screen, the changes view and the slash-command list are separate endpoints that send no keys. The changes view runs `git status` and `git diff` in the session's own folder with external diff tools, text conversion and filesystem monitors disabled; the phone cannot name a path. The file endpoint serves a short list of document types, only from the session's folder or from Ulak's own upload folder. Hidden files and folders inside the session's folder (names starting with a dot, where tools keep their keys) are not served, also when a link points at them. A session in your home folder can still serve any visible document of those types under it.
 
 ## What Ulak does not protect against
 
@@ -44,9 +44,9 @@ Ulak listens on `127.0.0.1:8765` and nowhere else. The phone reaches it through 
 Everything stays on the computer that runs Ulak, in two untracked folders next to the code:
 
 - `.secrets/`: the Web Push private key, push subscriptions, `config.json`.
-- `.state/`: pins, notification history, the decision log, uploads (deleted after a week).
+- `.state/`: pins, notification history, the decision log, uploads (removed once older than a week, at the next upload or restart).
 
-The browser keeps unsent drafts, the chosen language and whether the idle group is open, nothing else.
+The browser keeps unsent drafts, your pins, the chosen language and theme, and whether the idle group is open, nothing else.
 
 ## Reporting a problem
 

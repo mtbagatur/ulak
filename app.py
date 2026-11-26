@@ -371,6 +371,7 @@ async def load_all():
 
 async def initialize():
     load_since()
+    prune_uploads()
     try:
         # Subscribe to lifecycle events immediately; the first HTTP snapshot loads
         # session details after the server can already serve the app shell.
@@ -706,7 +707,7 @@ async def require_identity(request, call_next):
         response = await call_next(request)
     else:
         login = request.headers.get("tailscale-user-login")
-        if not allowed_login or not login or not secrets.compare_digest(login, allowed_login):
+        if not allowed_login or not login or not secrets.compare_digest(login.encode(), allowed_login.encode()):
             return JSONResponse({"detail": "Tailscale identity required"}, status_code=403)
         response = await call_next(request)
     if path.startswith("/static") or path in ("/", "/sw.js", "/manifest.webmanifest"):
@@ -1135,6 +1136,20 @@ UPLOAD_MAX = 15 * 1024 * 1024
 VIEWABLE_SUFFIXES = {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".heic", ".txt", ".md", ".csv", ".json"}
 
 
+def prune_uploads():
+    """Files sent from the phone are kept a week."""
+    try:
+        old = list((STATE / "uploads").iterdir())
+    except OSError:
+        return
+    for path in old:
+        try:
+            if time.time() - path.stat().st_mtime > 7 * 86400:
+                path.unlink()
+        except OSError:
+            pass
+
+
 @app.post("/api/sessions/{pane}/upload")
 async def upload(pane: str, request: Request):
     """Save an image/PDF/text file sent from the phone and return its absolute path, ready to paste into a prompt."""
@@ -1142,19 +1157,22 @@ async def upload(pane: str, request: Request):
     ctype = request.headers.get("content-type", "").split(";")[0].strip().lower()
     if ctype not in UPLOAD_TYPES:
         raise HTTPException(415, "Unsupported file type")
-    if int(request.headers.get("content-length") or 0) > UPLOAD_MAX:
-        raise HTTPException(413, "File too large (15 MB max)")
-    data = await request.body()
-    if not data or len(data) > UPLOAD_MAX:
-        raise HTTPException(413, "File too large (15 MB max)")
+    length = request.headers.get("content-length") or "0"
+    if not (length.isascii() and length.isdigit()):
+        raise HTTPException(400, "Invalid content length")
+    too_large = HTTPException(413, "File too large (15 MB max)")
+    if int(length) > UPLOAD_MAX:
+        raise too_large
+    data = bytearray()
+    async for chunk in request.stream():  # the declared length may be missing, so stop at the limit while reading
+        data += chunk
+        if len(data) > UPLOAD_MAX:
+            raise too_large
+    if not data:
+        raise too_large
     folder = STATE / "uploads"
     folder.mkdir(parents=True, exist_ok=True)
-    for old in folder.iterdir():  # keep a week
-        try:
-            if time.time() - old.stat().st_mtime > 7 * 86400:
-                old.unlink()
-        except OSError:
-            pass
+    prune_uploads()
     path = folder / f"{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(3)}{UPLOAD_TYPES[ctype]}"
     path.write_bytes(data)
     return {"ok": True, "path": str(path), "bytes": len(data)}
@@ -1164,14 +1182,20 @@ async def upload(pane: str, request: Request):
 async def session_file(pane: str, path: str):
     """Serve a viewable document only from this pane's workspace or Ulak uploads."""
     item = must_exist(pane)
-    agent = raw_agents.get(pane, {})
-    cwd = Path(agent.get("cwd") or item.get("cwd") or ".").expanduser().resolve()
-    upload_dir = (STATE / "uploads").resolve()
-    requested = Path(path).expanduser()
-    candidate = (requested if requested.is_absolute() else cwd / requested).resolve()
-    if candidate.suffix.lower() not in VIEWABLE_SUFFIXES:
-        raise HTTPException(415, "Unsupported document type")
-    if not (candidate.is_relative_to(cwd) or candidate.is_relative_to(upload_dir)) or not candidate.is_file():
+    folder = raw_agents.get(pane, {}).get("cwd") or item.get("cwd")
+    try:
+        cwd = Path(folder).expanduser().resolve() if folder else None  # never fall back to the folder Ulak runs in
+        upload_dir = (STATE / "uploads").resolve()
+        requested = Path(path).expanduser()
+        candidate = (requested if requested.is_absolute() else (cwd or upload_dir) / requested).resolve()
+        if candidate.suffix.lower() not in VIEWABLE_SUFFIXES:
+            raise HTTPException(415, "Unsupported document type")
+        inside = candidate.is_relative_to(upload_dir) or bool(
+            cwd and candidate.is_relative_to(cwd) and not any(part.startswith(".") for part in candidate.relative_to(cwd).parts))
+        found = inside and candidate.is_file()
+    except (OSError, ValueError, RuntimeError):  # a NUL byte, a name too long, an unknown ~user, a symlink loop
+        found = False
+    if not found:
         raise HTTPException(404, "Document not found in this workspace")
     media_type = mimetypes.guess_type(candidate.name)[0] or "application/octet-stream"
     if media_type in {"text/markdown", "application/json"}:

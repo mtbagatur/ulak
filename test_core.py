@@ -3,7 +3,7 @@ from pathlib import Path
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 from core import NotificationGate, is_destructive, quiet_hours, status_rank, bucket
-import asyncio, json, tempfile
+import asyncio, json, os, tempfile
 from herdr_client import HerdrClient, HerdrError, HerdrUnavailable
 import pytest
 from fastapi.testclient import TestClient
@@ -1565,3 +1565,95 @@ def test_keybar_cannot_approve_a_command_that_is_not_shown_whole(monkeypatch):
 def test_an_overwrite_question_is_an_approval():
     screen = "─" * 40 + "\n Create file\n notes.md\n Do you want to overwrite notes.md?\n ❯ 1. Yes\n   2. No\n"
     assert parse_prompt(screen, "claude")["kind"] == "approval"
+
+
+# --- the file endpoint and uploads ----------------------------------------------
+
+def _files(monkeypatch, tmp_path, cwd):
+    fake, c, h = _setup(monkeypatch, CODEX)
+    monkeypatch.setattr(api, "STATE", tmp_path / "state")
+    monkeypatch.setattr(api, "raw_agents", {"w9:p1": {"pane_id": "w9:p1", **({"cwd": str(cwd)} if cwd else {})}})
+    return lambda path: c.get("/api/sessions/w9:p1/file", headers=h, params={"path": path}).status_code
+
+
+def test_a_session_with_no_folder_serves_no_file_of_ulaks_own(monkeypatch, tmp_path):
+    get = _files(monkeypatch, tmp_path, None)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "config.json").write_text("{}")
+    assert get("config.json") == 404 and get(str(tmp_path / "config.json")) == 404
+    (tmp_path / "state/uploads").mkdir(parents=True)
+    (tmp_path / "state/uploads/a.txt").write_text("sent from the phone")
+    assert get(str(tmp_path / "state/uploads/a.txt")) == 200
+
+
+@pytest.mark.parametrize("path", [".claude.json", ".codex/auth.json", "app/.secrets/config.json", "link.json"])
+def test_hidden_files_and_folders_are_not_served(monkeypatch, tmp_path, path):
+    work = tmp_path / "home"
+    for name in (".claude.json", ".codex/auth.json", "app/.secrets/config.json"):
+        (work / name).parent.mkdir(parents=True, exist_ok=True)
+        (work / name).write_text("{}")
+    (work / "link.json").symlink_to(work / ".claude.json")
+    assert _files(monkeypatch, tmp_path, work)(path) == 404
+
+
+def test_a_session_inside_a_hidden_folder_still_serves_its_own_documents(monkeypatch, tmp_path):
+    work = tmp_path / ".worktrees/x"
+    work.mkdir(parents=True)
+    (work / "plan.md").write_text("# Plan")
+    assert _files(monkeypatch, tmp_path, work)("plan.md") == 200
+
+
+@pytest.mark.parametrize("path", ["a\x00.md", "x" * 5000 + ".md", "~nobody-such-user/a.md"])
+def test_a_path_that_cannot_be_a_file_is_not_found(monkeypatch, tmp_path, path):
+    assert _files(monkeypatch, tmp_path, tmp_path)(path) == 404
+
+
+class _Upload:
+    """Just enough of a request, counting how much of the body Ulak takes in."""
+    def __init__(self, chunks, length=None):
+        self.headers = {"content-type": "image/png", **({"content-length": length} if length else {})}
+        self.chunks, self.taken = chunks, 0
+
+    async def stream(self):
+        for chunk in self.chunks:
+            self.taken += 1
+            yield chunk
+
+    async def body(self):
+        return b"".join([chunk async for chunk in self.stream()])
+
+
+@pytest.mark.parametrize("length,status", [(None, 413), ("abc", 400), ("-5", 400)])
+def test_an_upload_is_not_read_past_the_limit(monkeypatch, tmp_path, length, status):
+    _setup(monkeypatch, CODEX)
+    monkeypatch.setattr(api, "STATE", tmp_path)
+    monkeypatch.setattr(api, "UPLOAD_MAX", 10)
+    request = _Upload([b"12345678"] * 1000, length)
+    with pytest.raises(api.HTTPException) as caught:
+        asyncio.run(api.upload("w9:p1", request))
+    assert caught.value.status_code == status and request.taken <= 2
+
+
+# --- an identity that is not plain ASCII ------------------------------------------
+
+def test_a_login_that_is_not_ascii_is_refused_not_crashed(monkeypatch):
+    monkeypatch.setattr(api, "allowed_login", "user@example.test")
+    c = TestClient(api.app, raise_server_exceptions=False)
+    assert c.get("/api/config", headers={"Tailscale-User-Login": "usér@example.test".encode("latin-1")}).status_code == 403
+
+
+def test_uploads_older_than_a_week_go_at_start_up_too(monkeypatch, tmp_path):
+    monkeypatch.setattr(api, "STATE", tmp_path)
+    monkeypatch.setattr(api, "client", FakeHerdr(""))
+    (tmp_path / "uploads").mkdir()
+    old, new = tmp_path / "uploads/old.txt", tmp_path / "uploads/new.txt"
+    old.write_text("a"), new.write_text("b")
+    os.utime(old, (0, 0))
+
+    async def start():
+        before = asyncio.all_tasks()
+        await api.initialize()
+        for task in asyncio.all_tasks() - before:
+            task.cancel()
+    asyncio.run(start())
+    assert not old.exists() and new.exists()
