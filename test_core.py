@@ -36,6 +36,11 @@ def test_unknown_is_not_grouped_as_idle():
     assert bucket("unknown") == "unknown"
     assert status_rank({"bucket": "unknown"}) < status_rank({"bucket": "idle"})
 
+def test_finished_session_moves_to_idle_after_five_minutes():
+    now = 1_000_000
+    assert bucket("done", now - 299, now) == "done"
+    assert bucket("done", now - 300, now) == "idle"
+
 def test_tailscale_header_required(monkeypatch):
     monkeypatch.setattr(ulak, 'allowed_login', 'user@example.test')
     c=TestClient(ulak.app)

@@ -33,11 +33,11 @@ def is_destructive(command, rules_path=None):
 
 
 BUCKETS = {"blocked": 0, "working": 1, "done": 2, "unknown": 3, "idle": 4}
-DONE_WINDOW = 3600  # a finished session counts as "recent" for an hour, then it is just idle
+DONE_WINDOW = 300  # keep finished sessions prominent briefly, then return them to idle
 
 
 def bucket(status, since=None, now=None):
-    if status == "done" and (since is None or (now or 0) - since > DONE_WINDOW):
+    if status == "done" and (since is None or (now or 0) - since >= DONE_WINDOW):
         return "idle"  # finished long ago, or we never saw it finish
     return status if status in BUCKETS else "unknown"
 
