@@ -513,6 +513,7 @@ def test_offline_refresh_retains_cards_and_sse_reconnect_loads_snapshot(api_fixt
     chrome.offline(False)
     assert api.ready.wait(5)
     chrome.wait("document.querySelector('.g-unknown .proj')?.textContent === 'updated-while-offline'")
+    chrome.wait("document.querySelector('#conn').hidden")
     assert chrome.js("document.querySelector('#conn').hidden")
 
 
