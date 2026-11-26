@@ -6,7 +6,7 @@
 
 <p align="center"><a href="https://github.com/mtbagatur/ulak/actions/workflows/test.yml"><img src="https://github.com/mtbagatur/ulak/actions/workflows/test.yml/badge.svg" alt="Tests"></a></p>
 
-![Ulak demo: sessions, chat and approval on a phone](docs/demo.gif)
+![Ulak demo: an approval, a push that needs two seals, and an answer refused because the question changed](docs/demo.gif)
 
 <p align="center">
   <strong>Your coding agents, in your pocket.</strong><br>
@@ -17,11 +17,16 @@ Ulak is a small web app (PWA) that turns your [Herdr](https://herdr.dev) agent p
 
 <p align="center">
   <img src="docs/screenshots/en/home.png" alt="Home: sessions grouped by what needs you, with usage limits on top" width="195">
-  <img src="docs/screenshots/en/approval.png" alt="A session with an approval waiting" width="195">
-  <img src="docs/screenshots/en/destructive.png" alt="A destructive command flagged for a second confirmation" width="195">
-  <img src="docs/screenshots/en/limits.png" alt="Usage limits sheet" width="195">
+  <img src="docs/screenshots/en/approval.png" alt="A session with an approval waiting under the conversation" width="195">
+  <img src="docs/screenshots/en/second-seal.png" alt="A git push asking for a second confirmation with the full command" width="195">
+  <img src="docs/screenshots/en/delivered.png" alt="The line above the composer: approved, on its way, agent received it" width="195">
   <br>
-  <sub>Demo data from <code>tools/demo_server.py</code>. English and Turkish are built in; the app follows your phone's language and has a TR/EN switch. <a href="docs/screenshots/tr">Turkish screenshots</a>.</sub>
+  <img src="docs/screenshots/en/refused.png" alt="An approval refused because the question changed" width="195">
+  <img src="docs/screenshots/en/decisions.png" alt="The decision log: who answered what, and when the agent got it" width="195">
+  <img src="docs/screenshots/en/changes.png" alt="Read-only view of the uncommitted changes in a session's folder" width="195">
+  <img src="docs/screenshots/en/light.png" alt="The light theme" width="195">
+  <br>
+  <sub>Demo data, retaken with <code>python tools/shots.py</code>. English and Turkish are built in; the app follows your phone's language and has a TR/EN switch. <a href="docs/screenshots/tr">Turkish screenshots</a>.</sub>
 </p>
 
 ## What it does
