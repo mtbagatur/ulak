@@ -104,7 +104,7 @@
     chats[s.pane_id].push(...messages);
     set(s, {status: 'done', hint: '', preview: messages.at(-1).text});
   }
-  function infraAsks() {  // a third agent stops with a question a little after the release is answered
+  function infraAsks() {
     const s = find('d3:p1');
     if (infraAsked || !s) return;
     infraAsked = true;
@@ -134,7 +134,7 @@
       if (yes) chats[pane].forEach(m => { if (m.agent?.state === 'running') { m.agent.state = 'done'; m.result = '20 runs, 0 failures.'; } });
       finish(s, yes ? script.yes : [bot(script.no)]);
     });
-    if (p.fingerprint === 'demo-b') later(6, infraAsks);
+    if (!sessions.some(x => x.status === 'blocked')) later(8, infraAsks);  // the queue is empty: time to watch the answer arrive, then a third agent stops
     return [200, {ok: true, next: sessions.find(x => x !== s && x.status === 'blocked')?.pane_id || null}];
   }
   function chat(pane) {
@@ -245,7 +245,6 @@ diff --git a/tests/test_retry.py b/tests/test_retry.py
   };
   // No service worker and no push: a demo must not install itself or ask for notification permission.
   try { Object.defineProperty(navigator, 'serviceWorker', {value: {register: () => Promise.reject(new Error('demo')), addEventListener() {}}, configurable: true}); } catch {}
-  if (!worst) later(45, infraAsks);
   addEventListener('DOMContentLoaded', () => {
     const tag = Object.assign(document.createElement('small'), {textContent: 'demo', title: 'Fake sessions. Nothing leaves this tab.', className: 'demo-tag'});
     tag.style.cssText = 'margin-left:10px;padding:2px 7px;border:1px solid currentColor;border-radius:999px;font:600 11px/1.4 system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase;opacity:.55;vertical-align:middle';

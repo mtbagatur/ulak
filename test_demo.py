@@ -68,7 +68,13 @@ def test_demo_story_approve_then_two_seals_then_the_agent_resumes(site):
 
 def test_demo_refuses_an_answer_to_a_question_that_changed(site):
     chrome = site
-    chrome.wait("document.querySelector('.card[data-key=\"d3:p1\"] [data-act=approve]') !== null")  # the third agent stops by itself
+    open_card(chrome, "d1:p1")
+    chrome.click(APPROVE)
+    chrome.wait("location.hash === '#/s/d2:p1' && document.querySelector('#promptZone .two-seals') !== null")
+    chrome.click('#promptZone [data-d="deny"]')
+    chrome.wait("document.querySelector('#messages').textContent.includes('nothing was pushed')")
+    chrome.js("history.back()")
+    chrome.wait("document.querySelector('.card[data-key=\"d3:p1\"] [data-act=approve]') !== null")  # once the queue is empty a third agent stops
     open_card(chrome, "d3:p1")
     assert text(chrome, "#promptZone pre") == "terraform plan -out=tf.plan"
     chrome.click(APPROVE)
