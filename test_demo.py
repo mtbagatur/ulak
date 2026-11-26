@@ -1,5 +1,6 @@
 import json
 import threading
+import time
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
@@ -160,3 +161,16 @@ def test_switching_language_in_the_demo_switches_what_the_agents_say(site):
     chrome.js("toggleLang()")
     chrome.wait("document.querySelector('#home').textContent.includes('Kararsız senkron testini düzelt')")
     assert "[object Object]" not in chrome.js("document.body.textContent")
+
+
+@pytest.mark.parametrize("width", (320, 390))
+def test_history_close_button_stays_off_the_tabs(site, width):
+    chrome = site
+    chrome.resize(width, 780)
+    chrome.click("#history")
+    chrome.wait("document.querySelector('#sheet .sheet-x') !== null")
+    time.sleep(.5)  # the sheet slides up
+    overlapping = chrome.js("""(() => { const x = document.querySelector('#sheet .sheet-x').getBoundingClientRect();
+        return [...document.querySelectorAll('#sheet [data-tab]')].filter(tab => { const r = tab.getBoundingClientRect();
+            return r.left < x.right && r.right > x.left && r.top < x.bottom && r.bottom > x.top; }).map(tab => tab.textContent); })()""")
+    assert overlapping == []
