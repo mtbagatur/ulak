@@ -405,7 +405,7 @@ def test_prompt_reply_can_be_retried_after_a_failed_rpc(monkeypatch):
     client = TestClient(api.app, raise_server_exceptions=False)
     path = "/api/sessions/w9:p1/approve"
     action = {"decision": "approve", "fingerprint": parse_approval(CODEX)["fingerprint"]}
-    assert client.post(path, headers=headers, json=action).status_code == 500
+    assert client.post(path, headers=headers, json=action).status_code == 502
     assert fake.sent == []
     assert client.post(path, headers=headers, json=action).status_code == 200
     assert fake.sent == [["1"]]
@@ -1214,6 +1214,7 @@ def test_herdr_event_longer_than_the_default_line_limit_arrives(tmp_path):
             await reader.readline()
             writer.write((json.dumps({"event": "pane.created", "data": {"title": "x" * 1_000_000}}) + "\n").encode())
             await writer.drain()
+            writer.close()
 
         server = await asyncio.start_unix_server(serve, path)
         async with server:
