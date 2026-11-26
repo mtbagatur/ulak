@@ -1254,3 +1254,14 @@ def test_a_tap_does_not_leave_a_focus_ring_on_the_next_screen(api_fixture):
     tap("#back")
     chrome.wait("!document.querySelector('#home').hidden")
     assert chrome.js("document.querySelector(':focus-visible') === null")
+
+
+def test_a_command_too_long_for_its_card_fades_out_instead_of_being_sliced(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_prompt({**APPROVAL, "details": "\n".join(f"echo step {n}" for n in range(12))})
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelector('.card .c-cmd') !== null")
+    assert chrome.js("getComputedStyle(document.querySelector('.c-cmd')).maskImage").startswith("linear-gradient")
+    api.publish_prompt(APPROVAL)
+    chrome.wait("document.querySelector('.c-cmd.full-command') !== null")
+    assert chrome.js("getComputedStyle(document.querySelector('.c-cmd')).maskImage") == "none"
