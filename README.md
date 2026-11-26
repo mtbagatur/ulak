@@ -48,6 +48,14 @@ pip install -r requirements.txt
 python tools/demo_server.py      # http://127.0.0.1:8766
 ```
 
+The demo is the real app over a scripted, fake machine that lives in the browser tab (`tools/demo/demo.js`); nothing leaves the tab. Three scenes are worth trying in order:
+
+1. **billing-api**: approve the test run. Ulak moves you to the next session that waits.
+2. **web-app**: a `git push` needs two seals. After the second, the line above the composer follows your answer until the agent has it, and the agent resumes.
+3. **infra**: a little later a third agent stops. Approve it: the question changed while you were reading, so Ulak refuses your tap, shows the new question, and puts the refusal on the record (ledger icon, Decisions).
+
+`?speed=4` hurries the agents. `python tools/demo_server.py --build DIR` writes the same demo as static files for any web host.
+
 Run the test suite with:
 
 ```sh
