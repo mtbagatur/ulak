@@ -1264,3 +1264,23 @@ def test_the_phone_is_told_what_went_wrong_with_herdr(monkeypatch, method, path,
 
 def test_the_herdr_outage_has_turkish_words():
     assert "'Herdr is not reachable':" in (Path(__file__).parent / "web/i18n.js").read_text()
+
+
+JUNK_LINES = [
+    "null", "7", '"text"', "[1, 2]", "{half", '{"type": "assistant", "message": "words"}', '{"type": "user", "message": [1]}',
+    '{"type": "assistant", "message": {"content": ["loose", null, 3]}}',
+    '{"type": "assistant", "message": {"content": [{"type": "text", "text": null}]}}',
+    '{"type": "assistant", "message": {"content": [{"type": "tool_use", "id": ["a"], "name": 5, "input": "x"}]}}',
+    '{"type": "user", "message": {"content": [{"type": "text", "text": 4}, {"type": "tool_result", "tool_use_id": {}}]}}',
+    '{"type": "user", "message": {"content": [null]}}',
+]
+
+
+def test_a_damaged_transcript_line_does_not_hide_the_conversation(tmp_path):
+    good = [{"type": "user", "message": {"content": "Find the bug"}},
+            {"type": "assistant", "message": {"model": 12, "content": [{"type": "text", "text": "Found it."}]}}]
+    path = tmp_path / "s.jsonl"
+    path.write_text("\n".join([json.dumps(good[0]), *JUNK_LINES, json.dumps(good[1])]) + "\n")
+    messages, model = claude_chat(path)
+    assert [(m["role"], m["text"]) for m in messages if m["role"] != "tool"] == [("user", "Find the bug"), ("assistant", "Found it.")]
+    assert isinstance(model, str)

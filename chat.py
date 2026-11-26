@@ -199,6 +199,11 @@ SUBAGENT_TOOLS = ("Agent", "Task")
 NOTICE_RE = re.compile(r"<tool-use-id>([\w-]+)</tool-use-id>.*?<status>(\w+)</status>")
 
 
+def _usable(block):
+    """A content block the reader can take apart: a mapping whose text is text and whose ids are plain strings."""
+    return isinstance(block, dict) and all(isinstance(block.get(key, ""), str) for key in ("type", "text", "id", "name", "tool_use_id"))
+
+
 def claude_chat(path, max_messages=60, tail_bytes=700_000):
     """Parse the tail of a Claude JSONL file -> (messages, model)."""
     path = Path(path)
@@ -220,13 +225,19 @@ def claude_chat(path, max_messages=60, tail_bytes=700_000):
             d = json.loads(line)
         except ValueError:
             continue
+        # A line that is not shaped like a message is skipped; the rest of the conversation still shows.
+        if not isinstance(d, dict) or not isinstance(d.get("message"), dict):
+            continue
         kind = d.get("type")
         if d.get("isSidechain") or kind not in ("user", "assistant"):
             continue
-        content = (d.get("message") or {}).get("content")
+        content = d["message"].get("content")
+        if isinstance(content, list):
+            content = [block for block in content if _usable(block)]
         ts = d.get("timestamp", "")
         if kind == "assistant":
-            model = (d.get("message") or {}).get("model") or model
+            named = d["message"].get("model")
+            model = named if isinstance(named, str) and named else model
             for block in content if isinstance(content, list) else []:
                 if block.get("type") == "text" and block.get("text", "").strip():
                     msgs.append({"role": "assistant", "text": block["text"].strip(), "ts": ts})
