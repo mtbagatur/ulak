@@ -4,7 +4,8 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo
 from core import NotificationGate, is_destructive, quiet_hours, status_rank, bucket
 import asyncio, json, tempfile
-from herdr_client import HerdrClient, HerdrError
+from herdr_client import HerdrClient, HerdrError, HerdrUnavailable
+import pytest
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 with patch.object(Path, 'read_text', side_effect=FileNotFoundError):
@@ -1175,3 +1176,50 @@ def test_a_pane_herdr_has_only_just_named_is_not_refused(monkeypatch):
 def test_reading_a_plain_shell_pane_still_works(monkeypatch):
     fake, c, h = _plain(monkeypatch, None)
     assert c.get("/api/sessions/w9:p1/screen", headers=h).status_code == 200
+
+
+# --- Herdr failing under the app ---
+
+def _herdr_call(tmp_path, reply, **options):
+    """One client call against a socket that answers with whatever `reply(request)` returns (None: says nothing)."""
+    async def scenario():
+        path = str(tmp_path / "herdr.sock")
+
+        async def serve(reader, writer):
+            answer = reply(json.loads(await reader.readline()))
+            if answer is None:
+                await asyncio.sleep(1)
+            else:
+                writer.write(answer.encode())
+                await writer.drain()
+            writer.close()
+
+        server = await asyncio.start_unix_server(serve, path)
+        async with server:
+            return await HerdrClient(path).call("agent.read", **options)
+    return asyncio.run(scenario())
+
+
+def test_herdr_reply_longer_than_the_default_line_limit_is_read(tmp_path):
+    text = "x" * 1_000_000
+    result = _herdr_call(tmp_path, lambda m: json.dumps({"id": m["id"], "result": {"text": text}}) + "\n")
+    assert result == {"text": text}
+
+
+def test_herdr_event_longer_than_the_default_line_limit_arrives(tmp_path):
+    async def scenario():
+        path = str(tmp_path / "herdr.sock")
+
+        async def serve(reader, writer):
+            await reader.readline()
+            writer.write((json.dumps({"event": "pane.created", "data": {"title": "x" * 1_000_000}}) + "\n").encode())
+            await writer.drain()
+
+        server = await asyncio.start_unix_server(serve, path)
+        async with server:
+            client = HerdrClient(path)
+            await client.subscribe([])
+            event = await asyncio.wait_for(client.events.get(), 3)
+            await client.close()
+            return event
+    assert asyncio.run(scenario()).get("event") == "pane.created"

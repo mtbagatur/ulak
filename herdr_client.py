@@ -9,9 +9,18 @@ import json
 import os
 from pathlib import Path
 
+LINE_LIMIT = 16 * 1024 * 1024  # one reply is one line, and a screen or a snapshot easily outgrows asyncio's 64 KB
+
 
 class HerdrError(RuntimeError):
     pass
+
+
+class HerdrUnavailable(HerdrError):
+    """No usable answer at all: no socket, nothing back in time, or something that is not a reply."""
+
+    def __init__(self, message="Herdr is not reachable"):
+        super().__init__(message)
 
 
 class HerdrClient:
@@ -24,7 +33,7 @@ class HerdrClient:
     async def call(self, method, params=None, timeout=15):
         self.counter += 1
         msg_id = f"ulak:{self.counter}"
-        reader, writer = await asyncio.open_unix_connection(self.socket_path)
+        reader, writer = await asyncio.open_unix_connection(self.socket_path, limit=LINE_LIMIT)
         try:
             writer.write((json.dumps({"id": msg_id, "method": method, "params": params or {}}) + "\n").encode())
             await writer.drain()
@@ -52,7 +61,7 @@ class HerdrClient:
     async def _stream(self, subscriptions):
         while True:
             try:
-                reader, writer = await asyncio.open_unix_connection(self.socket_path)
+                reader, writer = await asyncio.open_unix_connection(self.socket_path, limit=LINE_LIMIT)
                 try:
                     writer.write((json.dumps({"id": "ulak:events", "method": "events.subscribe", "params": {"subscriptions": subscriptions}}) + "\n").encode())
                     await writer.drain()
