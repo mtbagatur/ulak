@@ -31,9 +31,9 @@ Ulak carries one thing between you and your agents: the answer. It is a small we
 </p>
 
 - **Your yes is bound to what you read.** Every approval carries a fingerprint of the prompt on your screen. If the agent is asking something else by the time your tap arrives, the server answers 409, shows you the new question, and approves nothing.
-- **Commands that leave a mark need two seals.** `rm`, `git push`, `ssh`, `terraform apply`, `kubectl delete`, cloud CLIs and your own patterns show the full command and need a second confirmation that expires in two minutes. A command too long to show in full can only be denied.
+- **Commands that leave a mark need two seals.** `rm`, `git push`, `ssh`, `terraform apply`, `kubectl delete`, cloud CLIs and your own patterns show the full command and need a second confirmation that expires in two minutes. A Claude command whose beginning has left the screen can only be denied; for Codex and agy Ulak cannot tell, as [SECURITY.md](SECURITY.md) explains.
 - **You see the answer arrive.** A line above the composer follows it: sent, on its way, agent received it. If the prompt never leaves the agent's screen, Ulak says so instead of assuming.
-- **Everything is on the record.** Each decision, each refusal and each timeout is logged on your machine with who, what and when. Open it from the ledger icon.
+- **Everything is on the record.** Each decision, each refused answer and each timeout is logged on your machine with who, what and when. Open it from the ledger icon.
 
 ## When to pick something else
 
@@ -55,7 +55,7 @@ Read from each project's README on 26 November 2026. They move fast; check their
 - **Pick HerdrChat** when you want a native app, a real terminal, subagent and workflow transcripts, an iPad layout, or several computers in one list.
 - **Pick ColliePWA** when you use tmux or zellij instead of Herdr, or want built-in voice input, themes and its durable-agent tools.
 - **Pick Ovis** when your phone cannot join a tailnet, or you want one app across desktop, phone and browser.
-- **Pick Ulak** when you want the phone to be able to answer and little else, every yes tied to the question you read, and code short enough to read before you trust it: about 3,400 lines of Python, JavaScript and CSS and four runtime dependencies.
+- **Pick Ulak** when you want the phone to be able to answer and little else, every yes tied to the question you read, and code short enough to read before you trust it: about 3,800 lines of Python, JavaScript and CSS and four runtime dependencies.
 
 What Ulak does not do: no terminal, one computer, one person, Herdr only. Conversations are fullest for Claude Code, where the transcript is read directly; other agents are read from the screen.
 
@@ -102,7 +102,7 @@ The demo is the real app over a scripted, fake machine that lives in the browser
 
 ## Security
 
-The server binds to `127.0.0.1` and trusts one thing: the `Tailscale-User-Login` header that Tailscale Serve sets, compared with `ULAK_ALLOWED_LOGIN` on every API request. What that protects, what the fingerprint, the two seals and the log add, and what none of it protects against is in [SECURITY.md](SECURITY.md). Read it before you run Ulak.
+The server binds to `127.0.0.1` and trusts one thing: the `Tailscale-User-Login` header that Tailscale Serve sets, compared with `ULAK_ALLOWED_LOGIN` on every API request except the one that hands out the public push key. A request that changes something is also refused when it comes from another web page, and only Ulak's own host names are answered. What that protects, what the fingerprint, the two seals and the log add, and what none of it protects against is in [SECURITY.md](SECURITY.md). Read it before you run Ulak.
 
 ## Install
 
@@ -113,7 +113,9 @@ ULAK_ALLOWED_LOGIN=you@github ULAK_VAPID_SUBJECT=mailto:you@example.com ./instal
 tailscale serve --bg 8765
 ```
 
-The unit it installs is `deploy/ulak.service.example`. Without systemd, run it by hand:
+The unit it installs is `deploy/ulak.service.example`. To update, run `git pull`, then the same command again: it rewrites the unit and restarts the service. A user service stops when you log out of the computer; `loginctl enable-linger` keeps it running.
+
+Without systemd, run it by hand:
 
 ```sh
 python3 -m venv .venv
@@ -135,6 +137,7 @@ Optional, in `.secrets/config.json` (untracked):
   "quick_label": "Main",
   "limit_files": {"claude": "~/limit.json", "agy": "~/agy-usage.txt"},
   "project_roots": ["~", "~/code"],
+  "allowed_hosts": [],
   "min_work_seconds": 120,
   "approval_timeout_minutes": 0
 }
@@ -148,12 +151,12 @@ Optional, in `.secrets/config.json` (untracked):
 - `min_work_seconds`: a "finished" push is skipped when the turn took less than this (default 120).
 - `approval_timeout_minutes`: off by default (`0`), so an approval waits for you however long that takes. Set it and Ulak denies an approval nobody answered in that many minutes. It can only deny, only the exact prompt it has been timing, and each one is written to the decision log as a timeout. The clock restarts when Ulak restarts.
 
-State (`.state/`: pins, notification history, the decision log) lives on the server, so every device sees the same view. Nothing user-specific is stored in the browser except drafts.
+State (`.state/`: pins, notification history, the decision log) lives on the server, so every device sees the same view. The browser keeps only unsent drafts, a copy of your pins, the chosen language and theme, and whether the idle group is open.
 
 ## Architecture
 
 - `app.py` serves a FastAPI backend on `127.0.0.1:8765` and a static PWA.
-- `herdr_client.py` speaks newline-delimited JSON over `~/.config/herdr/herdr.sock`.
+- `herdr_client.py` speaks newline-delimited JSON over `~/.config/herdr/herdr.sock` (`HERDR_SOCKET_PATH` points it elsewhere).
 - Startup subscribes to the current pane set and adds/removes pane subscriptions as lifecycle events arrive.
 - Herdr events flow through the backend to browser clients as Server-Sent Events; the PWA uses REST for reads and actions.
 - Push notifications use local VAPID keys and go directly to the browser's Web Push endpoint. The [encrypted payload](https://www.rfc-editor.org/rfc/rfc8291) includes the project label, a short command or output preview, and the pane link. The device can display the preview on its lock screen.
@@ -167,7 +170,7 @@ State (`.state/`: pins, notification history, the decision log) lives on the ser
 - `POST /api/sessions/{pane}/approve`: approve/always/deny, bound to the screen fingerprint (409 if it changed; destructive = two steps).
 - `POST /api/sessions/{pane}/choose`: pick a menu option (single/multi, trust dialog). `POST .../keys`: raw keys (Enter/approve keys refused on destructive prompts).
 - `POST /api/sessions/{pane}/close`: two-step close. `GET /api/projects`, `POST /api/sessions`: start a new session.
-- `GET /api/audit`: the decision log. `GET /api/events`: SSE (`session`, `removed`, `receipt`). `POST /api/presence`: report whether a browser tab is visible. `GET /api/limits`: `{providers: [{id, label, updated, items: [{label, used, resets_at}]}]}`. `/api/push/*`: public key, subscribe, known, lang.
+- `GET /api/audit`: the decision log. `GET /api/events`: SSE (`ready`, `session`, `removed`, `receipt`). `POST /api/presence`: report whether a browser tab is visible. `GET /api/limits`: `{providers: [{id, label, updated, items: [{label, used, resets_at}]}]}`. `/api/push/*`: public key, subscribe, known, lang. `GET /api/config`: the quick-send label and the approval timeout. `GET /api/notifications`: the history of push notifications.
 
 ## Tests
 
