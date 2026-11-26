@@ -193,3 +193,10 @@ def test_limit_figures_stay_clear_of_the_sheet_scrollbar(site):
     room = chrome.js("""(() => { const box = document.querySelector('#sheet .scroll').getBoundingClientRect();
         return Math.min(...[...document.querySelectorAll('#sheet .lt span:last-child, #sheet .lv.big')].map(el => box.right - el.getBoundingClientRect().right)); })()""")
     assert room >= 10, room
+
+
+def test_history_tabs_are_a_full_touch_target(site):
+    chrome = site
+    chrome.click("#history")
+    chrome.wait("document.querySelector('#sheet [data-tab]') !== null")
+    assert min(chrome.js("[...document.querySelectorAll('#sheet [data-tab]')].map(tab => tab.offsetHeight)")) >= 44
