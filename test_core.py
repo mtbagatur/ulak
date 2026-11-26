@@ -1332,3 +1332,33 @@ def test_other_damaged_state_is_ignored(monkeypatch, tmp_path, name, damage):
     (tmp_path / name).write_text(damage)
     api.load_since()
     assert api.since == {} and api.read_pins() == []
+
+
+@pytest.mark.parametrize("method,path", [("put", "/api/pins"), ("post", "/api/push/subscribe"), ("post", "/api/push/lang"), ("post", "/api/push/known")])
+@pytest.mark.parametrize("body", [b"", b"{half", b"[1]", b"7", b"\xff"], ids=["empty", "half", "list", "number", "binary"])
+def test_a_body_that_is_not_an_object_is_refused_politely(monkeypatch, tmp_path, method, path, body):
+    monkeypatch.setattr(api, "allowed_login", "user@example.test")
+    monkeypatch.setattr(api, "STATE", tmp_path)
+    monkeypatch.setattr(api, "ROOT", tmp_path)
+    r = TestClient(api.app).request(method, path, headers={"Tailscale-User-Login": "user@example.test", "Content-Type": "application/json"}, content=body)
+    assert (r.status_code, r.json()) == (400, {"detail": "Request body must be a JSON object"})
+    assert list(tmp_path.rglob("*.json")) == []
+
+
+@pytest.mark.parametrize("cache", ['[]', '{"models": "x"}', '{"models": [{"visibility": "list"}]}', '{"models": [7]}', '{"models": null}'])
+def test_a_strange_codex_model_cache_still_offers_the_built_in_models(monkeypatch, tmp_path, cache):
+    (tmp_path / ".codex").mkdir()
+    (tmp_path / ".codex/models_cache.json").write_text(cache)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(api, "_models_cache", {})
+    assert set(api.tool_models("codex")) == {"", "gpt-6-luna"}
+
+
+def test_a_limits_file_that_is_not_text_is_left_out(monkeypatch, tmp_path):
+    monkeypatch.setattr(api, "allowed_login", "user@example.test")
+    (tmp_path / "bad").write_bytes(b"\xff\xfe\x00")
+    (tmp_path / "good").write_text('{"h5": {"used_percentage": 10}}')
+    monkeypatch.setattr(api, "CONFIG", {"limit_files": {"agy": str(tmp_path / "bad"), "claude": str(tmp_path / "good")}})
+    monkeypatch.setattr(api, "codex_limits", lambda: None)
+    r = TestClient(api.app).get("/api/limits", headers={"Tailscale-User-Login": "user@example.test"})
+    assert r.status_code == 200 and [p["id"] for p in r.json()["providers"]] == ["claude"]

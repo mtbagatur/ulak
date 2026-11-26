@@ -93,8 +93,8 @@ def tool_models(name):
         elif name == "agy":
             out = subprocess.run(["agy", "models"], capture_output=True, text=True, timeout=15).stdout
             found = [ln.split("\t")[0].strip() for ln in out.splitlines() if "\t" in ln]
-    except (OSError, ValueError, subprocess.SubprocessError):
-        pass
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.SubprocessError):
+        pass  # the list is a convenience: whatever shape the tool's own cache has, the built-in names still work
     flag = " -m " if name == "codex" else " --model "
     models = {"": ""}
     models.update({s: flag + s for s in found if re.fullmatch(r"[A-Za-z0-9._-]{1,60}", s)})
@@ -1036,9 +1036,19 @@ async def get_pins():
     return {"pins": read_pins()}
 
 
+async def json_object(request):
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
+    if not isinstance(body, dict):
+        raise HTTPException(400, "Request body must be a JSON object")
+    return body
+
+
 @app.put("/api/pins")
 async def put_pins(request: Request):
-    body = await request.json()
+    body = await json_object(request)
     pins = body.get("pins")
     if not isinstance(pins, list) or len(pins) > 200 or not all(isinstance(x, str) and len(x) < 300 for x in pins):
         raise HTTPException(400, "Invalid pin list")
@@ -1123,7 +1133,7 @@ async def limits():
         path = Path(path).expanduser()
         try:
             raw, mtime = path.read_text(), path.stat().st_mtime
-        except OSError:
+        except (OSError, UnicodeDecodeError):
             continue
         provider = parse_limits(key, raw, mtime)
         if provider:
@@ -1147,7 +1157,7 @@ async def push_public():
 
 @app.post("/api/push/subscribe")
 async def push_subscribe(request: Request):
-    body = await request.json()
+    body = await json_object(request)
     subs = [s for s in read_subs() if s.get("endpoint") != body.get("endpoint")]
     body["lang"] = "tr" if body.get("lang") == "tr" else "en"
     subs.append(body)
@@ -1157,7 +1167,7 @@ async def push_subscribe(request: Request):
 
 @app.post("/api/push/lang")
 async def push_lang(request: Request):
-    body = await request.json()
+    body = await json_object(request)
     lang = "tr" if body.get("lang") == "tr" else "en"
     subs = read_subs()
     for s in subs:
@@ -1169,7 +1179,7 @@ async def push_lang(request: Request):
 
 @app.post("/api/push/known")
 async def push_known(request: Request):
-    body = await request.json()
+    body = await json_object(request)
     return {"known": any(s.get("endpoint") == body.get("endpoint") for s in read_subs())}
 
 
