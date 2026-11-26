@@ -111,3 +111,14 @@ def test_back_after_moving_to_the_next_waiting_session_goes_home(site):
     chrome.wait("location.hash === '#/s/d2:p1' && document.querySelector('#promptZone .two-seals') !== null")
     chrome.click("#back")  # not back into the session that was just answered
     chrome.wait("!document.querySelector('#home').hidden && location.hash === ''")
+
+
+def test_demo_decisions_include_a_menu_choice(site):
+    chrome = site
+    chrome.click("#history")
+    chrome.click("#sheet [data-tab=decisions]")
+    row = "#sheet [data-panel=decisions] .audit"
+    chrome.wait(f"document.querySelector({json.dumps(row)}) !== null")
+    shown = text(chrome, "#sheet [data-panel=decisions]")
+    assert "Chosen" in shown and "Which month should the backfill start from?" in shown and "> March 2026" in shown
+    assert chrome.js("[...document.querySelectorAll('#sheet, #sheet .audit')].every(el => el.scrollWidth <= el.clientWidth)")

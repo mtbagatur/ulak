@@ -65,7 +65,9 @@
     'demo-d': {hint: 'Applying the plan…', seconds: 5, no: 'Okay, nothing was applied. The plan is saved as `tf.plan`.',
       yes: [tool('Bash', 'terraform apply tf.plan', 'Apply complete! Resources: 0 added, 2 changed, 3 destroyed.'), bot('Applied. The three unused subnets are gone and both route tables are updated.')]},
   };
-  const audit = [];
+  // One earlier answer to a menu, so Decisions shows that choices are on the record too. Older than a receipt stays news.
+  const audit = [{id: 'demo-earlier', ts: now() - 3600, pane: 'd5:p1', project: 'kutuphane', decision: 'choose', outcome: 'sent', reason: '',
+    command: 'Which month should the backfill start from?\n> March 2026', destructive: false, login: 'you@example.test', delivered: now() - 3598}];
   const notes = [{ts: now() - 240, pane: 'd2:p1', status: 'blocked', title: 'tugra', body: 'Approval needed: git push origin release/2.4'},
     {ts: now() - 90, pane: 'd1:p1', status: 'blocked', title: 'panel', body: 'Approval needed: pytest -q tests/test_sync.py'}];
   let pins = ['work|panel'], made = 0, infraAsked = false;
