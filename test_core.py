@@ -578,6 +578,19 @@ def test_subagents_become_cards_with_a_state(tmp_path):
     assert "long private brief" not in json.dumps(msgs)
 
 
+def test_a_subagent_with_no_word_back_is_unknown_on_a_page_of_history(tmp_path):
+    f = tmp_path / "s.jsonl"
+    lines = [
+        _agent_use("a1", "Run the slow suite"),
+        {"type": "user", "toolUseResult": {"status": "async_launched", "agentId": "x"}, "message": {"content": [{"type": "tool_result", "tool_use_id": "a1", "content": "Async agent launched successfully."}]}},
+    ]
+    f.write_text("\n".join(json.dumps(l) for l in lines) + "\n")
+    import sys
+    msgs = claude_page(f, end=sys.maxsize)[0]
+    assert (msgs[0]["state"], msgs[0]["agent"]["state"]) == ("unknown", "unknown")
+    assert claude_chat(f)[0][0]["agent"]["state"] == "running"  # the live end may still hear from it
+
+
 def test_ordinary_tools_are_not_subagents(tmp_path):
     f = tmp_path / "s.jsonl"
     f.write_text(json.dumps({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "ls", "description": "Agent"}}]}}))

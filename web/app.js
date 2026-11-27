@@ -547,9 +547,9 @@ document.addEventListener('click', async e => {
 });
 // A subagent is not one more tool line: it is someone sent off on an errand, so it gets a card that says what for and whether it is back.
 function subNode(d, m) {
-  const state = ['running', 'done', 'failed'].includes(m.agent.state) ? m.agent.state : 'running';
+  const state = ['running', 'done', 'failed', 'unknown'].includes(m.agent.state) ? m.agent.state : 'running';
   d.className = 'tool sub'; d.dataset.state = state;
-  d.innerHTML = `<summary><span class="sub-mark" aria-hidden="true"></span><span class="sub-body"><span class="sub-kind">${esc(t('subagent') + (m.agent.kind ? ' · ' + m.agent.kind : ''))}</span><span class="sub-what">${esc(m.text || t('subagent'))}</span></span><span class="sub-state">${esc(t({running: 'subRunning', done: 'subDone', failed: 'subFailed'}[state]))}</span></summary>${m.result ? `<div class="md">${rich(m.result)}</div>` : ''}`;
+  d.innerHTML = `<summary><span class="sub-mark" aria-hidden="true"></span><span class="sub-body"><span class="sub-kind">${esc(t('subagent') + (m.agent.kind ? ' · ' + m.agent.kind : ''))}</span><span class="sub-what">${esc(m.text || t('subagent'))}</span></span><span class="sub-state">${esc(t({running: 'subRunning', done: 'subDone', failed: 'subFailed', unknown: 'noResult'}[state]))}</span></summary>${m.result ? `<div class="md">${rich(m.result)}</div>` : ''}`;
   return d;
 }
 const subSig = m => m.agent ? `${m.agent.state}|${(m.result || '').length}` : '';
@@ -646,7 +646,7 @@ function imagePaths(text) {
     if (/^[ \t]*```/.test(line)) fenced = !fenced;
     else if (!fenced) lines.push(line);
   }
-  for (const m of lines.join('\n').matchAll(/\]\(([^)\s]{1,2000})\)|(?:^|[^\w.\-\/])((?:\/|\.\.?\/|[\w.\-]+\/)[^\s<>"'`]+)/g)) {
+  for (const m of lines.join('\n').matchAll(/\]\(([^)\s]{1,500})\)|(?:^|[^\w.\-\/])((?:\/|\.\.?\/|[\w.\-]+\/)[^\s<>"'`]+)/g)) {
     const path = m[1] || splitTrailing(m[2])[0];
     if (/\.(?:png|jpe?g|webp|gif|heic)$/i.test(path) && !/^(?:[a-z]+:|\/\/)/i.test(path)) found.add(path);
     if (found.size === 4) break;

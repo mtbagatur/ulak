@@ -398,6 +398,8 @@ def _parse(lines, upto=None):
         for m in msgs:
             if m.get("state") == "running":
                 m["state"] = "unknown"
+                if m.get("agent", {}).get("state") == "running":
+                    m["agent"]["state"] = "unknown"  # a page of history cannot tell whether it ever came back
     return msgs, offsets, model
 
 

@@ -1027,6 +1027,16 @@ def test_subagents_show_as_cards_with_their_state(api_fixture):
     assert chrome.js("document.querySelector('#messages details.sub .sub-state').textContent") == "Done"
 
 
+def test_a_subagent_the_record_lost_track_of_is_not_shown_as_working(api_fixture):
+    chrome, api, url = api_fixture
+    api.messages = [{"role": "assistant", "text": "Sending one out."}, {"role": "tool", "tool": "Agent", "text": "Run the slow suite", "state": "unknown", "agent": {"kind": "Explore", "state": "unknown"}}]
+    open_first(chrome, url)
+    chrome.wait("document.querySelector('#messages details.sub') !== null")
+    assert chrome.js("document.querySelector('#messages details.sub').dataset.state") == "unknown"
+    assert chrome.js("document.querySelector('#messages details.sub .sub-state').textContent") == "No result in the record"
+    assert chrome.js("getComputedStyle(document.querySelector('#messages details.sub .sub-mark')).animationName") == "none"
+
+
 def test_answer_stays_in_the_chat_when_nothing_else_is_waiting(api_fixture):
     chrome, api, url = api_fixture
     open_first(chrome, url)
@@ -1563,12 +1573,22 @@ def test_markdown_never_lets_markup_through(api_fixture):
     assert chrome.js("!/[\\u0001\\u0002]/.test(box.textContent)")
 
 
+def test_a_code_span_inside_a_link_target_stays_out_of_the_href(api_fixture):
+    chrome, api, url = api_fixture
+    open_reader(chrome, url)
+    hostile = '[x](https://a/`"onmouseover=window.pwned=1//`)'
+    chrome.js(f"window.box = document.createElement('div'); document.body.appendChild(box); box.innerHTML = rich({json.dumps(hostile)})")
+    assert chrome.js("box.querySelectorAll('[onmouseover]').length") == 0
+    assert chrome.js("[...box.querySelectorAll('a')].every(a => !/code|[<>\\u0001\\u0002]/.test(a.getAttribute('href')))")
+    assert chrome.js("!/[\\u0001\\u0002]/.test(box.textContent)")
+
+
 def test_markdown_stays_fast_on_hostile_text(api_fixture):
     chrome, api, url = api_fixture
     open_reader(chrome, url)
     for source in ("'['.repeat(100000)", "'|'.repeat(100000) + '\\n|-|'", "'`'.repeat(100000)", "'a/'.repeat(100000)", "'- item\\n'.repeat(20000)",
-                   "'a/' + '!'.repeat(100000)", "'http://' + '.'.repeat(100000)", "' '.repeat(100000) + 'x'", "'|' + ' '.repeat(100000) + '\\n|-' + ' '.repeat(100000) + 'x'"):
-        for call in ("rich", "md"):
+                   "'a/' + '!'.repeat(100000)", "'http://' + '.'.repeat(100000)", "' '.repeat(100000) + 'x'", "'|' + ' '.repeat(100000) + '\\n|-' + ' '.repeat(100000) + 'x'", "'![]('.repeat(100000)"):
+        for call in ("rich", "md", "imagePaths"):
             took = chrome.js(f"(() => {{ const s = {source}, a = performance.now(); {call}(s); return performance.now() - a; }})()")
             assert took < 1000, (call, source, took)
 
@@ -1692,6 +1712,15 @@ def test_failures_and_refusals_stay_open_and_split_the_run(api_fixture):
     token = lambda name: chrome.js(f"(() => {{ const p = document.createElement('i'); p.style.color = 'var(--{name})'; document.body.append(p); const c = getComputedStyle(p).color; p.remove(); return c; }})()")
     border = lambda q: chrome.js(f"(() => {{ const s = getComputedStyle(document.querySelector('{q}')); return [s.borderTopStyle, s.borderTopColor]; }})()")
     assert border(".act.bad") == ["solid", token("lal")] and border(".act.denied") == ["dashed", token("muted")]
+
+
+def test_a_failure_of_many_short_lines_scrolls_inside_its_card(api_fixture):
+    chrome, api, url = api_fixture
+    api.messages = [SAY, tool("b1", "Bash", "pytest -q", state="failed", result="E\n" * 300)]
+    open_first(chrome, url)
+    chrome.wait("document.querySelector('#messages .act.bad .out') !== null")
+    height, inner, overflow = chrome.js("(() => { const o = document.querySelector('.act.bad .out'); return [o.clientHeight, o.scrollHeight, getComputedStyle(o).overflowY]; })()")
+    assert height <= 320 and inner > height and overflow == "auto"
 
 
 def test_the_running_step_is_named_on_the_summary(api_fixture):

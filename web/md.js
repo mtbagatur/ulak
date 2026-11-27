@@ -19,7 +19,7 @@ function inlineMd(value, link) {
   source = source.replace(/```[^\n]{0,200}\n([\s\S]*?)```/g, (_, code) => hold(`<pre><code>${esc(code.replace(/\n$/, ''))}</code></pre>`));
   source = source.replace(/`([^`\n]+)`/g, (_, code) => hold(`<code>${esc(code)}</code>`));
   // A picture is linked like any other file; the "!" goes, and a picture without a name is called by its path.
-  source = source.replace(/(!?)\[([^\]\n]{0,300})\]\(([^)\s]{1,2000})\)/g, (whole, bang, label, href) => {
+  source = source.replace(/(!?)\[([^\]\n]{0,300})\]\(([^)\s\u0001\u0002]{1,500})\)/g, (whole, bang, label, href) => {
     if (!label && !bang) return whole;
     const html = link(label || href, href);
     return html ? hold(html) : whole;

@@ -233,6 +233,7 @@ details.sub[data-state=failed] .sub-state{color:var(--strong)}
 .step .diff .gap{color:var(--muted)}
 pre.out{margin:6px 0 0;padding:8px 10px;border-radius:9px;background:var(--bg2);font:11.5px/1.5 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text)}
 .step pre.out{max-height:200px;overflow:auto}
+.act pre.out{max-height:300px;overflow:auto}
 .act{border-radius:12px;padding:9px 11px}
 .act.bad{border:1px solid var(--lal);background:color-mix(in srgb,var(--lal) 9%,transparent)}.act.bad .h b{color:var(--lal-t)}
 .act.denied{border:1px dashed var(--muted)}
