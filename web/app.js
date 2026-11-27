@@ -408,7 +408,7 @@ function openSession(pane) {
   hideSheet();
   const carry = focusIsIn('#home');
   state.view++;
-  state.current = pane; state.chatHash = ''; state.rendered = 0; state.prompt = null;
+  state.current = pane; state.chatHash = ''; state.prompt = null; openRuns.clear();
   state.anchor = state.cursor = state.start = null; state.conversation = undefined;
   loadSlash(pane);
   $('#home').hidden = true; $('#session').hidden = false;
@@ -470,15 +470,114 @@ function subNode(d, m) {
   return d;
 }
 const subSig = m => m.agent ? `${m.agent.state}|${(m.result || '').length}` : '';
-function msgNode(m, source) {
-  if (m.role === 'tool' && m.agent) { const d = subNode(document.createElement('details'), m); d.dataset.sig = subSig(m); return d; }
-  if (m.role === 'tool') {
-    const d = document.createElement('details'); d.className = 'tool';
-    d.innerHTML = `<summary><b>${esc(m.tool || t('tool'))}</b><span>${md(m.text.split('\n')[0])}</span></summary>${m.result || m.text.includes('\n') ? `<pre>${md(m.result || m.text)}</pre>` : ''}`;
-    return d;
+// ---------- the conversation as keyed pieces ----------
+// Every piece has a key that survives the next reading of the transcript, so what is on screen is kept and only what changed is redrawn.
+const KINDS = {Read: 'kRead', NotebookRead: 'kRead', Grep: 'kSearch', Glob: 'kSearch', WebSearch: 'kSearch', ToolSearch: 'kSearch', Edit: 'kEdit', MultiEdit: 'kEdit', Write: 'kEdit', NotebookEdit: 'kEdit', Bash: 'kCommand', WebFetch: 'kPage'};
+const openRuns = new Set();  // tool ids of the runs you opened: they stay open while the conversation moves
+const many = (key, n) => { const forms = t(key).split('|'); return (n === 1 ? forms[0] : forms.at(-1)).replace('{n}', n); };
+const firstLine = text => String(text || '').split('\n')[0];
+const callName = m => [m.tool || t('tool'), firstLine(m.text)].filter(Boolean).join(' ');
+const counted = m => typeof m.added === 'number' && typeof m.removed === 'number';
+const plusMinus = (added, removed) => `<span class="add">+${added}</span> <span class="del">−${removed}</span>`;
+const toolSig = m => [m.id, m.state, (m.text || '').length, (m.result || '').length, m.added, m.removed, m.lines, subSig(m)].join('|');
+function itemsOf(messages, source) {
+  const items = [], seen = new Map();
+  let run = null;
+  for (const m of messages) {
+    // Only the transcript says how a call ended; without that nothing is folded.
+    const call = source === 'transcript' && m.role === 'tool' && !m.agent && m.id && m.state;
+    if (call && m.state !== 'failed' && m.state !== 'rejected') {
+      if (!run) items.push(run = {kind: 'run', key: 't:' + m.id, messages: []});
+      run.messages.push(m);
+      continue;
+    }
+    run = null;
+    if (call) { items.push({kind: 'card', key: 't:' + m.id, messages: [m]}); continue; }
+    const text = m.text || '';
+    const base = m.role === 'tool' && m.id ? 't:' + m.id : `${m.role}|${m.tool || ''}|${m.ts || ''}|${text.length}|${text.slice(-24)}`;
+    const nth = seen.get(base) || 0; seen.set(base, nth + 1);  // the same words said twice are two messages
+    items.push({kind: m.agent ? 'sub' : 'msg', key: `${base}#${nth}`, messages: [m]});
   }
-  const d = document.createElement('div'), blocks = source === 'transcript' && m.role === 'assistant';
-  d.className = `msg ${m.role}${blocks ? ' md' : ''}`; d.innerHTML = m.role === 'command' ? esc(m.text) : blocks ? rich(m.text) : md(m.text); return d;
+  for (const item of items) { item.source = source; item.sig = [item.kind, source, LANG, ...item.messages.map(m => m.role === 'tool' ? toolSig(m) : '')].join('~'); }
+  return items;
+}
+function runLabel(calls) {
+  const done = calls.filter(m => m.state !== 'running'), running = calls.findLast(m => m.state === 'running'), counts = new Map();
+  for (const m of done) { const k = KINDS[m.tool] || 'kOther'; counts.set(k, (counts.get(k) || 0) + 1); }
+  let html = [...counts].map(([k, n]) => esc(many(k, n))).join(', ');
+  const edits = done.filter(m => m.state === 'ok' && counted(m));
+  if (edits.length) html += ` · ${plusMinus(edits.reduce((n, m) => n + m.added, 0), edits.reduce((n, m) => n + m.removed, 0))}`;
+  if (running) html += (html ? ' · ' : '') + esc(t('runNow', {x: callName(running)}));
+  return html;
+}
+function stepHtml(m) {
+  const diff = Array.isArray(m.diff) && m.diff.length ? `<div class="diff">${m.diff.map(([kind, line]) => `<div${kind === '+' ? ' class="a"' : kind === '-' ? ' class="d"' : kind === '…' ? ' class="gap"' : ''}>${kind === '…' ? '…' : esc(line) || ' '}</div>`).join('')}</div>` : '';
+  const notes = [m.state === 'unknown' ? t('noResult') : '', typeof m.lines === 'number' ? many('wrote', m.lines) : '', diff && m.diff_cut ? t('editCut') : ''].filter(Boolean);
+  const text = m.text || '';
+  return `<div class="h"><b>${esc(m.tool || t('tool'))}</b><span>${md(firstLine(text))}</span>${counted(m) ? `<em class="cnt">${plusMinus(m.added, m.removed)}</em>` : ''}</div>${diff || (m.result || text.includes('\n') ? `<pre class="out">${md(m.result || text)}</pre>` : '')}${notes.map(n => `<small>${esc(n)}</small>`).join('')}`;
+}
+function fillRun(node, item) {
+  const calls = item.messages, open = calls.some(m => openRuns.has(m.id));
+  if (open) calls.forEach(m => openRuns.add(m.id));
+  if (!node.firstChild) node.innerHTML = '<button type="button"><span class="chev" aria-hidden="true">›</span><span class="sum"></span></button><div class="fold"><div><div class="box"></div></div></div>';
+  node.className = open ? 'run open' : 'run'; node._ids = calls.map(m => m.id);
+  node.querySelector('button').setAttribute('aria-expanded', open);
+  putHtml(node.querySelector('.sum'), runLabel(calls));
+  const box = node.querySelector('.box'), old = new Map([...box.children].map(el => [el.dataset.id, el]));
+  box.replaceChildren(...calls.map(m => {
+    const sig = toolSig(m) + LANG;
+    let el = old.get(m.id);
+    if (!el) { el = document.createElement('div'); el.className = 'step'; el.dataset.id = m.id; }
+    if (el._sig !== sig) { el.innerHTML = stepHtml(m); el._sig = sig; }
+    return el;
+  }));
+}
+// What failed and what you refused are never folded away.
+function fillCard(node, m) {
+  const refused = m.state === 'rejected';
+  node.className = refused ? 'act denied' : 'act bad';
+  node.innerHTML = `<div class="h"><b>${esc(t(refused ? 'rejectedCall' : 'failedCall'))}</b><span>${esc(callName(m))}</span></div>${refused ? `<p class="why">${esc(t('didNotRun'))}</p>` : ''}${m.result ? `<pre class="out">${md(m.result)}</pre>` : ''}`;
+}
+function fill(node, item) {
+  const m = item.messages[0];
+  if (item.kind === 'run') fillRun(node, item);
+  else if (item.kind === 'card') fillCard(node, m);
+  else if (item.kind === 'sub') subNode(node, m);
+  else if (m.role === 'tool') {
+    node.className = 'tool';
+    node.innerHTML = `<summary><b>${esc(m.tool || t('tool'))}</b><span>${md(m.text.split('\n')[0])}</span></summary>${m.result || m.text.includes('\n') ? `<pre>${md(m.result || m.text)}</pre>` : ''}`;
+  } else {
+    const blocks = item.source === 'transcript' && m.role === 'assistant';
+    node.className = `msg ${m.role}${blocks ? ' md' : ''}`; node.innerHTML = m.role === 'command' ? esc(m.text) : blocks ? rich(m.text) : md(m.text);
+  }
+  node._sig = item.sig;
+}
+function buildNode(item) {
+  const node = document.createElement(item.kind === 'sub' || (item.kind === 'msg' && item.messages[0].role === 'tool') ? 'details' : 'div');
+  node._key = item.key; node._kind = item.kind;
+  fill(node, item);
+  return node;
+}
+const nodesFor = (messages, source) => itemsOf(messages, source).map(buildNode);
+document.addEventListener('click', e => {
+  const button = e.target.closest('.run > button');
+  if (!button) return;
+  const run = button.parentElement, open = run.classList.toggle('open');
+  button.setAttribute('aria-expanded', open);
+  (run._ids || []).forEach(id => open ? openRuns.add(id) : openRuns.delete(id));
+});
+// Whatever the drawing adds or removes, the line you were reading stays where it was.
+function keepPlace(box, draw, toEnd = false) {
+  const top = box.getBoundingClientRect().top, bottom = top + box.clientHeight, seen = [];
+  if (!toEnd) for (const el of box.querySelectorAll(':scope > .past > *, :scope > .live > *')) {
+    const r = el.getBoundingClientRect();
+    if (r.top >= bottom) break;
+    if (r.bottom > top) seen.push([el, r.top]);
+  }
+  draw();
+  const held = seen.find(([el]) => el.isConnected);
+  if (toEnd) box.scrollTop = box.scrollHeight;
+  else if (held) box.scrollTop += held[0].getBoundingClientRect().top - held[1];
 }
 // ---------- outbox: what you sent shows at once and stays until the conversation carries it ----------
 const outbox = new Map();  // pane -> [{text, status: 'sending' | 'sent' | 'unseen', seen, count}]
@@ -541,9 +640,10 @@ async function loadChat(first = false) {
     state.conversation = r.conversation;
     if (state.anchor !== null && r.start > state.anchor) forgetPast();  // better to load again than to show a hole
     if (state.anchor === null) state.start = r.start ?? null;
-    const key = JSON.stringify([r.messages.length, r.messages.at(-1), r.hint, r.messages.map(subSig).join()]);
+    const items = itemsOf(r.messages, r.source);
+    const key = JSON.stringify([r.hint, items.map(item => item.key + '~' + item.sig)]);
     settleOutbox(pane, r.messages);
-    if (key !== state.chatHash) { state.chatHash = key; renderMessages(r, first); }
+    if (key !== state.chatHash) { state.chatHash = key; renderMessages(r, first, items); }
     renderEarlier(r.source);
     renderOutbox();
     renderPrompt(r.prompt, r.status);
@@ -571,7 +671,7 @@ async function loadChat(first = false) {
 // The live part follows the conversation; what was loaded from before it sits above and is not asked for again.
 function parts() {
   const box = $('#messages');
-  if (!box.querySelector(':scope > .live')) { box.innerHTML = '<div class="earlier"></div><div class="past"></div><div class="live"></div>'; state.rendered = 0; }
+  if (!box.querySelector(':scope > .live')) { box.innerHTML = '<div class="earlier"></div><div class="past"></div><div class="live"></div>'; }
   return {box, earlier: box.querySelector('.earlier'), past: box.querySelector('.past'), live: box.querySelector('.live')};
 }
 function forgetPast() { state.anchor = null; state.cursor = null; state.start = null; $('#messages .past')?.replaceChildren(); state.chatHash = ''; }
@@ -587,11 +687,11 @@ async function loadEarlier(button) {
   const r = await act(button, () => api(`/api/sessions/${encodeURIComponent(pane)}/history?before=${state.cursor}`));
   if (!r || view !== state.view || conversation !== state.conversation) return;
   const {box, past} = parts();
-  const fromBottom = box.scrollHeight - box.scrollTop;
-  past.prepend(...r.messages.map(m => msgNode(m, 'transcript')));
-  state.cursor = r.start;
-  renderEarlier('transcript');
-  box.scrollTop = box.scrollHeight - fromBottom;
+  keepPlace(box, () => {
+    past.prepend(...nodesFor(r.messages, 'transcript'));
+    state.cursor = r.start;
+    renderEarlier('transcript');
+  });
 }
 $('#messages').addEventListener('click', e => {
   const button = e.target.closest('.earlier button');
@@ -616,7 +716,7 @@ async function pastSheet(pane, id, title) {
     if (!r || !box.isConnected) return;
     const fromBottom = box.scrollHeight - box.scrollTop;
     box.querySelector('.past-more')?.remove(); box.querySelector('.empty')?.remove();
-    box.prepend(...r.messages.map(m => msgNode(m, 'transcript')));
+    box.prepend(...nodesFor(r.messages, 'transcript'));
     if (r.start) {
       const more = document.createElement('button'); more.type = 'button'; more.className = 'past-more'; more.textContent = t('loadEarlier');
       more.onclick = () => { if (!more.classList.contains('loading')) page(r.start); };
@@ -626,25 +726,31 @@ async function pastSheet(pane, id, title) {
   };
   page(0);
 }
-function renderMessages(r, first) {
+function renderMessages(r, first, items = itemsOf(r.messages, r.source)) {
   const {box, live} = parts();
   const near = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
-  const fromBottom = box.scrollHeight - box.scrollTop;
-  box.querySelector('.hint')?.remove(); box.querySelector('.empty')?.remove();
-  const msgs = r.messages;
-  const same = state.rendered > 0 && state.sig === sig(msgs[Math.max(0, state.rendered - 1)]) && msgs.length >= state.rendered && state.source === r.source;
-  if (!same) { live.innerHTML = ''; state.rendered = 0; }
-  // A subagent comes back long after its card was drawn: update that card where it stands.
-  msgs.slice(0, state.rendered).forEach((m, i) => { const el = live.children[i]; if (m.agent && el?.classList.contains('sub') && el.dataset.sig !== subSig(m)) { subNode(el, m); el.dataset.sig = subSig(m); } });
-  for (const m of msgs.slice(state.rendered)) live.appendChild(msgNode(m, r.source));
-  state.rendered = msgs.length; state.sig = sig(msgs[msgs.length - 1]); state.source = r.source;
-  if (!msgs.length) live.innerHTML = `<div class="empty">${t('noChat')}</div>`;
-  if (r.hint) { const h = document.createElement('div'); h.className = 'hint'; h.textContent = r.hint.replace(/\(.*$/, '').trim() || t('working'); box.appendChild(h); }
-  if (first || near) box.scrollTop = box.scrollHeight;
-  else if (!same) box.scrollTop = box.scrollHeight - fromBottom;
+  keepPlace(box, () => {
+    box.querySelector('.hint')?.remove(); box.querySelector('.empty')?.remove();
+    const kept = new Map(), owner = new Map(), used = new Set();
+    for (const el of live.children) {
+      if (el._kind === 'run') el._ids.forEach(id => owner.set(id, el));
+      else if (el._key) kept.set(el._kind + el._key, el);
+    }
+    // A run takes over the node that already holds one of its calls: it grows, shrinks or splits where it stands.
+    const nodes = items.map(item => {
+      let node = item.kind === 'run' ? item.messages.map(m => owner.get(m.id)).find(el => el && !used.has(el)) : kept.get(item.kind + item.key);
+      if (!node) node = buildNode(item);
+      else if (node._sig !== item.sig) fill(node, item);
+      used.add(node);
+      return node;
+    });
+    nodes.forEach((node, i) => { if (live.children[i] !== node) live.insertBefore(node, live.children[i] || null); });
+    while (live.children.length > nodes.length) live.lastElementChild.remove();
+    if (!nodes.length) live.innerHTML = `<div class="empty">${t('noChat')}</div>`;
+    if (r.hint) { const h = document.createElement('div'); h.className = 'hint'; h.textContent = r.hint.replace(/\(.*$/, '').trim() || t('working'); box.appendChild(h); }
+  }, first || near);
   $('#jump').hidden = first || near;
 }
-const sig = m => m ? `${m.role}|${m.text.length}|${m.text.slice(-24)}` : '';
 $('#messages').addEventListener('scroll', e => { const b = e.target; if (b.scrollHeight - b.scrollTop - b.clientHeight < 80) $('#jump').hidden = true; });
 $('#jump').onclick = () => { const b = $('#messages'); b.scrollTo({top: b.scrollHeight, behavior: 'smooth'}); $('#jump').hidden = true; };
 

@@ -1579,3 +1579,202 @@ def test_copy_puts_raw_code_on_the_clipboard(api_fixture):
     chrome.js("Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {writeText: () => Promise.reject(new Error('no'))}})")
     chrome.click("button.copy")
     chrome.wait("document.querySelector('#toasts .err')?.textContent === 'Could not copy'")
+
+
+# --- reading: folded tool work, failures and refusals, keyed drawing ---
+def tool(id, name, text, state="ok", **more):
+    return {"role": "tool", "tool": name, "text": text, "ts": "t", "id": id, "state": state, **more}
+
+
+LIVE = "[...document.querySelectorAll('#messages .live > *')].map(e => e.className)"
+SUMS = "[...document.querySelectorAll('#messages .run .sum')].map(e => e.textContent)"
+HIDDEN = "!document.querySelector('#messages .run .step').checkVisibility({visibilityProperty: true})"
+SAY = {"role": "assistant", "text": "Looking.", "ts": "a"}
+
+
+def test_successful_calls_fold_into_one_line(api_fixture):
+    chrome, api, url = api_fixture
+    api.messages = [SAY, tool("r1", "Read", "src/" + "a_very_long_directory_name/" * 8 + "billing.py"), tool("r2", "Read", "b.py", result="x = 1"), tool("g1", "Grep", "retry")]
+    chrome.resize(320, 700)
+    open_first(chrome, url)
+    chrome.wait("document.querySelector('#messages .run') !== null")
+    assert chrome.js(LIVE) == ["msg assistant md", "run"]
+    assert chrome.js(SUMS) == ["2 reads, 1 search"]
+    assert chrome.js("document.querySelector('#messages .run > button').getAttribute('aria-expanded')") == "false"
+    assert chrome.js(HIDDEN)
+    chrome.click("#messages .run > button")
+    chrome.wait("document.querySelector('#messages .run > button').getAttribute('aria-expanded') === 'true'")
+    wait_for(lambda: not chrome.js(HIDDEN), "the steps show")
+    assert chrome.js("[...document.querySelectorAll('#messages .run .step b')].map(e => e.textContent)") == ["Read", "Read", "Grep"]
+    assert "x = 1" in chrome.js("document.querySelectorAll('#messages .run .step')[1].textContent")
+    assert chrome.js("document.documentElement.scrollWidth") <= 320
+    assert chrome.js("document.querySelector('#messages .run').getBoundingClientRect().right <= document.querySelector('#messages').getBoundingClientRect().right")
+    chrome.click("#messages .run > button")
+    wait_for(lambda: chrome.js(HIDDEN), "the steps fold away again")
+    api.messages = [SAY, tool("b1", "Bash", "ls"), tool("x1", "mcp__lala__durum", "")]
+    chrome.wait(f"{SUMS}.join() === '1 command, 1 other job'")
+    chrome.js("localStorage.setItem('lang', 'tr')")
+    api.messages = [SAY, tool("r1", "Read", "a.py"), tool("r2", "Read", "b.py"), tool("g1", "Grep", "retry"), tool("w1", "WebFetch", "example.com")]
+    open_first(chrome, url)
+    chrome.wait(f"{SUMS}.join() === '2 okuma, 1 arama, 1 sayfa'")
+
+
+def test_edit_runs_total_their_lines_and_show_the_diff(api_fixture):
+    chrome, api, url = api_fixture
+    api.messages = [
+        SAY,
+        tool("e1", "Edit", "core.py", added=10, removed=2, diff=[[" ", "a"], ["-", "<b>x</b>"], ["+", "y"], ["…", ""], [" ", "z"]], diff_cut=True),
+        tool("e2", "Edit", "app.py", added=3, removed=1, diff=[["-", "p"], ["+", "q"]]),
+        tool("e3", "Edit", "old.py", state="unknown", added=50, removed=50, diff=[["+", "n"]]),
+        tool("w1", "Write", "new.py", lines=5),
+        tool("b1", "Bash", "pytest -q"),
+    ]
+    open_first(chrome, url)
+    chrome.wait("document.querySelector('#messages .run') !== null")
+    assert chrome.js(SUMS) == ["4 edits, 1 command · +13 −3"]
+    chrome.click("#messages .run > button")
+    step = lambda i, ask: chrome.js(f"(() => {{ const s = document.querySelectorAll('#messages .run .step')[{i}]; return {ask}; }})()")
+    assert step(0, "[...s.querySelectorAll('.diff > *')].map(e => e.className + ':' + e.textContent)") == [":a", "d:<b>x</b>", "a:y", "gap:…", ":z"]
+    assert step(0, "s.querySelector('.diff b')") is None
+    assert "Diff cut short" in step(0, "s.textContent") and "Diff cut short" not in step(1, "s.textContent")
+    assert step(0, "s.querySelector('.cnt').textContent") == "+10 −2"
+    assert "5 lines written" in step(3, "s.textContent") and step(3, "s.querySelector('.diff')") is None
+
+
+def test_failures_and_refusals_stay_open_and_split_the_run(api_fixture):
+    chrome, api, url = api_fixture
+    api.messages = [
+        SAY, tool("r1", "Read", "a.py"),
+        tool("b1", "Bash", "pytest -q", state="failed", result="E assert 1 == 2\n1 failed"),
+        tool("e1", "Edit", "a.py", added=1, removed=1),
+        tool("b2", "Bash", "git push", state="rejected", result="use a <i>branch</i>"),
+        tool("b3", "Bash", "rm -rf build", state="rejected"),
+    ]
+    open_first(chrome, url)
+    chrome.wait("document.querySelector('#messages .act') !== null")
+    assert chrome.js(LIVE) == ["msg assistant md", "run", "act bad", "run", "act denied", "act denied"]
+    assert chrome.js("document.querySelector('.act.bad .out').checkVisibility({visibilityProperty: true})")
+    bad = chrome.js("document.querySelector('.act.bad').textContent")
+    assert "Failed" in bad and "Bash" in bad and "pytest -q" in bad and "1 failed" in bad
+    first, second = chrome.js("[...document.querySelectorAll('.act.denied')].map(e => e.textContent)")
+    assert "You said no" in first and "git push" in first and "use a <i>branch</i>" in first
+    assert "It did not run." in second and "rm -rf build" in second
+    assert chrome.js("document.querySelector('.act i')") is None
+    token = lambda name: chrome.js(f"(() => {{ const p = document.createElement('i'); p.style.color = 'var(--{name})'; document.body.append(p); const c = getComputedStyle(p).color; p.remove(); return c; }})()")
+    border = lambda q: chrome.js(f"(() => {{ const s = getComputedStyle(document.querySelector('{q}')); return [s.borderTopStyle, s.borderTopColor]; }})()")
+    assert border(".act.bad") == ["solid", token("lal")] and border(".act.denied") == ["dashed", token("muted")]
+
+
+def test_the_running_step_is_named_on_the_summary(api_fixture):
+    chrome, api, url = api_fixture
+    api.messages = [SAY, tool("r1", "Read", "a.py", state="unknown"), tool("b1", "Bash", "pytest -q\n  --maxfail=1", state="running")]
+    open_first(chrome, url)
+    chrome.wait("document.querySelector('#messages .run') !== null")
+    assert chrome.js(SUMS) == ["1 read · Running: Bash pytest -q"]
+    chrome.click("#messages .run > button")
+    notes = chrome.js("[...document.querySelectorAll('#messages .run .step')].map(e => e.textContent.includes('No result in the record'))")
+    assert notes == [True, False]
+    api.messages = [SAY, tool("b1", "Bash", "pytest -q", state="running")]
+    chrome.wait(f"{SUMS}.join() === 'Running: Bash pytest -q'")
+
+
+def test_an_open_run_stays_open_while_the_conversation_moves(api_fixture):
+    chrome, api, url = api_fixture
+    r1, r2, r3 = tool("r1", "Read", "a.py"), tool("r2", "Read", "b.py", state="running"), tool("r3", "Grep", "x")
+    api.messages = said("old", 1) + [SAY, r1, r2]
+    open_first(chrome, url)
+    chrome.click("#messages .run > button")
+    chrome.js("window.r = document.querySelector('#messages .run')")
+    api.messages = [SAY, r1, {**r2, "state": "ok"}, r3] + said("later", 1)
+    chrome.wait(f"{TEXTS}.at(-1) === 'later 0'")
+    assert chrome.js("document.querySelector('#messages .run') === window.r && window.r.classList.contains('open')")
+    assert chrome.js("window.r.querySelectorAll('.step').length") == 3 and chrome.js(SUMS) == ["2 reads, 1 search"]
+    assert chrome.js("window.r.querySelector('button').getAttribute('aria-expanded')") == "true"
+    api.messages = [SAY, r1, {**r2, "state": "failed", "result": "No such file"}, r3] + said("later", 1)
+    chrome.wait("document.querySelector('#messages .act.bad') !== null")
+    assert chrome.js(LIVE) == ["msg assistant md", "run open", "act bad", "run open", "msg assistant md"]
+    assert chrome.js("document.querySelector('#messages .run') === window.r && window.r.querySelectorAll('.step').length === 1")
+
+
+def test_reading_position_holds_when_the_window_slides(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    api.messages = [{"role": "assistant", "text": f"line {i}\nsecond\nthird", "ts": f"l{i}"} for i in range(60)]
+    open_first(chrome, url)
+    chrome.wait("document.querySelectorAll('#messages .msg').length === 60")
+    chrome.js("(() => { const b = document.querySelector('#messages'); b.scrollTop = b.scrollHeight / 2; })()")
+    chrome.js("(() => { const b = document.querySelector('#messages'), top = b.getBoundingClientRect().top; window.a = [...b.querySelectorAll('.msg')].find(e => e.getBoundingClientRect().top > top + 10); })()")
+    top = "window.a.getBoundingClientRect().top"
+    before = chrome.js(top)
+    api.messages = api.messages[5:] + [{"role": "assistant", "text": f"more {i}\nsecond\nthird\nfourth", "ts": f"m{i}"} for i in range(5)]
+    chrome.wait(f"{TEXTS}.at(-1).startsWith('more 4')")
+    assert chrome.js("window.a.isConnected") and abs(chrome.js(top) - before) <= 2
+    assert chrome.js("document.querySelectorAll('#messages .msg').length") == 60
+    assert chrome.js("getComputedStyle(document.querySelector('#messages')).overflowAnchor") == "none"
+
+
+@pytest.mark.parametrize("source", ["transcript", "screen"])
+def test_twin_messages_stay_two(api_fixture, source):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    api.source = source
+    twin = {"role": "assistant", "text": "Done."} | ({"ts": "same"} if source == "transcript" else {})
+    api.messages = [{"role": "user", "text": "go"}, twin, dict(twin)]
+    open_first(chrome, url)
+    chrome.wait("document.querySelectorAll('#messages .msg.assistant').length === 2")
+    chrome.js("window.twins = [...document.querySelectorAll('#messages .msg.assistant')]")
+    api.messages = [twin, dict(twin), {"role": "user", "text": "next"}]
+    chrome.wait(f"{TEXTS}.at(-1) === 'next'")
+    assert chrome.js(TEXTS) == ["Done.", "Done.", "next"]
+    assert chrome.js("[...document.querySelectorAll('#messages .msg.assistant')].every((e, i) => e === window.twins[i])")
+    api.messages = [dict(twin), {"role": "user", "text": "next"}]
+    chrome.wait(f"{TEXTS}.length === 2")
+    assert chrome.js(TEXTS) == ["Done.", "next"]
+
+
+def test_a_state_change_alone_redraws_the_call(api_fixture):
+    chrome, api, url = api_fixture
+    api.messages = [SAY, tool("b1", "Bash", "pytest -q", state="running"), {"role": "assistant", "text": "Waiting.", "ts": "b"}]
+    open_first(chrome, url)
+    chrome.wait(f"{SUMS}.join() === 'Running: Bash pytest -q'")
+    api.messages = [SAY, tool("b1", "Bash", "pytest -q", state="failed", result="1 failed"), api.messages[2]]
+    chrome.wait("document.querySelector('#messages .act.bad')?.textContent.includes('1 failed')")
+    assert chrome.js(LIVE) == ["msg assistant md", "act bad", "msg assistant md"]
+    api.messages = [SAY, tool("b1", "Bash", "pytest -q", result="2 passed"), api.messages[2]]
+    chrome.wait(f"{SUMS}.join() === '1 command'")
+
+
+def test_history_pages_group_too(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    page = [tool("h1", "Read", "a.py"), tool("h2", "Read", "b.py", state="failed", result="gone"), tool("h3", "Read", "c.py")] + said("mid", 1)
+    api.start, api.pages = 500, {"before=500": {"messages": page, "start": 0}, "conversation=past": {"messages": page, "start": 0}}
+    api.conversations = [{"id": "past", "ts": time.time() - 3600, "title": "Fix the build"}]
+    open_first(chrome, url)
+    chrome.click(EARLIER)
+    chrome.wait("document.querySelectorAll('#messages .past .run').length === 2")
+    assert chrome.js("[...document.querySelectorAll('#messages .past > *')].map(e => e.className)") == ["run", "act bad", "run", "msg assistant md"]
+    chrome.click("#messages .past .run > button")
+    api.messages = api.messages + said("later", 1)
+    chrome.wait(f"{TEXTS}.at(-1) === 'later 0'")
+    assert chrome.js("document.querySelector('#messages .past .run').classList.contains('open')")
+    chrome.click("#sMenu")
+    chrome.click("#sheet [data-p]")
+    chrome.click("#sheet .past-list button")
+    chrome.wait("document.querySelectorAll('#sheet .past-chat .run').length === 2")
+    chrome.click("#sheet .past-chat .act.bad + .run > button")
+    assert chrome.js("document.querySelector('#sheet .past-chat .act.bad + .run').classList.contains('open')")
+    assert chrome.js("document.querySelector('#sheet .past-chat .act.bad .out').textContent") == "gone"
+
+
+def test_fold_has_no_motion_when_reduced(api_fixture):
+    chrome, api, url = api_fixture
+    api.messages = [SAY, tool("r1", "Read", "a.py")]
+    open_first(chrome, url)
+    chrome.wait("document.querySelector('#messages .run') !== null")
+    duration = "getComputedStyle(document.querySelector('#messages .run .fold')).transitionDuration"
+    assert chrome.js(duration).startswith("0.24s")
+    assert chrome.js("document.querySelector('#messages .run > button').getBoundingClientRect().height") >= 44
+    chrome.cdp("Emulation.setEmulatedMedia", features=[{"name": "prefers-reduced-motion", "value": "reduce"}])
+    assert set(chrome.js(duration).split(", ")) == {"0s"}
+    assert set(chrome.js("getComputedStyle(document.querySelector('#messages .run .chev')).transitionDuration").split(", ")) == {"0s"}
