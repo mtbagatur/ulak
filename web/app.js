@@ -410,6 +410,7 @@ function openSession(pane) {
   const carry = focusIsIn('#home');
   state.view++;
   state.current = pane; state.chatHash = ''; state.rendered = 0; state.prompt = null;
+  state.anchor = state.cursor = state.start = null; state.conversation = undefined;
   loadSlash(pane);
   $('#home').hidden = true; $('#session').hidden = false;
   if (carry) $('#back').focus({preventScroll: true});
@@ -542,11 +543,19 @@ async function loadChat(first = false) {
   const request = {view, generation, again: false, first: false};
   chatRequest = request;
   try {
-    const r = await readSnapshot(`/api/sessions/${encodeURIComponent(pane)}/chat`);
+    const anchor = state.anchor;
+    const r = await readSnapshot(`/api/sessions/${encodeURIComponent(pane)}/chat${anchor === null ? '' : `?from=${anchor}`}`);
     if (chatRequest !== request || view !== state.view || generation !== snapshotGeneration) return;
+    if (state.conversation !== undefined && r.conversation !== state.conversation) {  // /clear: another conversation
+      forgetPast();
+      if (anchor !== null) { state.conversation = r.conversation; request.again = true; return; }
+    }
+    state.conversation = r.conversation;
+    if (state.anchor === null) state.start = r.start ?? null;
     const key = JSON.stringify([r.messages.length, r.messages.at(-1), r.hint, r.messages.map(subSig).join()]);
     settleOutbox(pane, r.messages);
     if (key !== state.chatHash) { state.chatHash = key; renderMessages(r, first); }
+    renderEarlier(r.source);
     renderOutbox();
     renderPrompt(r.prompt, r.status);
     renderReceipt(r.receipt);
@@ -569,19 +578,78 @@ async function loadChat(first = false) {
     }
   }
 }
-function renderMessages(r, first) {
+// ---------- earlier messages ----------
+// The live part follows the conversation; what was loaded from before it sits above and is not asked for again.
+function parts() {
   const box = $('#messages');
+  if (!box.querySelector(':scope > .live')) { box.innerHTML = '<div class="earlier"></div><div class="past"></div><div class="live"></div>'; state.rendered = 0; }
+  return {box, earlier: box.querySelector('.earlier'), past: box.querySelector('.past'), live: box.querySelector('.live')};
+}
+function forgetPast() { state.anchor = null; state.cursor = null; state.start = null; $('#messages .past')?.replaceChildren(); state.chatHash = ''; }
+function renderEarlier(source) {
+  const {earlier} = parts();
+  const at = state.anchor === null ? state.start : state.cursor;
+  const kind = source !== 'transcript' ? '' : at > 0 ? 'loadEarlier' : at === 0 ? 'conversations' : '';
+  putHtml(earlier, kind ? `<button type="button" data-kind="${kind}">${esc(t(kind))}</button>` : '');
+}
+async function loadEarlier(button) {
+  const pane = state.current, view = state.view, conversation = state.conversation;
+  if (state.anchor === null) { state.anchor = state.cursor = state.start; }
+  const r = await act(button, () => api(`/api/sessions/${encodeURIComponent(pane)}/history?before=${state.cursor}`));
+  if (!r || view !== state.view || conversation !== state.conversation) return;
+  const {box, past} = parts();
+  const fromBottom = box.scrollHeight - box.scrollTop;
+  past.prepend(...r.messages.map(msgNode));
+  state.cursor = r.start;
+  renderEarlier('transcript');
+  box.scrollTop = box.scrollHeight - fromBottom;
+}
+$('#messages').addEventListener('click', e => {
+  const button = e.target.closest('.earlier button');
+  if (!button || button.classList.contains('loading')) return;
+  button.dataset.kind === 'loadEarlier' ? loadEarlier(button) : conversationsSheet();
+});
+async function conversationsSheet() {
+  const pane = state.current;
+  showSheet(`<h3>${esc(t('conversations'))}</h3><p class="note">${esc(t('conversationsNote'))}</p><div class="past-list scroll" style="max-height:60vh"><p class="empty">${esc(t('loading'))}</p></div>`);
+  const box = $('#sheet .past-list');
+  const r = await act(null, () => api(`/api/sessions/${encodeURIComponent(pane)}/conversations`));
+  if (!box.isConnected || state.current !== pane) return;
+  const items = r?.items || [];
+  box.innerHTML = items.map(c => `<button type="button" class="row" data-c="${esc(c.id)}"><span>${esc(c.title)}</span><small>${esc(ago(c.ts))}</small></button>`).join('') || `<p class="empty">${esc(t('noConversations'))}</p>`;
+  box.onclick = e => { const b = e.target.closest('[data-c]'); if (b) pastSheet(pane, b.dataset.c, b.querySelector('span').textContent); };
+}
+async function pastSheet(pane, id, title) {
+  showSheet(`<h3>${esc(title)}</h3><p class="note">${esc(t('conversationsNote'))}</p><div class="past-chat scroll" style="max-height:62vh"><p class="empty">${esc(t('loading'))}</p></div>`);
+  const box = $('#sheet .past-chat');
+  const page = async before => {
+    const r = await act(box.querySelector('.past-more'), () => api(`/api/sessions/${encodeURIComponent(pane)}/history?conversation=${encodeURIComponent(id)}${before ? `&before=${before}` : ''}`));
+    if (!r || !box.isConnected) return;
+    const fromBottom = box.scrollHeight - box.scrollTop;
+    box.querySelector('.past-more')?.remove(); box.querySelector('.empty')?.remove();
+    box.prepend(...r.messages.map(msgNode));
+    if (r.start) {
+      const more = document.createElement('button'); more.type = 'button'; more.className = 'past-more'; more.textContent = t('loadEarlier');
+      more.onclick = () => { if (!more.classList.contains('loading')) page(r.start); };
+      box.prepend(more);
+    }
+    box.scrollTop = before ? box.scrollHeight - fromBottom : box.scrollHeight;
+  };
+  page(0);
+}
+function renderMessages(r, first) {
+  const {box, live} = parts();
   const near = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
   const fromBottom = box.scrollHeight - box.scrollTop;
   box.querySelector('.hint')?.remove(); box.querySelector('.empty')?.remove();
   const msgs = r.messages;
   const same = state.rendered > 0 && state.sig === sig(msgs[Math.max(0, state.rendered - 1)]) && msgs.length >= state.rendered && state.source === r.source;
-  if (!same) { box.innerHTML = ''; state.rendered = 0; }
+  if (!same) { live.innerHTML = ''; state.rendered = 0; }
   // A subagent comes back long after its card was drawn: update that card where it stands.
-  msgs.slice(0, state.rendered).forEach((m, i) => { const el = box.children[i]; if (m.agent && el?.classList.contains('sub') && el.dataset.sig !== subSig(m)) { subNode(el, m); el.dataset.sig = subSig(m); } });
-  for (const m of msgs.slice(state.rendered)) box.appendChild(msgNode(m));
+  msgs.slice(0, state.rendered).forEach((m, i) => { const el = live.children[i]; if (m.agent && el?.classList.contains('sub') && el.dataset.sig !== subSig(m)) { subNode(el, m); el.dataset.sig = subSig(m); } });
+  for (const m of msgs.slice(state.rendered)) live.appendChild(msgNode(m));
   state.rendered = msgs.length; state.sig = sig(msgs[msgs.length - 1]); state.source = r.source;
-  if (!msgs.length) box.innerHTML = `<div class="empty">${t('noChat')}</div>`;
+  if (!msgs.length) live.innerHTML = `<div class="empty">${t('noChat')}</div>`;
   if (r.hint) { const h = document.createElement('div'); h.className = 'hint'; h.textContent = r.hint.replace(/\(.*$/, '').trim() || t('working'); box.appendChild(h); }
   if (first || near) box.scrollTop = box.scrollHeight;
   else if (!same) box.scrollTop = box.scrollHeight - fromBottom;
@@ -1040,11 +1108,12 @@ async function changesSheet() {
 }
 $('#sMenu').onclick = () => {
   const s = state.sessions.get(state.current) || {};
-  showSheet(`<h3>${esc(s.project || t('pane'))}</h3><p>${esc(s.cwd || '')}</p><div class="acts" style="flex-direction:column"><button data-s>${esc(t('agentScreen'))}</button><button data-d>${esc(t('changes'))}</button><button data-r>${esc(t('refreshSession'))}</button><button class="danger" data-c>${esc(t('closeSession'))}</button><button class="ghost" data-x>${esc(t('cancel'))}</button></div>`);
+  showSheet(`<h3>${esc(s.project || t('pane'))}</h3><p>${esc(s.cwd || '')}</p><div class="acts" style="flex-direction:column"><button data-s>${esc(t('agentScreen'))}</button><button data-d>${esc(t('changes'))}</button>${s.agent === 'claude' ? `<button data-p>${esc(t('conversations'))}</button>` : ''}<button data-r>${esc(t('refreshSession'))}</button><button class="danger" data-c>${esc(t('closeSession'))}</button><button class="ghost" data-x>${esc(t('cancel'))}</button></div>`);
   $('#sheet [data-x]').onclick = hideSheet;
   $('#sheet [data-r]').onclick = () => { hideSheet(); state.chatHash = ''; loadChat(true); };
   $('#sheet [data-s]').onclick = screenSheet;
   $('#sheet [data-d]').onclick = changesSheet;
+  $('#sheet [data-p]')?.addEventListener('click', conversationsSheet);
   $('#sheet [data-c]').onclick = async e => {
     const r = await act(e.currentTarget, () => api(`/api/sessions/${encodeURIComponent(state.current)}/close`, {}));
     if (!r || !r.confirm_required) return;

@@ -58,6 +58,7 @@ class FakeAPI:
         self.presence = []
         self.fail_prompt = False
         self.pins = []
+        self.start, self.conversation, self.conversations, self.pages, self.anchors = None, "one", [], {}, []
         self.respond = threading.Event()
         self.respond.set()
         self.ended = threading.Event()
@@ -111,16 +112,24 @@ class Handler(SimpleHTTPRequestHandler):
             self.api.list_started.set()
             assert self.api.list_respond.wait(8), "test did not release the held snapshot"
             self.json(rows)
-        elif self.path == "/api/sessions/fake%3Ap1/chat":
+        elif self.path.split("?")[0] == "/api/sessions/fake%3Ap1/chat":
             if self.api.fail_chat:
                 self.json({"detail": "Fixture chat unavailable"}, 503)
                 self.api.chat_failed.set()
                 return
             item = self.api.cards[0]
+            anchor = self.path.partition("?from=")[2]
+            self.api.anchors.append(anchor)
             self.json({
                 "messages": self.api.messages, "source": "transcript", "prompt": self.api.approval,
                 "status": item["status"], "session": item, "receipt": self.api.receipt,
+                "start": int(anchor) if anchor else self.api.start, "conversation": self.api.conversation,
             })
+        elif self.path.startswith("/api/sessions/fake%3Ap1/history?"):
+            page = self.api.pages.get(self.path.partition("?")[2])
+            self.json(page) if page else self.json({"detail": "No such conversation"}, 404)
+        elif self.path == "/api/sessions/fake%3Ap1/conversations":
+            self.json({"items": self.api.conversations})
         elif self.path == "/api/sessions/fake%3Ap1/commands" and self.api.commands is not None:
             self.json({"commands": self.api.commands})
         elif self.path == "/api/sessions/fake%3Ap1/screen":
@@ -1389,3 +1398,60 @@ def test_idle_is_grey_done_is_green_and_working_blinks_in_its_own_colour(api_fix
     assert chrome.js("document.querySelector('.b-working .blink').textContent") == "Working" and chrome.js(blink) != "none"
     chrome.cdp("Emulation.setEmulatedMedia", features=[{"name": "prefers-reduced-motion", "value": "reduce"}])
     assert chrome.js(blink) == "none"
+
+
+def said(prefix, n):
+    return [{"role": "assistant", "text": f"{prefix} {i}", "ts": f"{prefix}{i}"} for i in range(n)]
+
+
+TEXTS = "[...document.querySelectorAll('#messages .msg')].map(e => e.textContent)"
+EARLIER = "#messages .earlier button"
+
+
+def test_earlier_messages_load_above_and_stay_while_new_ones_arrive(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    api.messages, api.start = said("new", 30), 500
+    api.pages = {"before=500": {"messages": said("mid", 20), "start": 200}, "before=200": {"messages": said("old", 2), "start": 0}}
+    open_first(chrome, url)
+    chrome.wait(f"document.querySelector('{EARLIER}')?.textContent === 'Load earlier'")
+    chrome.js("document.querySelector('#messages').scrollTop = 0")
+    top = "document.querySelector('#messages .live .msg').getBoundingClientRect().top"
+    before = chrome.js(top)
+    chrome.click(EARLIER)
+    chrome.wait("document.querySelectorAll('#messages .msg').length === 50")
+    assert abs(chrome.js(top) - before) < 40
+    api.messages = api.messages + said("later", 1)
+    chrome.wait(f"{TEXTS}.at(-1) === 'later 0'")
+    assert chrome.js(TEXTS)[:2] == ["mid 0", "mid 1"] and len(chrome.js(TEXTS)) == 51 and api.anchors[-1] == "500"
+    chrome.click(EARLIER)
+    chrome.wait(f"{TEXTS}[0] === 'old 0'")
+    chrome.wait(f"document.querySelector('{EARLIER}').textContent === 'Earlier conversations'")
+
+
+def test_a_clear_drops_the_older_messages_of_the_previous_conversation(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    api.start, api.pages = 500, {"before=500": {"messages": said("old", 2), "start": 0}}
+    open_first(chrome, url)
+    chrome.click(EARLIER)
+    chrome.wait("document.querySelectorAll('#messages .msg').length === 3")
+    api.messages, api.start, api.conversation = said("fresh", 1), 0, "two"
+    chrome.wait(f"{TEXTS}.join('|') === 'fresh 0'")
+    assert api.anchors[-1] == ""
+
+
+def test_an_earlier_conversation_opens_read_only(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    api.conversations = [{"id": "past", "ts": time.time() - 3600, "title": "Fix the build"}]
+    api.pages = {"conversation=past": {"messages": said("then", 2), "start": 90}, "conversation=past&before=90": {"messages": said("first", 1), "start": 0}}
+    open_first(chrome, url)
+    chrome.click("#sMenu")
+    chrome.click("#sheet [data-p]")
+    chrome.wait("document.querySelector('#sheet .past-list button')?.textContent.includes('Fix the build')")
+    chrome.click("#sheet .past-list button")
+    chrome.wait("document.querySelectorAll('#sheet .past-chat .msg').length === 2")
+    chrome.click("#sheet .past-more")
+    chrome.wait("document.querySelector('#sheet .past-chat .msg').textContent === 'first 0' && !document.querySelector('#sheet .past-more')")
+    assert chrome.js("document.querySelectorAll('#sheet textarea, #sheet input').length") == 0

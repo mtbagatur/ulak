@@ -216,6 +216,7 @@ diff --git a/tests/test_retry.py b/tests/test_retry.py
       if (verb === 'commands') return {commands: COMMANDS};
       if (verb === 'changes') return changes(pane);
       if (verb === 'screen') return screen(pane);
+      if (verb === 'conversations') return {items: []};
       return {'/api/config': {quick_label: '', approval_timeout_minutes: 0}, '/api/pins': {pins}, '/api/audit': {items: audit}, '/api/notifications': {items: notes},
         '/api/limits': limits(), '/api/push/public': {key: ''}, '/api/projects': PROJECTS}[path] || [404, {detail: 'Not found'}];
     }
