@@ -29,7 +29,7 @@ const I18N = {
     copy: 'Copy', copied: 'Copied', copyFail: 'Could not copy', openImage: 'Open picture {x}',
     ctxShort: 'Context {n}', cacheShort: 'Cache {n}', cacheMins: '~{n}m', cacheCold: 'Cache cold', win5h: '5h', win7d: 'wk', metersTitle: 'This session', mContext: 'Context', tokens: '{n} tokens', mCache: 'Cache', cache1h: '1 hour', cache5m: '5 minute', cacheLeft: '~{n}m left', fromRecord: 'from the session record', agoT: '{t} ago', limFile: 'account-wide, from your limits file', limCodex: 'account-wide, from Codex records or your limits file',
     kRead: '{n} read|{n} reads', kSearch: '{n} search|{n} searches', kEdit: '{n} edit|{n} edits', kCommand: '{n} command|{n} commands', kPage: '{n} page|{n} pages', kOther: '{n} other job|{n} other jobs', runNow: 'Running: {x}', noResult: 'No result in the record', failedCall: 'Failed', rejectedCall: 'You said no', didNotRun: 'It did not run.', editCut: 'Diff cut short', wrote: '{n} line written|{n} lines written',
-    language: 'Language', darkTheme: 'Dark theme', appearance: 'Appearance', themeDark: 'Dark', themeLight: 'Light', limits: 'Limits', limitsTitle: 'Usage limits', resets: 'resets {t}', resetsIn: 'in {t}', used: '{n}% used', stale: 'not updated for {t}', noLimits: 'No limit data configured.', left: '{n}% left',
+    language: 'Language', darkTheme: 'Dark theme', appearance: 'Appearance', themeDark: 'Dark', themeLight: 'Light', limits: 'Limits', limitsTitle: 'Usage limits', resets: 'resets {t}', resetsIn: 'in {t}', used: '{n}% used', stale: 'not updated for {t}', readAgo: 'read {t} ago', noLimits: 'No limit data configured.', left: '{n}% left',
     pane: 'pane', settings: 'Settings', install: 'Add to Home Screen for push notifications',
   },
   tr: {
@@ -60,7 +60,7 @@ const I18N = {
     copy: 'Kopyala', copied: 'Kopyalandı', copyFail: 'Kopyalanamadı', openImage: '{x} resmini aç',
     ctxShort: 'Bağlam {n}', cacheShort: 'Cache {n}', cacheMins: '~{n} dk', cacheCold: 'Cache soğudu', win5h: '5s', win7d: 'hf', metersTitle: 'Bu oturum', mContext: 'Bağlam', tokens: '{n} belirteç', mCache: 'Cache', cache1h: '1 saat', cache5m: '5 dakika', cacheLeft: '~{n} dk kaldı', fromRecord: 'oturum kaydından', agoT: '{t} önce', limFile: 'hesap geneli, limit dosyandan', limCodex: 'hesap geneli, Codex kayıtlarından ya da limit dosyandan',
     kRead: '{n} okuma', kSearch: '{n} arama', kEdit: '{n} düzenleme', kCommand: '{n} komut', kPage: '{n} sayfa', kOther: '{n} diğer iş', runNow: 'Çalışıyor: {x}', noResult: 'Kayıtta sonuç yok', failedCall: 'Hata', rejectedCall: 'Sen reddettin', didNotRun: 'Çalışmadı.', editCut: 'Fark kısaltıldı', wrote: '{n} satır yazıldı',
-    language: 'Dil', darkTheme: 'Koyu tema', appearance: 'Görünüm', themeDark: 'Koyu', themeLight: 'Açık', limits: 'Limitler', limitsTitle: 'Kullanım limitleri', resets: 'sıfırlanır {t}', resetsIn: '{t} sonra', used: '%{n} kullanıldı', stale: '{t} önce güncellendi', noLimits: 'Limit verisi ayarlanmamış.', left: '%{n} kaldı',
+    language: 'Dil', darkTheme: 'Koyu tema', appearance: 'Görünüm', themeDark: 'Koyu', themeLight: 'Açık', limits: 'Limitler', limitsTitle: 'Kullanım limitleri', resets: 'sıfırlanır {t}', resetsIn: '{t} sonra', used: '%{n} kullanıldı', stale: '{t} önce güncellendi', readAgo: '{t} önce okundu', noLimits: 'Limit verisi ayarlanmamış.', left: '%{n} kaldı',
     pane: 'panel', settings: 'Ayarlar', install: 'Bildirim için ana ekrana ekle',
   },
 };

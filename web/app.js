@@ -177,6 +177,7 @@ function patch(container, items, keyOf, htmlOf, make) {
   }
   existing.forEach(el => el.remove());
 }
+function setTitle(waiting = [...state.sessions.values()].filter(s => s.bucket === 'blocked').length) { const text = (waiting ? `(${waiting}) ` : '') + t('appName'); if (document.title !== text) document.title = text; }
 function renderHome() {
   const hold = (state.sealHold || 0) - performance.now();
   if (hold > 0 && $('#groups .stamp')) { clearTimeout(renderHome.held); renderHome.held = setTimeout(renderHome, hold); return; }
@@ -184,6 +185,7 @@ function renderHome() {
   const blocked = all.filter(s => s.bucket === 'blocked').length;
   const unknown = all.filter(s => s.bucket === 'unknown').length;
   putHtml($('#summary'), !all.length ? '' : blocked ? t('summaryBlocked', {n: blocked}) : unknown ? t('summaryUnknown', {n: unknown}) : t('summaryCalm', {n: all.filter(s => s.bucket === 'working').length}));
+  setTitle(blocked);  // the one sign that shows without notification permission
   if (navigator.setAppBadge) { blocked ? navigator.setAppBadge(blocked).catch(() => {}) : navigator.clearAppBadge?.().catch(() => {}); }
   const groups = $('#groups');
   if (!all.length) { putHtml(groups, `<div class="empty">${t('empty')}</div>`); return; }
@@ -426,7 +428,7 @@ function renderLimits() {
   box.innerHTML = ps.map(p => {
     const show = [[...p.items].sort((a, b) => b.used - a.used)[0]];  // the tightest window; details on tap
     const stale = p.updated && now - p.updated > 1800;
-    return `<span class="lim${stale ? ' stale' : ''}"><b>${esc(p.label)}</b>${show.map(i => `<span class="lv ${lvl(i.used)}" title="${esc(i.label)}"><i style="width:${Math.min(100, i.used)}%"></i></span><em>${tight ? '' : esc(winName(i)) + ' '}${i.used}%</em>`).join('')}</span>`;
+    return `<span class="lim${stale ? ' stale' : ''}"><b>${esc(p.label)}</b>${show.map(i => `<span class="lv${stale ? '' : ' ' + lvl(i.used)}" title="${esc(i.label)}"><i style="width:${Math.min(100, i.used)}%"></i></span><em>${tight ? '' : esc(winName(i)) + ' '}${i.used}%</em>`).join('')}</span>`;
   }).join('');
 }
 function limitsSheet() {
@@ -434,7 +436,7 @@ function limitsSheet() {
   const ps = limitData && limitData.providers || [];
   const body = ps.length ? ps.map(p => {
     const stale = p.updated && now - p.updated > 1800;
-    return `<section class="lp"><h4>${esc(p.label)}${stale ? `<small>${esc(t('stale', {t: fmtIn(now - p.updated)}))}</small>` : ''}</h4>${p.items.map(i => `<div class="li"><div class="lt"><span>${esc(i.label)}</span><span>${esc(t('used', {n: i.used}))} · ${esc(t('left', {n: Math.max(0, 100 - i.used)}))}</span></div><div class="lv big ${lvl(i.used)}"><i style="width:${Math.min(100, i.used)}%"></i></div><small>${esc(resetText(i.resets_at, now))}</small></div>`).join('')}</section>`;
+    return `<section class="lp"><h4>${esc(p.label)}${stale ? `<small>${esc(t('stale', {t: fmtIn(now - p.updated)}))}</small>` : p.updated ? `<small class="fresh">${esc(t('readAgo', {t: fmtIn(now - p.updated)}))}</small>` : ''}</h4>${p.items.map(i => `<div class="li"><div class="lt"><span>${esc(i.label)}</span><span>${esc(t('used', {n: i.used}))} · ${esc(t('left', {n: Math.max(0, 100 - i.used)}))}</span></div><div class="lv big${stale ? '' : ' ' + lvl(i.used)}"><i style="width:${Math.min(100, i.used)}%"></i></div><small>${esc(resetText(i.resets_at, now))}</small></div>`).join('')}</section>`;
   }).join('') : `<div class="empty">${esc(t('noLimits'))}</div>`;
   showSheet(`<h3>${esc(t('limitsTitle'))}</h3><div class="scroll" style="max-height:65vh">${body}</div>`);
 }
@@ -1454,7 +1456,7 @@ function histBody(n) { const b = n.body || ''; return n.project ? (b || t(n.stat
 function refreshLang() {
   applyStaticI18n();
   updateConnection();
-  document.title = t('appName');
+  setTitle();
   setQuickLabel();
   state.sessions.size && renderHome();
   renderLimits();

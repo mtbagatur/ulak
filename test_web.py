@@ -2206,3 +2206,35 @@ def test_a_heic_photo_is_redrawn_before_it_leaves_the_phone_and_the_owner_hears_
     chrome.js(PICK + "('shot.png', 'image/png', true)")
     chrome.wait("document.querySelector('#message').value.includes('/tmp/up-4')")
     assert api.uploads[3] == ("image/png", b"\x89PNG")
+
+
+# --- Yayın 1b: the tab title counts, a stale limit does not shout ---
+def test_the_tab_title_counts_what_is_waiting(api_fixture):
+    chrome, api, url = api_fixture
+    api.cards = [card("blocked", pending=APPROVAL), {**card("blocked", pending=APPROVAL), "pane_id": "fake:p2"}, {**card("working"), "pane_id": "fake:p3"}]
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.title === '(2) Ulak'")
+    chrome.js("toggleLang()")
+    chrome.wait("document.documentElement.lang === 'tr'")
+    assert chrome.js("document.title") == "(2) Ulak"
+    api.publish_session("working")
+    api.events.append({"type": "removed", "pane": "fake:p2"})
+    chrome.wait("document.title === 'Ulak'")
+
+
+def test_a_stale_limit_keeps_its_figure_and_loses_its_alarm(api_fixture):
+    chrome, api, url = api_fixture
+    now = time.time()
+    api.limits = [{"label": "Claude", "updated": now - 1801, "items": [{"label": "7d", "used": 95, "resets": 0}]},
+                  {"label": "Codex", "updated": now - 125, "items": [{"label": "7d", "used": 95, "resets": 0}]},
+                  {"label": "agy", "items": [{"label": "7d", "used": 10, "resets": 0}]}]
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelectorAll('#limits .lim').length === 3")
+    assert chrome.js("[...document.querySelectorAll('#limits .lim')].map(e => [e.classList.contains('stale'), e.querySelector('.lv').className, e.querySelector('em').textContent])") == [
+        [True, "lv", "95%"], [False, "lv hot", "95%"], [False, "lv ok", "10%"]]
+    chrome.click("#limits")
+    chrome.wait("document.querySelectorAll('#sheet .lp').length === 3")
+    assert chrome.js("[...document.querySelectorAll('#sheet .lp')].map(e => [e.querySelector('h4 small')?.textContent ?? null, e.querySelector('h4 small')?.className ?? null, e.querySelector('.lv').className])") == [
+        ["not updated for 30m", "", "lv big"], ["read 2m ago", "fresh", "lv big hot"], [None, None, "lv big ok"]]
+    stale, fresh = chrome.js("[...document.querySelectorAll('#sheet .lp h4 small')].map(e => getComputedStyle(e).color)")
+    assert stale != fresh
