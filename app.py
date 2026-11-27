@@ -8,6 +8,7 @@ import re
 import secrets
 import time
 from contextlib import asynccontextmanager, contextmanager
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -55,6 +56,8 @@ waiting = {}        # pane -> (prompt fingerprint, when Ulak first saw it waitin
 sessions = {}       # pane -> card (what the phone shows)
 raw_agents = {}     # pane -> last agent record from herdr
 since = {}          # pane -> {"status", "ts"}
+active = {}         # pane -> when the conversation last moved
+active_saved = 0.0
 pending_confirm = {}
 replying_panes = set()
 subscribers = set()
@@ -153,6 +156,28 @@ def read_json(path, kind):
 
 def load_since():
     since.update({pane: entry for pane, entry in read_json(STATE / "since.json", dict).items() if isinstance(entry, dict)})
+    active.update({pane: ts for pane, ts in read_json(STATE / "active.json", dict).items() if isinstance(ts, (int, float))})
+
+
+def touch_active(pane, ts):
+    """Remember the latest sign of conversation in a pane; written to disk at most twice a minute."""
+    global active_saved
+    if ts > active.get(pane, 0):
+        active[pane] = ts
+        if time.time() - active_saved >= 30:
+            try:
+                save_file(STATE / "active.json", json.dumps(active))
+                active_saved = time.time()
+            except OSError:
+                pass
+    return active.get(pane, 0)
+
+
+def message_time(message):
+    try:
+        return datetime.fromisoformat(str(message.get("ts", "")).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0
 
 
 def save_since():
@@ -285,6 +310,8 @@ def subtitle(agent, project):
 async def make_card(agent, force=False):
     pane = agent["pane_id"]
     status = agent.get("agent_status") or agent.get("status") or "unknown"
+    if status == "working" or (since.get(pane) or {}).get("status") == "working":
+        touch_active(pane, time.time())  # working now, or stopped since the last look
     ts = touch_since(pane, status)
     project = project_name(agent)
     card = {
@@ -307,6 +334,8 @@ async def make_card(agent, force=False):
         if path:
             try:
                 msgs, model = await asyncio.to_thread(claude_chat, path, max_messages=30, tail_bytes=250_000)
+                if spoken := [m for m in msgs if m["role"] != "tool"]:
+                    touch_active(pane, message_time(spoken[-1]))
                 texts = [m["text"] for m in msgs if m["role"] == "assistant"]
                 tools = [m for m in msgs if m["role"] == "tool"]
                 if texts:
@@ -327,6 +356,7 @@ async def make_card(agent, force=False):
                            "fingerprint": p["fingerprint"], "cut": p.get("cut", False),
                            "roles": [o["role"] for o in p["options"]]}
     discard_changed_confirmation(pane, (card["pending"] or {}).get("fingerprint"))
+    card["active"] = active.get(pane, 0)
     return card
 
 
@@ -376,6 +406,7 @@ async def load_all():
         pending_confirm.pop(pane, None)
         pushed.pop(pane, None)
         work_started.pop(pane, None)
+        active.pop(pane, None)
     sem = asyncio.Semaphore(6)
 
     async def one(pane):
@@ -457,6 +488,7 @@ async def handle_event(msg):
         pending_confirm.pop(pane, None)
         pushed.pop(pane, None)
         work_started.pop(pane, None)
+        active.pop(pane, None)
         pane_ids.discard(pane)
         await resubscribe()
         await broadcast({"type": "removed", "pane": pane})
@@ -862,7 +894,9 @@ async def prompt(pane: str, action: Action):
     if not action.text or not action.text.strip():
         raise HTTPException(400, "Message is empty")
     await must_be_agent(pane)
-    return await client.call("agent.prompt", {"target": pane, "text": action.text})
+    sent = await client.call("agent.prompt", {"target": pane, "text": action.text})
+    touch_active(pane, time.time())
+    return sent
 
 
 @app.get("/api/config")

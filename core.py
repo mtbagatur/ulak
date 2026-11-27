@@ -52,10 +52,10 @@ def bucket(status, since=None, now=None):
 
 
 def status_rank(session):
-    """Blocked, working, recently done, idle. Newest change first within a group (pins are a client concern)."""
+    """Blocked, working, recently done, idle. Latest conversation first within a group (pins are a client concern)."""
     group = BUCKETS.get(session.get("bucket") or session.get("status", "unknown"), 3)
     name = str(session.get("workspace_label", "")).lower()
-    return (group, -(session.get("since") or 0), name)
+    return (group, -(session.get("active") or session.get("since") or 0), name)
 
 
 def quiet_hours(now=None):

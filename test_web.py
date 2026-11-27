@@ -57,6 +57,7 @@ class FakeAPI:
         self.changes = {"repo": False, "branch": "", "files": [], "more_files": 0, "diff": "", "truncated": False}
         self.presence = []
         self.fail_prompt = False
+        self.pins = []
         self.respond = threading.Event()
         self.respond.set()
         self.ended = threading.Event()
@@ -131,7 +132,7 @@ class Handler(SimpleHTTPRequestHandler):
         elif self.path == "/api/notifications":
             self.json({"items": []})
         elif self.path == "/api/pins":
-            self.json({"pins": []})
+            self.json({"pins": self.api.pins})
         elif self.path == "/api/limits":
             self.json({"now": time.time(), "providers": self.api.limits})
         elif self.path == "/api/config":
@@ -1359,3 +1360,17 @@ def test_unseen_message_says_so_and_a_command_settles_it(api_fixture):
     chrome.wait(f"{PENDING}?.textContent.includes('Not in the conversation yet')")
     api.messages = [{"role": "command", "text": "/clear", "ts": "t2"}]
     chrome.wait(f"!{PENDING} && document.querySelector('#messages .msg.command')?.textContent === '/clear'")
+
+
+def test_each_group_lists_the_latest_conversation_first(api_fixture):
+    chrome, api, url = api_fixture
+    def one(pane, status, since, active, project):
+        return {**card(status), "pane_id": pane, "since": since, "active": active, "project": project, "workspace_label": project}
+    api.cards = [one("a", "idle", 900, 100, "old"), one("b", "idle", 100, 500, "new"),
+                 one("c", "idle", 800, 700, "pin-quiet"), one("d", "blocked", 50, 60, "pin-waiting")]
+    api.pins = ["pin-quiet|pin-quiet", "pin-waiting|pin-waiting"]
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelectorAll('.card').length === 4")
+    chrome.wait("!!document.querySelector('.g-pinned')")
+    names = lambda group: chrome.js(f"[...document.querySelectorAll('.g-{group} .proj')].map(e => e.textContent)")
+    assert names("pinned") == ["pin-waiting", "pin-quiet"] and names("idle") == ["new", "old"]

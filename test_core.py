@@ -1855,3 +1855,57 @@ def test_typed_slash_commands_are_part_of_the_conversation(tmp_path):
     ]) + "\n")
     msgs, _ = claude_chat(log)
     assert [(m["role"], m["text"]) for m in msgs] == [("command", "/clear"), ("command", "/model opus")]
+
+
+def _active(monkeypatch, tmp_path, status="idle", agent="claude"):
+    fake, c, h = _cleared(monkeypatch, tmp_path)
+    monkeypatch.setattr(api, "active", {})
+    monkeypatch.setattr(api, "active_saved", 0.0)
+    api.raw_agents["w9:p1"].update(agent=agent, agent_status=status)
+    return fake, c, h
+
+
+def _card():
+    return asyncio.run(api.refresh_pane("w9:p1"))
+
+
+def test_a_claude_card_is_as_recent_as_its_last_words(monkeypatch, tmp_path):
+    _active(monkeypatch, tmp_path)
+    api.raw_agents["w9:p1"]["agent_session"] = {"value": "new-session"}
+    assert _card()["active"] == datetime.fromisoformat("2026-11-27T10:00:00+00:00").timestamp()
+
+
+def test_last_activity_survives_going_idle_and_a_restart(monkeypatch, tmp_path):
+    _active(monkeypatch, tmp_path, status="working", agent="codex")
+    monkeypatch.setattr(api.time, "time", lambda: 5000.0)
+    assert _card()["active"] == 5000.0
+    monkeypatch.setattr(api.time, "time", lambda: 9000.0)
+    api.raw_agents["w9:p1"]["agent_status"] = "done"
+    done = _card()["active"]
+    api.raw_agents["w9:p1"]["agent_status"] = "idle"
+    assert done == 9000.0 and _card()["active"] == 9000.0   # it stopped working just now
+    api.active.clear()
+    api.load_since()
+    assert api.active["w9:p1"] == 9000.0
+
+
+def test_a_pane_first_seen_idle_has_no_activity_until_a_message_is_sent(monkeypatch, tmp_path):
+    _, c, h = _active(monkeypatch, tmp_path, agent="codex")
+    monkeypatch.setattr(api.time, "time", lambda: 7000.0)
+    assert _card()["active"] == 0
+    assert c.post("/api/sessions/w9:p1/prompt", headers=h, json={"text": "hello"}).status_code == 200
+    assert api.active["w9:p1"] == 7000.0
+
+
+def test_a_closed_pane_forgets_its_activity(monkeypatch, tmp_path):
+    _active(monkeypatch, tmp_path)
+    api.active["w9:p1"] = 1.0
+    asyncio.run(api.handle_event({"event": "pane.closed", "data": {"pane_id": "w9:p1"}}))
+    assert api.active == {}
+
+
+def test_within_a_group_the_latest_conversation_comes_first():
+    old = {"bucket": "idle", "since": 900, "active": 100, "workspace_label": "a"}
+    new = {"bucket": "idle", "since": 100, "active": 500, "workspace_label": "b"}
+    unknown = {"bucket": "idle", "since": 300, "active": 0, "workspace_label": "c"}
+    assert sorted([old, new, unknown], key=status_rank) == [new, unknown, old]

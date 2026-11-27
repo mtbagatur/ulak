@@ -98,7 +98,7 @@ function ago(ts) {
 const GROUPS = ['blocked', 'working', 'done', 'unknown', 'idle'];
 const rank = s => ({blocked: 0, working: 1, done: 2, unknown: 3, idle: 4}[s.bucket] ?? 3);
 function sorted() {
-  return [...state.sessions.values()].sort((a, b) => rank(a) - rank(b) || (b.since - a.since));
+  return [...state.sessions.values()].sort((a, b) => rank(a) - rank(b) || ((b.active || b.since) - (a.active || a.since)));
 }
 // Pins live on the server (.state/pins.json) so every device sees the same list.
 const pins = new Set();
