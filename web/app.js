@@ -522,13 +522,14 @@ function closedBanner() {
   $('#toList').onclick = () => history.state ? history.back() : (location.hash = '', route());
 }
 // A link in a transcript opens on the web, or reads a file of the session's own folder. Anything else stays text.
+const fileUrl = path => `/api/sessions/${encodeURIComponent(state.current)}/file?path=${encodeURIComponent(path)}`;
 const fileLink = (label, href) => {
   const external = /^https?:\/\//i.test(href);
   let target = href;
   if (!external) {
     const suffix = href.split(/[?#]/, 1)[0].split('.').pop().toLowerCase();
     if (!/^(pdf|png|jpe?g|webp|gif|heic|txt|md|csv|json)$/.test(suffix) || /^(?:[a-z]+:|\/\/)/i.test(href)) return null;
-    target = `/api/sessions/${encodeURIComponent(state.current)}/file?path=${encodeURIComponent(href)}`;
+    target = fileUrl(href);
   }
   return `<a href="${esc(target)}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>`;
 };
@@ -631,9 +632,61 @@ function fill(node, item) {
   } else {
     const blocks = item.source === 'transcript' && m.role === 'assistant';
     node.className = `msg ${m.role}${blocks ? ' md' : ''}`; node.innerHTML = m.role === 'command' ? esc(m.text) : blocks ? rich(m.text) : md(m.text);
+    const paths = m.role === 'assistant' || m.role === 'user' ? imagePaths(m.text) : [];
+    if (paths.length) { const box = document.createElement('div'); box.className = 'shots'; box.append(...paths.map(shotNode)); node.append(box); }
   }
   node._sig = item.sig;
 }
+// ---------- pictures ----------
+// A picture a message points at is shown under it, read through the same /file rules as its link. Nothing remote is fetched.
+function imagePaths(text) {
+  const lines = [], found = new Set();
+  let fenced = false;
+  for (const line of String(text || '').split('\n')) {
+    if (/^[ \t]*```/.test(line)) fenced = !fenced;
+    else if (!fenced) lines.push(line);
+  }
+  for (const m of lines.join('\n').matchAll(/\]\(([^)\s]{1,2000})\)|(?:^|[^\w.\-\/])((?:\/|\.\.?\/|[\w.\-]+\/)[^\s<>"'`]+)/g)) {
+    const path = m[1] || splitTrailing(m[2])[0];
+    if (/\.(?:png|jpe?g|webp|gif|heic)$/i.test(path) && !/^(?:[a-z]+:|\/\/)/i.test(path)) found.add(path);
+    if (found.size === 4) break;
+  }
+  return [...found];
+}
+function shotNode(path) {
+  const b = document.createElement('button'), name = path.split('/').pop();
+  b.type = 'button'; b.className = 'shot'; b.setAttribute('aria-label', t('openImage', {x: name}));
+  b.innerHTML = `<img loading="lazy" alt="" src="${esc(fileUrl(path))}"><small>${esc(name)}</small>`;
+  // What cannot be shown goes away with its box; the link in the text stays.
+  b.firstChild.addEventListener('error', () => {
+    const drop = () => { const box = b.parentElement; b.remove(); if (box && !box.children.length) box.remove(); };
+    const scroller = b.closest('#messages');
+    scroller ? keepPlace(scroller, drop) : drop();
+  });
+  return b;
+}
+let viewerOpener = null;
+function openViewer(img, opener) {
+  const v = $('#viewer');
+  viewerOpener = opener;
+  v.querySelector('img').src = img.getAttribute('src');
+  v.hidden = false; $('main').inert = true;
+  history.pushState({...history.state, viewer: true}, '');
+  $('#viewerClose').focus({preventScroll: true});
+}
+function hideViewer() {
+  const v = $('#viewer');
+  if (v.hidden) return;
+  v.hidden = true; $('main').inert = false; v.querySelector('img').removeAttribute('src');
+  if (viewerOpener?.isConnected) viewerOpener.focus({preventScroll: true});
+  viewerOpener = null;
+}
+// Closing is going back: the phone's back gesture and the button do the same thing.
+const closeViewer = () => history.state?.viewer ? history.back() : hideViewer();
+window.addEventListener('popstate', () => { if (!history.state?.viewer) hideViewer(); });
+$('#viewer').addEventListener('click', e => { if (e.target.tagName !== 'IMG') closeViewer(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#viewer').hidden) { e.preventDefault(); e.stopPropagation(); closeViewer(); } }, true);  // before the sheet under it hears the key
+document.addEventListener('click', e => { const shot = e.target.closest('.shot'); if (shot) openViewer(shot.querySelector('img'), shot); });
 function buildNode(item) {
   const node = document.createElement(item.kind === 'sub' || (item.kind === 'msg' && item.messages[0].role === 'tool') ? 'details' : 'div');
   node._key = item.key; node._kind = item.kind;

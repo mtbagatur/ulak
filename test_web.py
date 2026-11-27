@@ -2,6 +2,8 @@
 
 import re
 import json
+import struct
+import zlib
 import shutil
 import subprocess
 import threading
@@ -10,6 +12,7 @@ from contextlib import contextmanager
 from functools import partial
 from http.client import HTTPConnection
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import unquote
 from pathlib import Path
 
 import pytest
@@ -30,6 +33,15 @@ APPROVAL = {
 }
 DESTRUCTIVE = {**APPROVAL, "fingerprint": "destructive-approval", "details": "git push origin example", "destructive": True}
 OTHER_APPROVAL = {**APPROVAL, "fingerprint": "second-approval", "details": "pytest -q test_web.py"}
+
+
+def _png(width, height):
+    chunk = lambda kind, data: struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+    rows = (b"\0" + b"\x60\x40\x80" * width) * height
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
+
+
+PNG = _png(40, 400)  # taller than the box it is shown in
 
 
 def card(status, **fields):
@@ -62,6 +74,8 @@ class FakeAPI:
         self.moved = None
         self.start, self.conversation, self.conversations, self.pages, self.anchors = None, "one", [], {}, []
         self.meters, self.clock_shift = {}, 0
+        self.files, self.missing, self.file_gate = [], set(), threading.Event()
+        self.file_gate.set()
         self.respond = threading.Event()
         self.respond.set()
         self.ended = threading.Event()
@@ -132,6 +146,19 @@ class Handler(SimpleHTTPRequestHandler):
         elif self.path.startswith("/api/sessions/fake%3Ap1/history?"):
             page = self.api.pages.get(self.path.partition("?")[2])
             self.json(page) if page else self.json({"detail": "No such conversation"}, 404)
+        elif self.path.startswith("/api/sessions/fake%3Ap1/file?path="):
+            path = unquote(self.path.partition("?path=")[2])
+            self.api.files.append(path)
+            assert self.api.file_gate.wait(8), "test did not release the held picture"
+            if path in self.api.missing:
+                self.json({"detail": "No such file"}, 404)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(PNG)))
+            self.end_headers()
+            self.wfile.write(PNG)
         elif self.path == "/api/sessions/fake%3Ap1/conversations":
             self.json({"items": self.api.conversations})
         elif self.path == "/api/sessions/fake%3Ap1/commands" and self.api.commands is not None:
@@ -1915,3 +1942,110 @@ def test_meters_do_not_leak_into_the_next_session(api_fixture):
     chrome.click(".card-open")
     chrome.wait("!document.querySelector('#session').hidden")
     assert chrome.js("document.querySelector('#sMeta').hidden")
+
+
+# --- reading: the pictures a conversation points at ---
+SRCS = "[...document.querySelectorAll('#messages .shot img')].map(e => e.getAttribute('src'))"
+LOADED = "[...document.querySelectorAll('#messages .shot img')].every(e => e.complete && e.naturalWidth > 0)"
+FILE = "/api/sessions/fake%3Ap1/file?path="
+
+
+def test_pictures_named_in_a_message_show_under_it(api_fixture):
+    chrome, api, url = api_fixture
+    api.messages = [
+        {"role": "assistant", "text": "Saved /tmp/out/full.png and docs/shot-2.JPG.\n\n![the chart](chart.webp)", "ts": "a"},
+        {"role": "user", "text": "compare with old/before.gif", "ts": "b"},
+    ]
+    open_first(chrome, url)
+    chrome.wait("document.querySelectorAll('#messages .shot img').length === 4")
+    assert chrome.js(SRCS) == [FILE + p for p in ("%2Ftmp%2Fout%2Ffull.png", "docs%2Fshot-2.JPG", "chart.webp", "old%2Fbefore.gif")]
+    assert chrome.js("[...document.querySelectorAll('#messages .shot small')].map(e => e.textContent)") == ["full.png", "shot-2.JPG", "chart.webp", "before.gif"]
+    assert chrome.js("[...document.querySelectorAll('#messages .msg')].map(e => e.querySelectorAll(':scope > .shots .shot').length)") == [3, 1]
+    assert chrome.js("[...document.querySelectorAll('#messages .msg.assistant a')].map(e => e.textContent)") == ["/tmp/out/full.png", "docs/shot-2.JPG", "the chart"]
+    chrome.wait(LOADED)
+    assert chrome.js("[...document.querySelectorAll('#messages .shot img')].every(e => e.loading === 'lazy' && e.getBoundingClientRect().height === 160 && getComputedStyle(e).objectFit === 'contain')")
+    assert chrome.js("document.querySelector('#messages .shot').getAttribute('aria-label')") == "Open picture full.png"
+
+
+def test_code_remote_and_extra_pictures_are_left_as_text(api_fixture):
+    chrome, api, url = api_fixture
+    text = "see a/1.png, a/1.png and https://x.invalid/r.png //cdn.invalid/s.png file:///etc/t.png\n```\n/tmp/in-code.png\n```\na/2.png a/3.png a/4.png a/5.png a/6.png\n```\nb/open.png"
+    api.messages = [
+        {"role": "assistant", "text": text, "ts": "a"},
+        {"role": "tool", "tool": "Read", "text": "shots/x.png"},
+        tool("r1", "Read", "shots/y.png", result="shots/z.png"), tool("b1", "Bash", "open shots/w.png", state="failed", result="shots/v.png"),
+    ]
+    open_first(chrome, url)
+    chrome.wait("document.querySelectorAll('#messages .shot img').length > 0")
+    assert chrome.js(SRCS) == [FILE + f"a%2F{n}.png" for n in (1, 2, 3, 4)]
+    assert chrome.js("document.querySelectorAll('#messages img').length") == 4
+    assert chrome.js("imagePaths('x/a.png '.repeat(50000) + '[](' + '('.repeat(50000)).join()") == "x/a.png"
+    time.sleep(0.5)
+    assert set(api.files) <= {f"a/{n}.png" for n in (1, 2, 3, 4)}
+
+
+def test_a_picture_that_will_not_load_leaves_the_link(api_fixture):
+    chrome, api, url = api_fixture
+    api.missing = {"gone/x.png"}
+    api.messages = [{"role": "assistant", "text": "Look at gone/x.png", "ts": "a"}]
+    open_first(chrome, url)
+    wait_for(lambda: "gone/x.png" in api.files, "the picture is asked for")
+    chrome.wait("document.querySelector('#messages .shot') === null && document.querySelector('#messages .shots') === null")
+    assert chrome.js("document.querySelector('#messages .msg a').textContent") == "gone/x.png"
+
+
+def test_pictures_are_not_fetched_again_on_redraw(api_fixture):
+    chrome, api, url = api_fixture
+    api.messages = [{"role": "assistant", "text": "Look at a/1.png", "ts": "a"}]
+    open_first(chrome, url)
+    chrome.wait("document.querySelector('#messages .shot img') !== null && " + LOADED)
+    chrome.js("window.shot = document.querySelector('#messages .shot img')")
+    api.messages = api.messages + said("later", 1)
+    chrome.wait(f"{TEXTS}.at(-1) === 'later 0'")
+    api.messages = api.messages + said("again", 1)
+    chrome.wait(f"{TEXTS}.at(-1) === 'again 0'")
+    assert chrome.js("document.querySelector('#messages .shot img') === window.shot")
+    assert api.files == ["a/1.png"]
+
+
+def test_the_viewer_closes_by_button_and_back_and_returns_focus(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    api.messages = said("before", 30) + [{"role": "assistant", "text": "Look at a/1.png", "ts": "a"}] + said("after", 3)
+    open_first(chrome, url)
+    chrome.wait("document.querySelector('#messages .shot img') !== null")
+    place = "document.querySelector('#messages').scrollTop"
+    opened = "!document.querySelector('#viewer').hidden"
+    closers = ("document.querySelector('#viewerClose').click()", "history.back()", "document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}))", "document.querySelector('#viewer').click()")
+    for close in closers:
+        before = chrome.js(place)
+        chrome.click("#messages .shot")
+        chrome.wait(opened)
+        assert chrome.js("document.querySelector('#viewer img').getAttribute('src')") == FILE + "a%2F1.png"
+        assert chrome.js("history.state.viewer === true && document.activeElement.id === 'viewerClose' && document.querySelector('main').inert")
+        assert chrome.js("(() => { const r = document.querySelector('#viewerClose').getBoundingClientRect(); return r.width >= 44 && r.height >= 44; })()")
+        assert chrome.js("getComputedStyle(document.querySelector('#viewer')).animationName") == "none"
+        chrome.js(close)
+        chrome.wait("document.querySelector('#viewer').hidden && !history.state.viewer")
+        assert chrome.js("document.activeElement === document.querySelector('#messages .shot') && !document.querySelector('main').inert")
+        assert chrome.js("!document.querySelector('#session').hidden") and chrome.js(place) == before
+    chrome.click("#messages .shot")
+    chrome.wait(opened)
+    chrome.js("history.go(-2)")
+    chrome.wait("!document.querySelector('#home').hidden")
+    assert chrome.js("document.querySelector('#viewer').hidden && !document.querySelector('main').inert")
+    assert api.files == ["a/1.png"]
+
+
+def test_a_picture_loading_does_not_move_the_text(api_fixture):
+    chrome, api, url = api_fixture
+    api.file_gate.clear()
+    api.messages = [{"role": "assistant", "text": "Look at a/1.png", "ts": "a"}] + said("after", 2)
+    open_first(chrome, url)
+    chrome.wait("document.querySelector('#messages .shot img') !== null")
+    below = "[...document.querySelectorAll('#messages .msg')].at(-1).offsetTop"
+    assert not chrome.js("document.querySelector('#messages .shot img').complete")
+    before = chrome.js(below)
+    api.file_gate.set()
+    chrome.wait(LOADED)
+    assert chrome.js(below) == before
