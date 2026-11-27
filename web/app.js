@@ -156,7 +156,7 @@ function cardHtml(s) {
   const body = p ? `<pre class="c-cmd${inline ? ' full-command' : ''}">${esc(p.details || p.question)}</pre>` : (s.preview ? `<div class="c-prev">${esc(s.preview)}</div>` : '');
   const pinned = isPinned(s);
   return `<button class="card-open" type="button" aria-label="${esc(t('openSession', {project: s.project}))}"></button><div class="c-top"><span class="proj">${esc(s.project)}</span>${dup && s.workspace_label ? `<span class="ws">${esc(s.workspace_label)}</span>` : ''}<span class="chip ${esc(s.agent)}">${esc(TOOLNAME[s.agent] || s.agent)}</span><span class="model">${esc(s.model)}</span><button class="pin ${pinned ? 'on' : ''}" data-pin aria-label="${esc(t(pinned ? 'unpin' : 'pin'))}" aria-pressed="${pinned}">${icon('pin', 16)}</button></div>
-    <div class="state"><span class="d"></span>${esc(stateText)}</div>
+    <div class="state"><span class="d"></span><span>${s.bucket === 'working' && stateText.startsWith(statusText('working')) ? `<span class="blink">${esc(statusText('working'))}</span>${esc(stateText.slice(statusText('working').length))}` : esc(stateText)}</span></div>
     ${s.title ? `<div class="c-title">${esc(s.title)}</div>` : ''}${p && p.destructive ? `<div class="seals">${icon('seal', 14)}${icon('seal', 14)}<span>${esc(t('destructive'))}</span></div>` : ''}${body}
     ${inline ? `<div class="c-act"><button class="deny" data-act="deny">${esc(t('deny'))}</button><button class="seal" data-act="approve">${icon('seal', 17)}${esc(t('approve'))}</button></div>` : ''}${isSealed(s.pane_id, p) ? stampHtml(p) : ''}`;
 }

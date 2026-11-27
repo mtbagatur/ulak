@@ -622,7 +622,7 @@ def test_dock_button_stays_tappable_over_scrolled_cards(api_fixture):
     api.cards = [card("working", pane_id=f"fake:p{index}", project=f"project-{index}") for index in range(12)]
     chrome.resize(360, 640)
     chrome.cdp("Page.navigate", url=url)
-    chrome.wait("document.querySelectorAll('.card').length === 12 && document.getAnimations().every(a => a.animationName === 'pulse')")
+    chrome.wait("document.querySelectorAll('.card').length === 12 && document.getAnimations().every(a => ['pulse', 'blink'].includes(a.animationName))")
     assert chrome.js("""(() => {
         const button = document.querySelector('#newSession');
         const box = button.getBoundingClientRect();
@@ -738,7 +738,7 @@ def test_both_themes_define_the_same_colours_and_stay_readable():
     dark, light = _palettes()
     assert set(light) == set(dark)  # one set of names, so no rule can fall back to the other theme by accident
     for name, p in (("dark", dark), ("light", light)):
-        for ink in ("text", "strong", "muted", "zer", "lal-t", "ok"):
+        for ink in ("text", "strong", "muted", "zer", "lal-t", "ok", "run"):
             for ground in ("bg", "bg2", "card", "card2"):
                 assert _contrast(p[ink], p[ground]) >= 4.5, f"{name}: --{ink} on --{ground} is {_contrast(p[ink], p[ground]):.2f}"
         # Gold as a filled surface (the seal) carries dark ink in both themes; ruby carries white.
@@ -1374,3 +1374,18 @@ def test_each_group_lists_the_latest_conversation_first(api_fixture):
     chrome.wait("!!document.querySelector('.g-pinned')")
     names = lambda group: chrome.js(f"[...document.querySelectorAll('.g-{group} .proj')].map(e => e.textContent)")
     assert names("pinned") == ["pin-waiting", "pin-quiet"] and names("idle") == ["new", "old"]
+
+
+def test_idle_is_grey_done_is_green_and_working_blinks_in_its_own_colour(api_fixture):
+    chrome, api, url = api_fixture
+    api.cards = [{**card(status), "pane_id": status, "project": status} for status in ("working", "done", "idle")]
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelectorAll('.card').length === 3")
+    token = lambda name: chrome.js(f"(() => {{ const p = document.createElement('i'); p.style.color = 'var(--{name})'; document.body.append(p); const c = getComputedStyle(p).color; p.remove(); return c; }})()")
+    colour = lambda status: chrome.js(f"getComputedStyle(document.querySelector('.card.b-{status} .state')).color")
+    assert (colour("idle"), colour("done"), colour("working")) == (token("muted"), token("ok"), token("run"))
+    assert len({colour("idle"), colour("done"), colour("working")}) == 3
+    blink = "getComputedStyle(document.querySelector('.b-working .blink')).animationName"
+    assert chrome.js("document.querySelector('.b-working .blink').textContent") == "Working" and chrome.js(blink) != "none"
+    chrome.cdp("Emulation.setEmulatedMedia", features=[{"name": "prefers-reduced-motion", "value": "reduce"}])
+    assert chrome.js(blink) == "none"

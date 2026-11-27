@@ -1,9 +1,9 @@
 /* Palette: aubergine ground, paper ink. Gold (zer) means "waiting for you" and the seal; ruby (lal) only ever means a command that needs two seals; green only means "it arrived". */
-:root{color-scheme:dark;--bg:#1c1520;--bg2:#140f17;--card:#261d2b;--card2:#31263a;--line:#3f3149;--text:#d6cbc4;--strong:#f1e8d9;--muted:#a99caa;--zer:#d4ad62;--zer-ink:#241a08;--seal:#d4ad62;--ink:#f1e8d9;--lal:#d0434a;--lal-t:#ee8a8f;--ok:#8fbf9a;--shade:rgba(0,0,0,.28);--veil:rgba(255,255,255,.08);--shadow:rgba(0,0,0,.45);--back:rgba(0,0,0,.55);
+:root{color-scheme:dark;--bg:#1c1520;--bg2:#140f17;--card:#261d2b;--card2:#31263a;--line:#3f3149;--text:#d6cbc4;--strong:#f1e8d9;--muted:#a99caa;--zer:#d4ad62;--zer-ink:#241a08;--seal:#d4ad62;--ink:#f1e8d9;--lal:#d0434a;--lal-t:#ee8a8f;--ok:#8fbf9a;--run:#8db4e2;--shade:rgba(0,0,0,.28);--veil:rgba(255,255,255,.08);--shadow:rgba(0,0,0,.45);--back:rgba(0,0,0,.55);
   --display:"El Messiri",ui-serif,"New York","Iowan Old Style",Georgia,serif;--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
   --ease-out:cubic-bezier(.23,1,.32,1);--ease-drawer:cubic-bezier(.32,.72,0,1);--safe-t:env(safe-area-inset-top);--safe-r:env(safe-area-inset-right);--safe-b:env(safe-area-inset-bottom);--safe-l:env(safe-area-inset-left);font:16px/1.4 -apple-system,system-ui,"Segoe UI",sans-serif}
 /* Daylight: warm sized paper, neither pink nor yellow; aubergine stays in the ink. Gold and ruby darken so they still read as text. theme.js sets data-theme from the system, or from your choice. */
-:root[data-theme=light]{color-scheme:light;--bg:#f0eee8;--bg2:#e6e3da;--card:#fbfaf6;--card2:#e2dfd5;--line:#d6d2c6;--text:#35312c;--strong:#1a1714;--muted:#615b51;--zer:#6f4c08;--zer-ink:#241a08;--seal:#cfa24c;--ink:#47294f;--lal:#b3262e;--lal-t:#a0212a;--ok:#27603a;--shade:rgba(55,48,36,.08);--veil:rgba(55,48,36,.08);--shadow:rgba(45,38,28,.2);--back:rgba(30,26,20,.4)}
+:root[data-theme=light]{color-scheme:light;--bg:#f0eee8;--bg2:#e6e3da;--card:#fbfaf6;--card2:#e2dfd5;--line:#d6d2c6;--text:#35312c;--strong:#1a1714;--muted:#615b51;--zer:#6f4c08;--zer-ink:#241a08;--seal:#cfa24c;--ink:#47294f;--lal:#b3262e;--lal-t:#a0212a;--ok:#27603a;--run:#1f5a8c;--shade:rgba(55,48,36,.08);--veil:rgba(55,48,36,.08);--shadow:rgba(45,38,28,.2);--back:rgba(30,26,20,.4)}
 @font-face{font-family:"El Messiri";src:url(elmessiri.woff2) format("woff2");font-weight:400 700;font-display:swap}
 /* Changing theme: the new colours spread from the button that was pressed. */
 .theme-turn::view-transition-old(root){animation:none;mix-blend-mode:normal}
@@ -107,7 +107,9 @@ button.loading::after{content:"";position:absolute;left:calc(50% - 8px);top:calc
 .state .d{width:8px;height:8px;border-radius:50%;background:var(--muted)}
 .b-blocked .state{color:var(--zer)}.b-blocked .d{background:var(--seal)}
 .two-seals .state{color:var(--lal-t)}.two-seals .d{background:var(--lal)}
-.b-working .state{color:var(--text)}.b-working .d{background:var(--strong);animation:pulse 1.3s infinite}
+.b-working .state{color:var(--run)}.b-working .d{background:var(--run);animation:pulse 1.3s infinite}
+.b-working .blink{animation:blink 1.3s ease-in-out infinite}@keyframes blink{50%{opacity:.45}}
+.b-idle .state{color:var(--muted)}
 .b-done .state{color:var(--ok)}.b-done .d{background:var(--ok)}
 @keyframes pulse{50%{opacity:.35}}
 .c-title{font-size:13px;color:var(--text);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -277,7 +279,7 @@ input::placeholder,textarea::placeholder{color:var(--muted);opacity:1}
 .toast.out{opacity:0;transform:translateY(-6px);transition:opacity .18s,transform .18s var(--ease-out)}
 @media (prefers-reduced-motion:reduce){
   #session,.card,.prompt,.sheet-back,.sheet,.toast{animation:fade .15s ease-out both!important}
-  .b-working .state .d,.hint,details.sub .sub-mark,.receipt .leg,.receipt svg,.mark.draw *,.stamp svg,button.loading::after{animation:none!important}
+  .b-working .state .d,.b-working .blink,.hint,details.sub .sub-mark,.receipt .leg,.receipt svg,.mark.draw *,.stamp svg,button.loading::after{animation:none!important}
   button{transition:opacity .15s ease,background .15s ease!important}
   button:active{transform:none!important}
   .sheet{transition:opacity .15s ease-out!important}
