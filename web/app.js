@@ -551,6 +551,7 @@ async function loadChat(first = false) {
       if (anchor !== null) { state.conversation = r.conversation; request.again = true; return; }
     }
     state.conversation = r.conversation;
+    if (state.anchor !== null && r.start > state.anchor) forgetPast();  // better to load again than to show a hole
     if (state.anchor === null) state.start = r.start ?? null;
     const key = JSON.stringify([r.messages.length, r.messages.at(-1), r.hint, r.messages.map(subSig).join()]);
     settleOutbox(pane, r.messages);

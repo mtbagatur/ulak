@@ -871,8 +871,6 @@ async def chat(pane: str, limit: int = 60, anchor: int | None = Query(None, alia
         if path:
             try:
                 messages, _, start = await asyncio.to_thread(claude_page, path, start=anchor, max_messages=max(10, min(limit, 200)))
-                if anchor is not None:
-                    start = anchor
                 source = "transcript"
             except OSError:
                 messages = None

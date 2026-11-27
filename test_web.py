@@ -58,6 +58,7 @@ class FakeAPI:
         self.presence = []
         self.fail_prompt = False
         self.pins = []
+        self.moved = None
         self.start, self.conversation, self.conversations, self.pages, self.anchors = None, "one", [], {}, []
         self.respond = threading.Event()
         self.respond.set()
@@ -123,7 +124,7 @@ class Handler(SimpleHTTPRequestHandler):
             self.json({
                 "messages": self.api.messages, "source": "transcript", "prompt": self.api.approval,
                 "status": item["status"], "session": item, "receipt": self.api.receipt,
-                "start": int(anchor) if anchor else self.api.start, "conversation": self.api.conversation,
+                "start": self.api.moved or (int(anchor) if anchor else self.api.start), "conversation": self.api.conversation,
             })
         elif self.path.startswith("/api/sessions/fake%3Ap1/history?"):
             page = self.api.pages.get(self.path.partition("?")[2])
@@ -1455,3 +1456,15 @@ def test_an_earlier_conversation_opens_read_only(api_fixture):
     chrome.click("#sheet .past-more")
     chrome.wait("document.querySelector('#sheet .past-chat .msg').textContent === 'first 0' && !document.querySelector('#sheet .past-more')")
     assert chrome.js("document.querySelectorAll('#sheet textarea, #sheet input').length") == 0
+
+
+def test_older_messages_are_dropped_rather_than_left_with_a_hole(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    api.start, api.pages = 500, {"before=500": {"messages": said("old", 2), "start": 100}}
+    open_first(chrome, url)
+    chrome.click(EARLIER)
+    chrome.wait("document.querySelectorAll('#messages .msg').length === 3")
+    api.moved = 900  # the server could not reach back to the anchor any more
+    chrome.wait("document.querySelectorAll('#messages .msg').length === 1")
+    chrome.wait(f"document.querySelector('{EARLIER}').textContent === 'Load earlier'")

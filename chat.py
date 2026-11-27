@@ -229,7 +229,7 @@ ANCHOR_BYTES = 4_000_000  # the most a phone that scrolled back is sent again on
 def claude_page(path, end=None, start=None, max_messages=60, tail_bytes=700_000):
     """A stretch of a transcript -> (messages, model, offset of the line the first one came from; 0 when nothing is older).
 
-    With `start`, everything from that offset on; otherwise the last messages before `end`. Pages are cut between lines."""
+    With `start`, everything from that offset on (a later offset if that is out of reach); otherwise the last messages before `end`. Pages are cut between lines."""
     with Path(path).open("rb") as f:
         size = f.seek(0, 2)
         end = size if end is None else min(end, size)
@@ -237,15 +237,17 @@ def claude_page(path, end=None, start=None, max_messages=60, tail_bytes=700_000)
         while True:
             begin = max(0, end - window) if start is None else max(min(start, end), end - ANCHOR_BYTES)
             msgs, offsets, model = _parse(_whole_lines(f, begin, end))
-            if msgs or begin == 0 or start is not None:
+            if begin == 0 or start is not None or len(msgs) >= min(max_messages, 20) or msgs and window >= ANCHOR_BYTES:
                 break
-            window *= 2  # one line wider than the window
+            window *= 2  # screenshots and long tool output make lines wider than the window
     older = begin > 0
     if start is None and len(msgs) > max_messages:
         cut = offsets[-max_messages]
         keep = offsets.index(cut)
         older = older or keep > 0
         msgs, offsets = msgs[keep:], offsets[keep:]
+    if start is not None and begin <= start:
+        return msgs, pretty_model(model), start
     return msgs, pretty_model(model), offsets[0] if msgs and older else 0
 
 

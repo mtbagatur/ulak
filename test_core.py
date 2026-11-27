@@ -419,6 +419,7 @@ def test_destructive_deny_is_one_step(monkeypatch):
 
 
 # --- v2 tests: transcript cleaning, choices, push payload, sorting ---
+import chat as chat_module
 from chat import clean_transcript, screen_chat, preview_from_screen, detect_model, claude_chat, claude_page, pretty_model
 from core import parse_prompt, build_push, bucket, project_name
 FX = Path(__file__).parent / "fixtures"
@@ -1980,3 +1981,17 @@ def test_a_pane_without_a_transcript_has_no_history(monkeypatch, tmp_path):
     api.sessions["w9:p1"]["agent"] = "codex"
     assert c.get("/api/sessions/w9:p1/conversations", headers=h).json() == {"items": []}
     assert c.get("/api/sessions/w9:p1/history", headers=h).status_code == 404
+
+
+def test_an_anchor_too_far_behind_says_where_it_really_starts(monkeypatch, tmp_path):
+    c, h, now = _history(monkeypatch, tmp_path)
+    anchor = c.get("/api/sessions/w9:p1/chat", headers=h).json()["start"]
+    monkeypatch.setattr(chat_module, "ANCHOR_BYTES", 600)
+    r = c.get(f"/api/sessions/w9:p1/chat?from={anchor}", headers=h).json()
+    assert r["start"] > anchor and r["messages"][0]["ts"] != "t20"
+
+
+def test_a_page_of_heavy_lines_still_brings_a_screenful(tmp_path):
+    log = _lines(tmp_path / "a.jsonl", "/p", 60, size=300)   # about 700 bytes a line
+    msgs, _, start = claude_page(log, tail_bytes=2000)
+    assert len(msgs) >= 20 and start > 0
