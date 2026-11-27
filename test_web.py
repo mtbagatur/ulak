@@ -57,6 +57,7 @@ class FakeAPI:
         self.cards = [card("blocked", pending=APPROVAL)]
         self.limits = []
         self.push_tests = []
+        self.uploads = []
         self.push_test_reply = {"ok": True, "code": 201}
         self.messages = [{"role": "assistant", "text": "Example answer"}]
         self.source = "transcript"
@@ -203,6 +204,12 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         api = self.api
+        if self.path == "/api/sessions/fake%3Ap1/upload":
+            data = self.rfile.read(int(self.headers["Content-Length"]))
+            kind = self.headers["Content-Type"]
+            api.uploads.append((kind, data[:4]))
+            self.json({"ok": True, "path": f"/tmp/up-{len(api.uploads)}", "bytes": len(data), **({"meta": "kept"} if kind == "image/heic" else {"meta": "removed"} if kind == "image/jpeg" else {})})
+            return
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         if self.path == "/api/presence":
             api.presence.append(body)
@@ -2170,3 +2177,32 @@ def test_an_approval_with_hidden_characters_warns_and_cannot_be_approved_from_th
     assert chrome.js("document.querySelector('#promptZone [data-d=always]') === null")
     note = chrome.js("(() => { const r = document.querySelector('#promptZone .hidden-note').getBoundingClientRect(); return [r.width > 0, r.right <= innerWidth]; })()")
     assert note == [True, True]
+
+
+# --- Yayın 1b: what a photo says about where it was taken ---
+PICK = """(async (name, type, real) => {
+    let bytes = new Uint8Array([1, 2, 3, 4, 5]);
+    if (real) { const c = document.createElement('canvas'); c.width = 40; c.height = 20; c.getContext('2d').fillRect(0, 0, 40, 20);
+                bytes = new Uint8Array(await (await new Promise(done => c.toBlob(done, 'image/png'))).arrayBuffer()); }
+    const dt = new DataTransfer(); dt.items.add(new File([bytes], name, {type}));
+    const input = document.querySelector('#fileIn'); input.files = dt.files; input.dispatchEvent(new Event('change'));
+})"""
+
+
+def test_a_heic_photo_is_redrawn_before_it_leaves_the_phone_and_the_owner_hears_when_it_could_not_be(api_fixture):
+    chrome, api, url = api_fixture
+    open_first(chrome, url)
+    chrome.js(PICK + "('IMG_1.HEIC', 'image/heic', true)")  # a picture this browser can draw
+    chrome.wait("document.querySelector('#message').value.includes('/tmp/up-1')")
+    assert api.uploads[0] == ("image/jpeg", b"\xff\xd8\xff\xe0")
+    assert chrome.js("[...document.querySelectorAll('#toasts .toast')].map(el => el.textContent)") == ["File attached. Add a note and send."]
+    chrome.js(PICK + "('IMG_2.HEIC', 'image/heic', false)")  # one it cannot
+    chrome.wait("document.querySelector('#message').value.includes('/tmp/up-2')")
+    assert api.uploads[1] == ("image/heic", b"\x01\x02\x03\x04")
+    chrome.wait("[...document.querySelectorAll('#toasts .toast')].some(el => el.textContent === 'File attached. Where and with what this photo was taken may still be in it.')")
+    chrome.js(PICK + "('notes.txt', 'text/plain', false)")
+    chrome.wait("document.querySelector('#message').value.includes('/tmp/up-3')")
+    assert api.uploads[2] == ("text/plain", b"\x01\x02\x03\x04")
+    chrome.js(PICK + "('shot.png', 'image/png', true)")
+    chrome.wait("document.querySelector('#message').value.includes('/tmp/up-4')")
+    assert api.uploads[3] == ("image/png", b"\x89PNG")

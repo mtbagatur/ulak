@@ -2350,3 +2350,76 @@ def test_an_approval_names_its_hidden_chars_and_shows_where_they_are():
     assert dirty["hidden"] == ["U+200B"] and word[0] + "⟨U+200B⟩" + word[1:] in dirty["details"] and "​" not in dirty["details"]
     assert dirty["fingerprint"] != plain["fingerprint"]  # a different command is a different request
     assert parse_prompt("nothing is being asked here", "codex") is None
+
+
+# --- Yayın 1b: what a photo says about where it was taken ---
+def _seg(marker, payload):
+    return bytes([0xFF, marker]) + (len(payload) + 2).to_bytes(2, "big") + payload
+
+
+def _exif(orientation, order="II"):
+    put = (lambda n, size: n.to_bytes(size, "little")) if order == "II" else (lambda n, size: n.to_bytes(size, "big"))
+    entry = lambda tag, kind, value: put(tag, 2) + put(kind, 2) + put(1, 4) + (put(value, 2) + b"\0\0" if kind == 3 else put(value, 4))
+    ifd = put(2, 2) + entry(0x0112, 3, orientation) + entry(0x8825, 4, 38) + put(0, 4)  # 0x8825 points at the GPS block
+    return b"Exif\0\0" + order.encode() + put(42, 2) + put(8, 4) + ifd + b"GPS 40.1885N 29.0610E iPhone 17"
+
+
+def _jpeg(orientation=6, order="II", tail=b""):
+    scan = b"\x12\xff\x00\x34\xff\xd0\x56"  # entropy data with a stuffed FF and a restart marker
+    return (b"\xff\xd8" + _seg(0xE0, b"JFIF\0\x01\x02\0\0\x01\0\x01\0\0") + _seg(0xE1, _exif(orientation, order))
+            + _seg(0xE1, b"http://ns.adobe.com/xap/1.0/\0<x:xmpmeta>home</x:xmpmeta>") + _seg(0xE2, b"ICC_PROFILE\0\x01\x01profile")
+            + _seg(0xE2, b"MPF\0second picture") + _seg(0xED, b"Photoshop 3.0\0caption") + _seg(0xFE, b"taken at home")
+            + _seg(0xDB, b"\0" + bytes(64)) + _seg(0xC2, bytes(15)) + _seg(0xC4, bytes(20))
+            + _seg(0xDA, bytes(10)) + scan + _seg(0xC4, bytes(5)) + _seg(0xDA, bytes(8)) + scan + b"\xff\xd9" + tail)
+
+
+def _orientation(data):
+    at = data.find(b"Exif\0\0")
+    if at < 0:
+        return None
+    tiff = data[at + 6:]
+    assert tiff[:8] == b"MM\x00\x2a\x00\x00\x00\x08" and tiff[8:12] == b"\x00\x01\x01\x12"
+    return int.from_bytes(tiff[18:20], "big")
+
+
+@pytest.mark.parametrize("order", ["II", "MM"])
+def test_a_photo_loses_where_and_with_what_it_was_taken_but_stays_upright(order):
+    from core import strip_jpeg
+    clean = strip_jpeg(_jpeg(6, order, tail=b"\xff\xd8 a second picture with its own GPS \xff\xd9"))
+    for gone in (b"GPS", b"iPhone", b"ns.adobe.com", b"home", b"Photoshop", b"MPF", b"second picture"):
+        assert gone not in clean
+    assert clean.startswith(b"\xff\xd8" + _seg(0xE0, b"JFIF\0\x01\x02\0\0\x01\0\x01\0\0")) and clean.endswith(b"\xff\xd9")
+    assert _seg(0xE2, b"ICC_PROFILE\0\x01\x01profile") in clean  # colours stay as they were
+    picture = _jpeg(6, order)
+    assert clean.endswith(picture[picture.index(b"\xff\xdb"):])  # the picture itself is the same bytes
+    assert _orientation(clean) == 6
+    assert strip_jpeg(clean) == clean
+
+
+def test_an_upright_photo_keeps_no_exif_at_all():
+    from core import strip_jpeg
+    assert b"Exif" not in strip_jpeg(_jpeg(1)) and b"Exif" not in strip_jpeg(_jpeg(0)) and b"Exif" not in strip_jpeg(_jpeg(9))
+
+
+@pytest.mark.parametrize("data", [b"", b"\x89PNG\r\n\x1a\n", b"\xff\xd8", _jpeg()[:60], _jpeg()[:-2], _jpeg()[:-12], b"\xff\xd8\xff\xe1\x00\x01", b"\xff\xd8\xff\xe1\x00\x08Exif\0\0\xff\xd9",
+                                  b"\xff\xd8" + _seg(0xE1, b"Exif\0\0II\x2a\x00\xff\xff\xff\xff") + _seg(0xDA, b"") + b"\xff\xd9"])
+def test_what_is_not_a_whole_jpeg_is_left_alone_or_cleaned_never_an_error(data):
+    from core import strip_jpeg
+    out = strip_jpeg(data)
+    assert out is None or (out.startswith(b"\xff\xd8") and out.endswith(b"\xff\xd9") and b"Exif" not in out)
+
+
+def test_upload_cleans_a_jpeg_and_says_when_it_could_not(monkeypatch, tmp_path):
+    fake, c, h = _setup(monkeypatch, CODEX)
+    monkeypatch.setattr(api, "STATE", tmp_path)
+    post = lambda kind, data: c.post("/api/sessions/w9:p1/upload", headers={**h, "Content-Type": kind}, content=data).json()
+    r = post("image/jpeg", _jpeg(6))
+    saved = open(r["path"], "rb").read()
+    assert r["meta"] == "removed" and b"GPS" not in saved and r["bytes"] == len(saved) and _orientation(saved) == 6
+    broken = _jpeg()[:-12]
+    r = post("image/jpeg", broken)
+    assert r["meta"] == "kept" and open(r["path"], "rb").read() == broken
+    assert post("image/heic", b"....ftypheic")["meta"] == "kept"
+    r = post("image/heif", b"....ftypheic")
+    assert r["meta"] == "kept" and r["path"].endswith(".heic")
+    assert "meta" not in post("application/pdf", b"%PDF-1.7") and "meta" not in post("image/png", b"\x89PNG-data")

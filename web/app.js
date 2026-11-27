@@ -1135,19 +1135,35 @@ $('#composer').addEventListener('submit', async e => {
 });
 // attach: upload the file to the server, then put its path in the draft (agents read files by path)
 $('#attachBtn').onclick = () => $('#fileIn').click();
+// iPhone photos (HEIC) carry where and with what they were taken, and the server cannot rewrite that format.
+// Drawing the picture again leaves only the picture; a JPEG goes as it is and the server cleans it without touching the image.
+async function redrawAsJpeg(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image(); img.src = url; await img.decode();
+    const scale = Math.min(1, 4096 / Math.max(img.naturalWidth, img.naturalHeight));  // iOS refuses a canvas much larger than this
+    const c = document.createElement('canvas'); c.width = Math.round(img.naturalWidth * scale); c.height = Math.round(img.naturalHeight * scale);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    return await new Promise(done => c.toBlob(done, 'image/jpeg', 0.9));
+  } catch { return null; } finally { URL.revokeObjectURL(url); }
+}
 $('#fileIn').onchange = async e => {
   const files = [...e.target.files]; e.target.value = ''; if (!files.length) return;
   const btn = $('#attachBtn');
   const paths = [];
+  let kept = false;
   const r = await act(btn, async () => {
     for (const f of files) {  // one upload per file, sequential; paths are collected as they succeed
+      const body = /^image\/hei[cf]$/.test(f.type) && await redrawAsJpeg(f) || f;
       let res;
-      try { res = await fetch(`/api/sessions/${encodeURIComponent(state.current)}/upload`, {method: 'POST', headers: {'Content-Type': f.type || 'application/octet-stream'}, body: f}); } catch { throw new Error(t('offline')); }
+      try { res = await fetch(`/api/sessions/${encodeURIComponent(state.current)}/upload`, {method: 'POST', headers: {'Content-Type': body.type || 'application/octet-stream'}, body}); } catch { throw new Error(t('offline')); }
       if (!res.ok) { let m = `${res.status}`; try { m = (await res.json()).detail || m; } catch {} throw new Error(errText(m)); }
-      paths.push((await res.json()).path);
+      const out = await res.json();
+      paths.push(out.path); kept = kept || out.meta === 'kept';
     }
+    toast(t(kept ? 'attachedKept' : 'attached'), kept ? '' : 'ok');
     return true;
-  }, t('attached'));
+  });
   if (paths.length) { ta.value = (ta.value ? ta.value.replace(/\s*$/, ' ') : '') + paths.join(' ') + ' '; store.set('draft:' + state.current, ta.value); autosize(); ta.focus(); }
 };
 // keep the composer above the iOS keyboard

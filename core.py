@@ -478,6 +478,78 @@ def clean_subscription(body):
     return {"endpoint": endpoint, "keys": kept, "lang": "tr" if body.get("lang") == "tr" else "en"}
 
 
+def _jpeg_orientation(exif):
+    """The orientation tag (1-8) of an Exif block, or None."""
+    tiff = exif[6:]
+    order = {b"II": "little", b"MM": "big"}.get(tiff[:2])
+    if not order or len(tiff) < 8:
+        return None
+    num = lambda at, size: int.from_bytes(tiff[at:at + size], order)
+    at = num(4, 4)
+    if at + 2 > len(tiff):
+        return None
+    for i in range(min(num(at, 2), 200)):
+        entry = at + 2 + 12 * i
+        if entry + 12 > len(tiff):
+            return None
+        if num(entry, 2) == 0x0112:
+            value = num(entry + 8, 2)
+            return value if 1 <= value <= 8 else None
+    return None
+
+
+def strip_jpeg(data):
+    """A JPEG without what it says about its taking: place, device, time, captions, and any second picture packed behind it.
+
+    The picture itself is the same bytes. A photo held sideways keeps the one tag that says so, or it would show lying down.
+    Returns None when `data` is not a JPEG that can be walked from start to end."""
+    data = bytes(data)
+    if data[:2] != b"\xff\xd8":
+        return None
+    head, tail, at, turn = [], None, 2, None
+    while tail is None:  # the segments before the picture
+        if data[at:at + 1] != b"\xff" or at + 4 > len(data):
+            return None
+        marker = data[at + 1]
+        if marker == 0xFF:  # padding
+            at += 1
+            continue
+        size = int.from_bytes(data[at + 2:at + 4], "big")
+        if size < 2 or at + 2 + size > len(data) or marker in (0xD8, 0xD9) or 0xD0 <= marker <= 0xD7:
+            return None
+        body = data[at + 4:at + 2 + size]
+        if marker == 0xDA:
+            tail = at
+        elif marker == 0xE1 and body[:6] == b"Exif\0\0":
+            turn = turn or _jpeg_orientation(body)
+        elif not (0xE0 <= marker <= 0xEF or marker == 0xFE) or marker in (0xE0, 0xEE) or marker == 0xE2 and body[:12] == b"ICC_PROFILE\0":
+            head.append(data[at:at + 2 + size])  # tables, frame, colour: what drawing needs
+        if tail is None:
+            at += 2 + size
+    at += 2 + int.from_bytes(data[at + 2:at + 4], "big")
+    while True:  # the picture: scans, with tables between them, up to the end marker
+        at = data.find(b"\xff", at)
+        if at < 0 or at + 2 > len(data):
+            return None
+        marker = data[at + 1]
+        if marker in (0x00, 0xFF) or 0xD0 <= marker <= 0xD7:
+            at += 1 if marker == 0xFF else 2
+            continue
+        if marker == 0xD9:
+            end = at + 2
+            break
+        size = int.from_bytes(data[at + 2:at + 4], "big")
+        if size < 2 or at + 2 + size > len(data):
+            return None
+        at += 2 + size
+    keep = b""
+    if turn and turn != 1:
+        exif = b"Exif\0\0MM\x00\x2a\x00\x00\x00\x08\x00\x01\x01\x12\x00\x03\x00\x00\x00\x01" + bytes([0, turn, 0, 0]) + b"\x00\x00\x00\x00"
+        keep = b"\xff\xe1" + (len(exif) + 2).to_bytes(2, "big") + exif
+    first = next((i for i, seg in enumerate(head) if seg[1] != 0xE0), len(head))  # JFIF's own header stays first
+    return b"\xff\xd8" + b"".join(head[:first]) + keep + b"".join(head[first:]) + data[tail:end]
+
+
 def parse_codex_limits(lines, mtime=None):
     """Newest `rate_limits` in a Codex rollout (JSONL lines) as a limits provider, or None."""
     for line in reversed(lines):

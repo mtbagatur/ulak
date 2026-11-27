@@ -20,7 +20,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 
 from chat import claude_chat, claude_meters, claude_page, claude_path, earlier_conversations, detect_model, preview_from_screen, screen_chat, SPINNER, strip_ansi
-from core import NotificationGate, tidy_details, bucket, build_push, clean_subscription, push_topic, is_destructive, parse_approval, parse_codex_limits, parse_limits, parse_prompt, project_name, status_rank, slash_commands, changes
+from core import NotificationGate, tidy_details, bucket, build_push, clean_subscription, push_topic, strip_jpeg, is_destructive, parse_approval, parse_codex_limits, parse_limits, parse_prompt, project_name, status_rank, slash_commands, changes
 from herdr_client import HerdrClient, HerdrError, HerdrUnavailable
 
 ROOT = Path(__file__).parent
@@ -1263,7 +1263,7 @@ def codex_limits():
     return None
 
 
-UPLOAD_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif", "image/heic": ".heic", "application/pdf": ".pdf", "text/plain": ".txt"}
+UPLOAD_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif", "image/heic": ".heic", "image/heif": ".heic", "application/pdf": ".pdf", "text/plain": ".txt"}
 UPLOAD_MAX = 15 * 1024 * 1024
 VIEWABLE_SUFFIXES = {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".heic", ".txt", ".md", ".csv", ".json"}
 
@@ -1306,8 +1306,14 @@ async def upload(pane: str, request: Request):
     folder.mkdir(parents=True, exist_ok=True)
     prune_uploads()
     path = folder / f"{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(3)}{UPLOAD_TYPES[ctype]}"
+    out = {"ok": True, "path": str(path)}
+    if ctype == "image/jpeg":
+        clean = strip_jpeg(data)  # the agent, and the model behind it, get the picture and not where it was taken
+        data, out["meta"] = (clean, "removed") if clean else (data, "kept")
+    elif ctype in ("image/heic", "image/heif"):
+        out["meta"] = "kept"  # the phone redraws these before sending; one that arrives as it was could not be cleaned
     path.write_bytes(data)
-    return {"ok": True, "path": str(path), "bytes": len(data)}
+    return {**out, "bytes": len(data)}
 
 
 @app.get("/api/sessions/{pane}/file")
