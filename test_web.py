@@ -61,6 +61,7 @@ class FakeAPI:
         self.pins = []
         self.moved = None
         self.start, self.conversation, self.conversations, self.pages, self.anchors = None, "one", [], {}, []
+        self.meters, self.clock_shift = {}, 0
         self.respond = threading.Event()
         self.respond.set()
         self.ended = threading.Event()
@@ -126,6 +127,7 @@ class Handler(SimpleHTTPRequestHandler):
                 "messages": self.api.messages, "source": self.api.source, "prompt": self.api.approval,
                 "status": item["status"], "session": item, "receipt": self.api.receipt,
                 "start": self.api.moved or (int(anchor) if anchor else self.api.start), "conversation": self.api.conversation,
+                "meters": self.api.meters, "now": time.time() + self.api.clock_shift,
             })
         elif self.path.startswith("/api/sessions/fake%3Ap1/history?"):
             page = self.api.pages.get(self.path.partition("?")[2])
@@ -1778,3 +1780,138 @@ def test_fold_has_no_motion_when_reduced(api_fixture):
     chrome.cdp("Emulation.setEmulatedMedia", features=[{"name": "prefers-reduced-motion", "value": "reduce"}])
     assert set(chrome.js(duration).split(", ")) == {"0s"}
     assert set(chrome.js("getComputedStyle(document.querySelector('#messages .run .chev')).transitionDuration").split(", ")) == {"0s"}
+
+
+# --- reading: context, cache and limit above the conversation ---
+META = "document.querySelector('#sMeta').textContent"
+SHOWN = "!document.querySelector('#sMeta').hidden"
+RING = "[document.querySelector('#sRing b')?.textContent, document.querySelector('#sRing small')?.textContent]"
+
+
+def meters(tokens=124_300, ttl=3600, age=19 * 60 - 30, shift=0):
+    now = time.time() + shift
+    return {"context": {"tokens": tokens, "ts": now - 120}, "cache": {"ttl": ttl, "since": now - age}}
+
+
+def limit(key, *windows, updated=0):
+    return {"id": key, "label": key.title(), "updated": time.time() - updated, "items": [{"label": label, "used": used, "resets_at": resets} for label, used, resets in windows]}
+
+
+def test_the_header_says_context_and_cache(api_fixture):
+    chrome, api, url = api_fixture
+    api.meters = meters()
+    open_first(chrome, url)
+    chrome.wait(SHOWN)
+    assert chrome.js(META) == "Context 124k · Cache ~41m" and "%" not in chrome.js(META)
+    assert chrome.js("[999, 1000, 124300, 999600, 1240000].map(fmtTokens)") == ["999", "1k", "124k", "1M", "1.2M"]
+    chrome.js("localStorage.setItem('lang', 'tr')")
+    open_first(chrome, url)
+    chrome.wait(SHOWN)
+    assert chrome.js(META) == "Bağlam 124k · Cache ~41 dk"
+
+
+def test_cache_time_follows_the_computers_clock(api_fixture):
+    chrome, api, url = api_fixture
+    api.clock_shift = -7200
+    api.meters = meters(age=30, shift=-7200)
+    open_first(chrome, url)
+    chrome.wait(SHOWN)
+    assert chrome.js(META) == "Context 124k · Cache ~59m"
+
+
+def test_a_cold_cache_says_so(api_fixture):
+    chrome, api, url = api_fixture
+    api.meters = meters(ttl=300, age=400)
+    open_first(chrome, url)
+    chrome.wait(SHOWN)
+    assert chrome.js(META) == "Context 124k · Cache cold"
+
+
+def test_unknown_measures_are_absent_not_zero(api_fixture):
+    chrome, api, url = api_fixture
+    api.meters = {"context": meters()["context"]}
+    open_first(chrome, url)
+    chrome.wait(SHOWN)
+    assert chrome.js(META) == "Context 124k"
+    api.meters = {"cache": meters()["cache"]}
+    chrome.wait(f"{META} === 'Cache ~41m'")
+    api.meters = {}
+    chrome.wait("document.querySelector('#sMeta').hidden")
+    assert chrome.js("document.querySelector('#sRing').hidden")
+    assert chrome.js("getComputedStyle(document.querySelector('#sMeta')).display") == "none"
+
+
+def test_the_ring_carries_the_fullest_live_window_of_this_agent(api_fixture):
+    chrome, api, url = api_fixture
+    soon = time.time() + 3600
+    api.limits = [limit("claude", ("5h", 93, soon), ("7d", 57, soon)), limit("codex", ("5h", 99, None))]
+    open_first(chrome, url)
+    chrome.wait("!document.querySelector('#sRing').hidden")
+    assert chrome.js(RING) == ["93", "5h"]
+    assert chrome.js("(() => { const r = document.querySelector('#sRing').getBoundingClientRect(); return r.width >= 44 && r.height >= 44; })()")
+    assert chrome.js("document.querySelector('#sRing').getAttribute('aria-label')") == "Claude 5h: 93% used"
+    assert not chrome.js("document.querySelector('#sRing').classList.contains('stale')")
+    api.limits = [limit("claude", ("5h", 93, time.time() - 60), ("7d", 57, soon), updated=3600)]
+    chrome.js("loadLimits()")
+    chrome.wait(f"{RING}.join() === '57,wk'")
+    assert chrome.js("document.querySelector('#sRing').classList.contains('stale')")
+    api.limits = [limit("claude", ("7d", 94, None))]
+    chrome.js("loadLimits()")
+    chrome.wait(f"{RING}.join() === '94,wk'")
+    token = chrome.js("(() => { const p = document.createElement('i'); p.style.color = 'var(--zer)'; document.body.append(p); const c = getComputedStyle(p).color; p.remove(); return c; })()")
+    assert chrome.js("getComputedStyle(document.querySelector('#sRing .fill')).stroke") == token
+    assert chrome.js("document.querySelector('#sRing .fill').getAttribute('stroke-dasharray')") == "94 100"
+    api.limits = [limit("codex", ("5h", 99, None)), limit("claude", ("monthly", 12, time.time() - 5))]
+    chrome.js("loadLimits()")
+    chrome.wait("document.querySelector('#sRing').hidden")
+    chrome.js("localStorage.setItem('lang', 'tr')")
+    api.limits = [limit("claude", ("5h", 20, None), ("7d", 10, None))]
+    open_first(chrome, url)
+    chrome.wait(f"{RING}.join() === '20,5s'")
+
+
+def test_the_meter_sheet_names_source_and_age(api_fixture):
+    chrome, api, url = api_fixture
+    api.meters = meters()
+    api.limits = [limit("claude", ("5h", 93, time.time() + 3600), ("7d", 57, None), updated=3600)]
+    open_first(chrome, url)
+    chrome.wait(SHOWN + " && !document.querySelector('#sRing').hidden")
+    rows = "[...document.querySelectorAll('#sheet .meter')].map(e => e.textContent)"
+    for opener in ("#sMeta", "#sRing"):
+        chrome.click(opener)
+        chrome.wait("document.querySelectorAll('#sheet .meter').length === 4")
+        context, cache, five, week = chrome.js(rows)
+        assert "Context" in context and "124,300 tokens" in context and "from the session record, 2m ago" in context
+        assert "~41m left" in cache and "1 hour" in cache and "from the session record" in cache and "ago" in cache
+        assert "5h" in five and "93% used" in five and "account-wide, from your limits file" in five and "1h 0m ago" in five
+        assert "7d" in week and "57% used" in week
+        assert chrome.js("[...document.querySelectorAll('#sheet .meter')].map(e => !!e.querySelector('.bar'))") == [False, False, True, True]
+        chrome.js("hideSheet()")
+        chrome.wait("document.querySelector('#sheet .meter') === null")
+    api.meters, api.limits = {"context": meters()["context"]}, [limit("codex", ("5h", 9, None))]
+    api.cards = [card("idle", agent="codex")]
+    chrome.js("loadLimits()")
+    chrome.wait(f"{RING}.join() === '9,5h' && {META} === 'Context 124k'")
+    chrome.click("#sRing")
+    chrome.wait("document.querySelectorAll('#sheet .meter').length === 2")
+    assert "account-wide, from Codex records or your limits file" in chrome.js(rows)[1]
+
+
+def test_meters_do_not_leak_into_the_next_session(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    api.meters = meters()
+    api.cards = [card("idle", project="a-project-with-a-very-long-name-indeed")]
+    chrome.resize(320, 700)
+    open_first(chrome, url)
+    chrome.wait(SHOWN)
+    assert chrome.js("document.documentElement.scrollWidth") <= 320
+    assert chrome.js("document.querySelector('#session .top').scrollWidth <= document.querySelector('#session .top').clientWidth")
+    reach = chrome.js("(() => { const m = document.querySelector('#sMeta'), r = m.getBoundingClientRect(); let n = 0; for (let y = Math.floor(r.top) - 12; y < r.bottom + 16; y++) if (document.elementFromPoint(r.left + 6, y)?.closest('#sMeta')) n++; return n; })()")
+    assert reach >= 24
+    api.fail_chat = True
+    chrome.click("#back")
+    chrome.wait("document.querySelector('#session').hidden")
+    chrome.click(".card-open")
+    chrome.wait("!document.querySelector('#session').hidden")
+    assert chrome.js("document.querySelector('#sMeta').hidden")

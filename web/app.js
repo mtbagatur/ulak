@@ -402,13 +402,95 @@ function showHome() {
   if (from) ([...document.querySelectorAll('.card')].find(el => el.dataset.key === from)?.querySelector('.card-open') || $('#newSession')).focus({preventScroll: true});
 }
 
+// ---------- limits ----------
+let limitData = null;
+const lvl = used => used >= 85 ? 'hot' : used >= 60 ? 'warn' : 'ok';
+function fmtIn(secs) {
+  if (secs <= 0) return t('justNow');
+  const d = Math.floor(secs / 86400), h = Math.floor(secs % 86400 / 3600), m = Math.floor(secs % 3600 / 60);
+  return d ? `${d}${t('day')} ${h}${t('hour')}` : h ? `${h}${t('hour')} ${m}${t('min')}` : `${Math.max(1, m)}${t('min')}`;
+}
+const resetText = (ts, now) => ts ? t('resets', {t: t('resetsIn', {t: fmtIn(ts - now)})}) : '';
+function renderLimits() {
+  const box = $('#limits');
+  const ps = limitData && limitData.providers || [];
+  box.hidden = !ps.length;
+  if (!ps.length) return;
+  const now = Date.now() / 1000;
+  // Three or more providers do not fit a phone with the window name; the name stays one tap away.
+  const tight = ps.length > 2;
+  box.classList.toggle('tight', tight);
+  box.innerHTML = ps.map(p => {
+    const show = [[...p.items].sort((a, b) => b.used - a.used)[0]];  // the tightest window; details on tap
+    const stale = p.updated && now - p.updated > 1800;
+    return `<span class="lim${stale ? ' stale' : ''}"><b>${esc(p.label)}</b>${show.map(i => `<span class="lv ${lvl(i.used)}" title="${esc(i.label)}"><i style="width:${Math.min(100, i.used)}%"></i></span><em>${tight ? '' : esc(i.label.split(' · ').pop()) + ' '}${i.used}%</em>`).join('')}</span>`;
+  }).join('');
+}
+function limitsSheet() {
+  const now = Date.now() / 1000;
+  const ps = limitData && limitData.providers || [];
+  const body = ps.length ? ps.map(p => {
+    const stale = p.updated && now - p.updated > 1800;
+    return `<section class="lp"><h4>${esc(p.label)}${stale ? `<small>${esc(t('stale', {t: fmtIn(now - p.updated)}))}</small>` : ''}</h4>${p.items.map(i => `<div class="li"><div class="lt"><span>${esc(i.label)}</span><span>${esc(t('used', {n: i.used}))} · ${esc(t('left', {n: Math.max(0, 100 - i.used)}))}</span></div><div class="lv big ${lvl(i.used)}"><i style="width:${Math.min(100, i.used)}%"></i></div><small>${esc(resetText(i.resets_at, now))}</small></div>`).join('')}</section>`;
+  }).join('') : `<div class="empty">${esc(t('noLimits'))}</div>`;
+  showSheet(`<h3>${esc(t('limitsTitle'))}</h3><div class="scroll" style="max-height:65vh">${body}</div>`);
+}
+async function loadLimits() {
+  try { limitData = await api('/api/limits'); renderLimits(); renderMeters(); } catch {}
+}
+// ---------- what this session has used: context, cache, limit ----------
+// Only what is known is shown. A number nobody measured is left out, not guessed.
+const fmtTokens = n => n < 1000 ? String(n) : n < 999500 ? Math.round(n / 1000) + 'k' : (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+const serverNow = () => Date.now() / 1000 + (state.skew || 0);
+const agoText = secs => secs < 60 ? t('justNow') : t('agoT', {t: fmtIn(secs)});
+const cacheMins = left => Math.max(1, Math.floor(left / 60));
+function cacheLeft() {
+  const c = state.meters?.cache;
+  return c && typeof c.ttl === 'number' && typeof c.since === 'number' ? c.ttl - (serverNow() - c.since) : null;
+}
+// The limit is the account's, for the tool this session runs. A window whose reset time has passed says nothing any more.
+function sessionLimits() {
+  const agent = state.sessions.get(state.current)?.agent, now = serverNow();
+  const p = (limitData?.providers || []).find(p => p.id === agent);
+  const items = (p?.items || []).filter(i => typeof i.used === 'number' && !(typeof i.resets_at === 'number' && i.resets_at <= now));
+  return items.length ? {id: p.id, label: p.label, updated: p.updated, items} : null;
+}
+function renderMeters() {
+  const meta = $('#sMeta'), ring = $('#sRing'), m = state.meters || {}, left = cacheLeft(), bits = [];
+  if (typeof m.context?.tokens === 'number') bits.push(t('ctxShort', {n: `<b>${fmtTokens(m.context.tokens)}</b>`}));
+  if (left !== null) bits.push(left > 0 ? t('cacheShort', {n: `<b>${t('cacheMins', {n: cacheMins(left)})}</b>`}) : esc(t('cacheCold')));
+  put(meta, 'hidden', !bits.length); putHtml(meta, `<span>${bits.join(' · ')}</span>`);
+  const lim = sessionLimits();
+  put(ring, 'hidden', !lim);
+  if (!lim) return;
+  const top = lim.items.reduce((a, b) => b.used > a.used ? b : a), used = Math.max(0, Math.min(100, Math.round(top.used)));
+  const name = String(top.label).split(' · ').pop(), short = {'5h': 'win5h', '7d': 'win7d'}[name];
+  ring.classList.toggle('stale', !!lim.updated && serverNow() - lim.updated > 1800);
+  ring.setAttribute('aria-label', `${lim.label} ${top.label}: ${t('used', {n: top.used})}`);
+  putHtml(ring, `<span class="o"><svg viewBox="0 0 36 36" aria-hidden="true"><circle cx="18" cy="18" r="16"/><circle class="fill" cx="18" cy="18" r="16" pathLength="100" stroke-dasharray="${used} 100"/></svg><b>${used}</b></span><small>${esc(short ? t(short) : name)}</small>`);
+}
+function metersSheet() {
+  const m = state.meters || {}, now = serverNow(), left = cacheLeft(), lim = sessionLimits(), rows = [];
+  const row = (name, value, note, bar) => `<div class="meter"><div class="l"><span>${esc(name)}</span><span>${esc(value)}</span></div>${bar === undefined ? '' : `<div class="bar"><i style="width:${bar}%"></i></div>`}<small>${esc(note)}</small></div>`;
+  const record = ts => typeof ts === 'number' ? `${t('fromRecord')}, ${agoText(now - ts)}` : t('fromRecord');
+  if (typeof m.context?.tokens === 'number') rows.push(row(t('mContext'), t('tokens', {n: m.context.tokens.toLocaleString(LANG === 'tr' ? 'tr-TR' : 'en-US')}), record(m.context.ts)));
+  if (left !== null) rows.push(row(`${t('mCache')} · ${t(m.cache.ttl >= 3600 ? 'cache1h' : 'cache5m')}`, left > 0 ? t('cacheLeft', {n: cacheMins(left)}) : t('cacheCold'), record(m.cache.since)));
+  for (const i of lim?.items || []) rows.push(row(`${lim.label} · ${i.label}`, t('used', {n: i.used}), [resetText(i.resets_at, now), t(lim.id === 'codex' ? 'limCodex' : 'limFile'), lim.updated ? agoText(now - lim.updated) : ''].filter(Boolean).join(' · '), Math.max(0, Math.min(100, i.used))));
+  if (rows.length) showSheet(`<h3>${esc(t('metersTitle'))}</h3><div class="scroll" style="max-height:65vh">${rows.join('')}</div>`);
+}
+$('#sMeta').onclick = $('#sRing').onclick = metersSheet;
+setInterval(() => { if (!document.hidden && state.current) renderMeters(); }, 60000);
+$('#limits').onclick = limitsSheet;
+setInterval(() => { if (!document.hidden) loadLimits(); }, 60000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) loadLimits(); });
+
 // ---------- session screen ----------
 function openSession(pane) {
   if (state.current === pane && !$('#session').hidden) return;
   hideSheet();
   const carry = focusIsIn('#home');
   state.view++;
-  state.current = pane; state.chatHash = ''; state.prompt = null; openRuns.clear();
+  state.current = pane; state.chatHash = ''; state.prompt = null; openRuns.clear(); state.meters = {}; renderMeters();
   state.anchor = state.cursor = state.start = null; state.conversation = undefined;
   loadSlash(pane);
   $('#home').hidden = true; $('#session').hidden = false;
@@ -650,6 +732,9 @@ async function loadChat(first = false) {
     renderReceipt(r.receipt);
     if (state.busy.has(pane)) setPaneActionsBusy(pane, true);
     if (r.session) { state.sessions.set(pane, {...state.sessions.get(pane), ...r.session}); updateSessionHeader(); }
+    state.meters = r.meters || {};
+    if (typeof r.now === 'number') state.skew = r.now - Date.now() / 1000;  // the phone's clock is not the computer's
+    renderMeters();
     chatReadyView = view;
     networkError = false;
     updateConnection();
@@ -1277,46 +1362,6 @@ $('#history').onclick = e => act(e.currentTarget, async () => {
 function histTitle(n) { return n.project ? t(n.status === 'blocked' ? 'needsYouTitle' : 'doneTitle', {p: n.project}) : (n.title || ''); }
 function histBody(n) { const b = n.body || ''; return n.project ? (b || t(n.status === 'blocked' ? 'askBody' : 'finishedBody')) : b; }
 
-// ---------- limits ----------
-let limitData = null;
-const lvl = used => used >= 85 ? 'hot' : used >= 60 ? 'warn' : 'ok';
-function fmtIn(secs) {
-  if (secs <= 0) return t('justNow');
-  const d = Math.floor(secs / 86400), h = Math.floor(secs % 86400 / 3600), m = Math.floor(secs % 3600 / 60);
-  return d ? `${d}${t('day')} ${h}${t('hour')}` : h ? `${h}${t('hour')} ${m}${t('min')}` : `${Math.max(1, m)}${t('min')}`;
-}
-const resetText = (ts, now) => ts ? t('resets', {t: t('resetsIn', {t: fmtIn(ts - now)})}) : '';
-function renderLimits() {
-  const box = $('#limits');
-  const ps = limitData && limitData.providers || [];
-  box.hidden = !ps.length;
-  if (!ps.length) return;
-  const now = Date.now() / 1000;
-  // Three or more providers do not fit a phone with the window name; the name stays one tap away.
-  const tight = ps.length > 2;
-  box.classList.toggle('tight', tight);
-  box.innerHTML = ps.map(p => {
-    const show = [[...p.items].sort((a, b) => b.used - a.used)[0]];  // the tightest window; details on tap
-    const stale = p.updated && now - p.updated > 1800;
-    return `<span class="lim${stale ? ' stale' : ''}"><b>${esc(p.label)}</b>${show.map(i => `<span class="lv ${lvl(i.used)}" title="${esc(i.label)}"><i style="width:${Math.min(100, i.used)}%"></i></span><em>${tight ? '' : esc(i.label.split(' · ').pop()) + ' '}${i.used}%</em>`).join('')}</span>`;
-  }).join('');
-}
-function limitsSheet() {
-  const now = Date.now() / 1000;
-  const ps = limitData && limitData.providers || [];
-  const body = ps.length ? ps.map(p => {
-    const stale = p.updated && now - p.updated > 1800;
-    return `<section class="lp"><h4>${esc(p.label)}${stale ? `<small>${esc(t('stale', {t: fmtIn(now - p.updated)}))}</small>` : ''}</h4>${p.items.map(i => `<div class="li"><div class="lt"><span>${esc(i.label)}</span><span>${esc(t('used', {n: i.used}))} · ${esc(t('left', {n: Math.max(0, 100 - i.used)}))}</span></div><div class="lv big ${lvl(i.used)}"><i style="width:${Math.min(100, i.used)}%"></i></div><small>${esc(resetText(i.resets_at, now))}</small></div>`).join('')}</section>`;
-  }).join('') : `<div class="empty">${esc(t('noLimits'))}</div>`;
-  showSheet(`<h3>${esc(t('limitsTitle'))}</h3><div class="scroll" style="max-height:65vh">${body}</div>`);
-}
-async function loadLimits() {
-  try { limitData = await api('/api/limits'); renderLimits(); } catch {}
-}
-$('#limits').onclick = limitsSheet;
-setInterval(() => { if (!document.hidden) loadLimits(); }, 60000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) loadLimits(); });
-
 // ---------- language ----------
 function refreshLang() {
   applyStaticI18n();
@@ -1325,7 +1370,7 @@ function refreshLang() {
   setQuickLabel();
   state.sessions.size && renderHome();
   renderLimits();
-  if (state.current) { updateSessionHeader(); $('#promptZone').dataset.sig = ''; state.chatHash = ''; loadChat(); }
+  if (state.current) { updateSessionHeader(); renderMeters(); $('#promptZone').dataset.sig = ''; state.chatHash = ''; loadChat(); }
 }
 async function toggleLang() {
   LANG = LANG === 'tr' ? 'en' : 'tr';
