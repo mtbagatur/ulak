@@ -20,7 +20,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 
 from chat import claude_chat, claude_meters, claude_page, claude_path, earlier_conversations, detect_model, preview_from_screen, screen_chat, SPINNER, strip_ansi
-from core import NotificationGate, tidy_details, bucket, build_push, clean_subscription, push_topic, strip_jpeg, is_destructive, parse_approval, parse_codex_limits, parse_limits, parse_prompt, project_name, status_rank, slash_commands, changes
+from core import CSP, NotificationGate, tidy_details, bucket, build_push, clean_subscription, push_topic, strip_jpeg, is_destructive, parse_approval, parse_codex_limits, parse_limits, parse_prompt, project_name, status_rank, slash_commands, changes
 from herdr_client import HerdrClient, HerdrError, HerdrUnavailable
 
 ROOT = Path(__file__).parent
@@ -797,6 +797,9 @@ async def require_identity(request, call_next):
         response = await call_next(request)
     if path.startswith("/static") or path in ("/", "/sw.js", "/manifest.webmanifest"):
         response.headers["Cache-Control"] = "no-cache"
+        response.headers["Content-Security-Policy"] = CSP
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "no-referrer"
     return response
 
 

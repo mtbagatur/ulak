@@ -43,3 +43,10 @@ def test_both_pages_name_everything_the_browser_keeps():
         sentence = re.search(r"[^.\n]*[Tt]he browser keeps[^.\n]*\.", (ROOT / name).read_text())
         assert sentence, name
         assert [w for w in words.values() if w not in sentence[0]] == [], name
+
+
+def test_the_readme_says_which_agents_get_folded_work_and_what_happens_to_a_photo():
+    folds = next(line for line in README.splitlines() if "folds away" in line)
+    assert "Claude Code" in folds and "Other agents" in folds
+    attach = next(line for line in README.splitlines() if line.startswith("- **Attach files.**"))
+    assert "JPEG" in attach and "HEIC" in attach and "strip_jpeg" in APP

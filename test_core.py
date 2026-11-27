@@ -2423,3 +2423,15 @@ def test_upload_cleans_a_jpeg_and_says_when_it_could_not(monkeypatch, tmp_path):
     r = post("image/heif", b"....ftypheic")
     assert r["meta"] == "kept" and r["path"].endswith(".heic")
     assert "meta" not in post("application/pdf", b"%PDF-1.7") and "meta" not in post("image/png", b"\x89PNG-data")
+
+
+# --- Yayın 1b: content security policy ---
+def test_pages_and_scripts_carry_the_content_policy_and_answers_do_not_need_one(monkeypatch):
+    _, c, h = _setup(monkeypatch, CODEX)
+    policy = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self'; "
+              "manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+    for path in ("/", "/static/app.js", "/sw.js", "/manifest.webmanifest"):
+        r = c.get(path, headers=h)
+        assert r.status_code == 200 and r.headers["content-security-policy"] == policy, path
+        assert r.headers["x-content-type-options"] == "nosniff" and r.headers["referrer-policy"] == "no-referrer", path
+    assert "content-security-policy" not in c.get("/api/sessions", headers=h).headers

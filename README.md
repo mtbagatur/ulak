@@ -75,14 +75,14 @@ What Ulak does not do: no terminal, one computer, one person, Herdr only. Conver
 
 - **See what needs you.** Sessions are grouped as Needs you, Working, Just finished (for five minutes) and Idle. Pins live on the server, so every device shows the same list.
 - **Read it like a chat.** Claude Code transcripts become messages with their headings, lists and tables, and code blocks you can copy with one tap. Subagents show as cards that say what they were asked and whether they are done.
-- **Work that went well folds away.** A turn's reads, edits and commands collapse into one line you can open, edits with their diff. A command that failed and a request you refused never fold; they stay in sight.
+- **Work that went well folds away.** In a Claude Code conversation a turn's reads, edits and commands collapse into one line you can open, edits with their diff. Other agents keep no record Ulak can read this way, so theirs is shown as the text on their screen. A command that failed and a request you refused never fold; they stay in sight.
 - **Know how much room is left.** The header of a Claude conversation shows the context in use and how long the prompt cache still lives, both read from the transcript, and a ring for the tightest usage limit. Context and cache are Claude only; the Claude limit needs `limit_files`, Codex limits need no setup.
 - **See the pictures.** An image the conversation points at shows as a thumbnail and opens full screen. It is served under the same rules as any file in the session's folder; a picture from the web is never loaded.
 - **Answer questions and menus.** Single and multi-select questions, trust dialogs, and a small key bar (arrows, Esc, Enter, digits) when a prompt needs it.
 - **The agent's own slash commands.** Type `/` for the commands and skills that exist on that machine, with a built-in list as fallback.
 - **Look without touching.** Agent screen shows the pane as text, Changes shows `git status` and the diff since the last commit. Both are read-only.
-- **Attach files.** A photo, screenshot, PDF or text file (15 MB max, kept a week); the agent gets the path.
-- **Push notifications.** Standard Web Push with your own VAPID keys. Nothing buzzes while Ulak is on screen, or for turns shorter than two minutes.
+- **Attach files.** A photo, screenshot, PDF or text file (15 MB max, kept a week); the agent gets the path. A photo loses where and with what it was taken on the way: a JPEG is cleaned on the server without touching the picture, an iPhone HEIC is redrawn on the phone. If one could not be cleaned, Ulak says so.
+- **Push notifications.** Standard Web Push with your own VAPID keys. Nothing buzzes while Ulak is on screen, or for turns shorter than two minutes. Settings show when a notification last reached this device and say so when they stopped; a test button sends one on demand.
 - **Usage limits.** A strip shows the tightest window per provider, read from files your own scripts write.
 - **Start and close sessions** from the phone (closing takes two steps).
 - **English and Turkish**, light and dark; both follow the phone.
@@ -177,7 +177,7 @@ State (`.state/`: pins, notification history, the decision log) lives on the ser
 - `POST /api/sessions/{pane}/approve`: approve/always/deny, bound to the screen fingerprint (409 if it changed; destructive = two steps).
 - `POST /api/sessions/{pane}/choose`: pick a menu option (single/multi, trust dialog). `POST .../keys`: raw keys (Enter/approve keys refused on destructive prompts).
 - `POST /api/sessions/{pane}/close`: two-step close. `GET /api/projects`, `POST /api/sessions`: start a new session.
-- `GET /api/audit`: the decision log. `GET /api/events`: SSE (`ready`, `session`, `removed`, `receipt`). `POST /api/presence`: report whether a browser tab is visible. `GET /api/limits`: `{providers: [{id, label, updated, items: [{label, used, resets_at}]}]}`. `/api/push/*`: public key, subscribe, known, lang. `GET /api/config`: the quick-send label and the approval timeout. `GET /api/notifications`: the history of push notifications.
+- `GET /api/audit`: the decision log. `GET /api/events`: SSE (`ready`, `session`, `removed`, `receipt`). `POST /api/presence`: report whether a browser tab is visible. `GET /api/limits`: `{providers: [{id, label, updated, items: [{label, used, resets_at}]}]}`. `/api/push/*`: public key, subscribe, known (with the last delivery and the last refusal), lang, test (one notification to the asking device). `GET /api/config`: the quick-send label and the approval timeout. `GET /api/notifications`: the history of push notifications.
 
 ## Tests
 

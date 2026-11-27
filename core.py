@@ -12,6 +12,11 @@ from datetime import datetime, time
 from chat import RULE, strip_ansi
 
 
+# What the page may load and run: its own files and nothing else. Styles set from script (bar widths, sheet heights) are the one allowance.
+CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self'; "
+       "manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+
+
 DESTRUCTIVE = [
     r"\brm\b", r"\bgit\s+push\b", r"\bgh\b", r"\bcurl\b[^\n]*\s(?:-X\s*|--request[\s=]+)(POST|PUT|PATCH|DELETE)\b",
     r"\bssh\b", r"\bscp\b", r"\brsync\b[^\n]*(?:\S+@\S+:|\S+:\S+)",

@@ -16,6 +16,7 @@ from urllib.parse import unquote
 from pathlib import Path
 
 import pytest
+from core import CSP
 
 
 WEB = Path(__file__).with_name("web")
@@ -108,6 +109,11 @@ class Handler(SimpleHTTPRequestHandler):
 
     def log_message(self, *_args):
         pass
+
+    def end_headers(self):
+        if not self.path.startswith("/api/"):  # every page test runs under the policy the real server sends
+            self.send_header("Content-Security-Policy", CSP)
+        super().end_headers()
 
     def json(self, body, status=200):
         data = json.dumps(body).encode()
@@ -2238,3 +2244,33 @@ def test_a_stale_limit_keeps_its_figure_and_loses_its_alarm(api_fixture):
         ["not updated for 30m", "", "lv big"], ["read 2m ago", "fresh", "lv big hot"], [None, None, "lv big ok"]]
     stale, fresh = chrome.js("[...document.querySelectorAll('#sheet .lp h4 small')].map(e => getComputedStyle(e).color)")
     assert stale != fresh
+
+
+# --- Yayın 1b: content security policy ---
+def test_nothing_the_app_does_is_refused_by_its_own_content_policy(api_fixture):
+    chrome, api, url = api_fixture
+    now = time.time()
+    api.limits = [{"label": "Claude", "updated": now, "items": [{"label": "7d", "used": 40, "resets": 0}]}]
+    api.messages = [{"role": "assistant", "text": "Look:\n\n![shot](shot.png)\n\n```\ncode\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |"}]
+    chrome.cdp("Page.enable")
+    chrome.cdp("Page.addScriptToEvaluateOnNewDocument", source="window.__refused = []; document.addEventListener('securitypolicyviolation', e => __refused.push(`${e.violatedDirective} ${e.blockedURI}`));")
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelector('.card') !== null && document.querySelectorAll('#limits .lim').length === 1")
+    assert chrome.js("parseFloat(getComputedStyle(document.querySelector('#limits .lv i')).width) > 5")  # widths set from script still apply
+    chrome.click("#limits")
+    chrome.wait("document.querySelector('#sheet .lp') !== null")
+    chrome.js("hideSheet()")
+    open_settings(chrome)
+    chrome.js("hideSheet()")
+    chrome.click(".card-open")
+    chrome.wait("!document.querySelector('#session').hidden && document.querySelector('#messages .msg') !== null")
+    chrome.wait("document.querySelector('#messages img')?.naturalWidth > 0")
+    chrome.js(PICK + "('IMG_1.HEIC', 'image/heic', true)")  # the redraw reads a blob: picture
+    chrome.wait("document.querySelector('#message').value.includes('/tmp/up-1')")
+    assert api.uploads[0][0] == "image/jpeg"
+    chrome.js("navigator.serviceWorker.getRegistration().then(r => { window.__worker = !!r; })")
+    chrome.wait("window.__worker === true")
+    assert chrome.js("__refused") == []
+    chrome.js("const s = document.createElement('script'); s.textContent = 'window.__ran = 1'; document.head.appendChild(s); const i = new Image(); i.src = 'https://example.invalid/x.png'")
+    chrome.wait("__refused.length === 2")
+    assert chrome.js("window.__ran === undefined") and sorted(r.split()[0] for r in chrome.js("__refused")) == ["img-src", "script-src-elem"]
