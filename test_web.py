@@ -1899,6 +1899,33 @@ def test_unknown_measures_are_absent_not_zero(api_fixture):
     assert chrome.js("getComputedStyle(document.querySelector('#sMeta')).display") == "none"
 
 
+def test_a_window_kept_for_one_model_shows_apart_and_counts_only_for_that_model(api_fixture):
+    chrome, api, url = api_fixture
+    fable = {"label": "Fable · 7d", "used": 88, "resets_at": time.time() + 3 * 86400, "model": "fable"}
+    api.limits = [limit("claude", ("5h", 31, None), ("7d", 57, None))]
+    api.limits[0]["items"].append(fable)
+    chrome.cdp("Page.navigate", url=url)
+    # the strip names the model, because "7d 88%" would read as the whole account's week
+    chrome.wait("document.querySelector('#limits .lim em')?.textContent === 'Fable 88%'")
+    assert chrome.js("document.querySelector('#limits').scrollWidth <= document.querySelector('#limits').clientWidth")
+    chrome.click("#limits")
+    chrome.wait("document.querySelectorAll('#sheet .li').length === 3")
+    assert chrome.js("[...document.querySelectorAll('#sheet .li .lt span:first-child')].map(e => e.textContent)") == ["5h", "7d", "Fable · 7d"]
+    assert "88% used" in chrome.js("document.querySelectorAll('#sheet .li')[2].textContent")
+    # the fixture session runs Sonnet: the Fable week is not its limit
+    open_first(chrome, url)
+    chrome.wait(f"{RING}.join() === '57,wk'")
+    chrome.click("#sRing")
+    chrome.wait("document.querySelectorAll('#sheet .meter').length === 2")
+    api.cards = [card("blocked", pending=APPROVAL, model="Fable 5.2")]
+    open_first(chrome, url)
+    chrome.wait(f"{RING}.join() === '88,Fable'")
+    assert chrome.js("document.querySelector('#sRing').getAttribute('aria-label')") == "Claude Fable · 7d: 88% used"
+    assert chrome.js("(() => { const r = document.querySelector('#sRing').getBoundingClientRect(), s = document.querySelector('#sRing small').getBoundingClientRect(); return s.left >= r.left - 0.5 && s.right <= r.right + 0.5; })()")
+    chrome.click("#sRing")
+    chrome.wait("document.querySelectorAll('#sheet .meter').length === 3")
+
+
 def test_the_ring_carries_the_fullest_live_window_of_this_agent(api_fixture):
     chrome, api, url = api_fixture
     soon = time.time() + 3600

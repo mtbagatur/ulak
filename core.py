@@ -331,7 +331,7 @@ def parse_limits(key, raw, mtime=None):
     """Normalise a limits file into {id, label, updated, items: [{label, used, resets_at}]}.
 
     Two formats: JSON `{"h5": {"used_percentage", "resets_at"}, "d7": {...}, "ts"}`
-    (5-hour and 7-day windows), or tab-separated text `name<TAB>window<TAB>NN%<TAB>ISO-reset`
+    (5-hour and 7-day windows; `d7_<model>` or `h5_<model>` adds a window kept for one model), or tab-separated text `name<TAB>window<TAB>NN%<TAB>ISO-reset`
     where the percentage is what is *remaining* (a bare `disabled` row is skipped).
     """
     items, updated = [], mtime
@@ -341,10 +341,17 @@ def parse_limits(key, raw, mtime=None):
         data = None
     if isinstance(data, dict):
         updated = data.get("ts") or mtime
-        for k, label in (("h5", "5h"), ("d7", "7d")):
+        # `h5`/`d7` are the account's windows; `d7_fable` is the same window kept for one model.
+        names = {"h5": "5h", "d7": "7d"}
+        windows = [(k, label, None) for k, label in names.items()]
+        for k in sorted(data):
+            m = re.fullmatch(r"(h5|d7)_([A-Za-z0-9][A-Za-z0-9 .-]{0,23})", str(k))
+            if m:
+                windows.append((k, f"{m[2][0].upper()}{m[2][1:]} · {names[m[1]]}", m[2].lower()))
+        for k, label, model in windows:
             w = data.get(k)
             if isinstance(w, dict) and isinstance(w.get("used_percentage"), (int, float)):
-                items.append({"label": label, "used": round(w["used_percentage"]), "resets_at": w.get("resets_at")})
+                items.append({"label": label, "used": round(w["used_percentage"]), "resets_at": w.get("resets_at"), **({"model": model} if model else {})})
     else:
         for line in str(raw).splitlines():
             cols = [c.strip() for c in line.split("\t")]

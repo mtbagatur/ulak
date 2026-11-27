@@ -410,6 +410,8 @@ function fmtIn(secs) {
   const d = Math.floor(secs / 86400), h = Math.floor(secs % 86400 / 3600), m = Math.floor(secs % 3600 / 60);
   return d ? `${d}${t('day')} ${h}${t('hour')}` : h ? `${h}${t('hour')} ${m}${t('min')}` : `${Math.max(1, m)}${t('min')}`;
 }
+// A window kept for one model goes by the model's name: "7d 88%" would read as the whole account's week.
+const winName = i => i.model ? String(i.label).split(' · ')[0] : String(i.label).split(' · ').pop();
 const resetText = (ts, now) => ts ? t('resets', {t: t('resetsIn', {t: fmtIn(ts - now)})}) : '';
 function renderLimits() {
   const box = $('#limits');
@@ -423,7 +425,7 @@ function renderLimits() {
   box.innerHTML = ps.map(p => {
     const show = [[...p.items].sort((a, b) => b.used - a.used)[0]];  // the tightest window; details on tap
     const stale = p.updated && now - p.updated > 1800;
-    return `<span class="lim${stale ? ' stale' : ''}"><b>${esc(p.label)}</b>${show.map(i => `<span class="lv ${lvl(i.used)}" title="${esc(i.label)}"><i style="width:${Math.min(100, i.used)}%"></i></span><em>${tight ? '' : esc(i.label.split(' · ').pop()) + ' '}${i.used}%</em>`).join('')}</span>`;
+    return `<span class="lim${stale ? ' stale' : ''}"><b>${esc(p.label)}</b>${show.map(i => `<span class="lv ${lvl(i.used)}" title="${esc(i.label)}"><i style="width:${Math.min(100, i.used)}%"></i></span><em>${tight ? '' : esc(winName(i)) + ' '}${i.used}%</em>`).join('')}</span>`;
   }).join('');
 }
 function limitsSheet() {
@@ -448,11 +450,12 @@ function cacheLeft() {
   const c = state.meters?.cache;
   return c && typeof c.ttl === 'number' && typeof c.since === 'number' ? c.ttl - (serverNow() - c.since) : null;
 }
-// The limit is the account's, for the tool this session runs. A window whose reset time has passed says nothing any more.
+// The limit is the account's, for the tool this session runs. A window whose reset time has passed says nothing any more,
+// and a window kept for one model is this session's only when it runs that model.
 function sessionLimits() {
-  const agent = state.sessions.get(state.current)?.agent, now = serverNow();
+  const s = state.sessions.get(state.current), agent = s?.agent, now = serverNow(), model = String(s?.model || '').toLowerCase();
   const p = (limitData?.providers || []).find(p => p.id === agent);
-  const items = (p?.items || []).filter(i => typeof i.used === 'number' && !(typeof i.resets_at === 'number' && i.resets_at <= now));
+  const items = (p?.items || []).filter(i => typeof i.used === 'number' && !(typeof i.resets_at === 'number' && i.resets_at <= now) && (!i.model || model.includes(String(i.model).toLowerCase())));
   return items.length ? {id: p.id, label: p.label, updated: p.updated, items} : null;
 }
 function renderMeters() {
@@ -464,7 +467,7 @@ function renderMeters() {
   put(ring, 'hidden', !lim);
   if (!lim) return;
   const top = lim.items.reduce((a, b) => b.used > a.used ? b : a), used = Math.max(0, Math.min(100, Math.round(top.used)));
-  const name = String(top.label).split(' · ').pop(), short = {'5h': 'win5h', '7d': 'win7d'}[name];
+  const name = winName(top), short = top.model ? '' : {'5h': 'win5h', '7d': 'win7d'}[name];
   ring.classList.toggle('stale', !!lim.updated && serverNow() - lim.updated > 1800);
   ring.setAttribute('aria-label', `${lim.label} ${top.label}: ${t('used', {n: top.used})}`);
   putHtml(ring, `<span class="o"><svg viewBox="0 0 36 36" aria-hidden="true"><circle cx="18" cy="18" r="16"/><circle class="fill" cx="18" cy="18" r="16" pathLength="100" stroke-dasharray="${used} 100"/></svg><b>${used}</b></span><small>${esc(short ? t(short) : name)}</small>`);

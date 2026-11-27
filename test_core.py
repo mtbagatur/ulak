@@ -769,6 +769,16 @@ def test_parse_limits_json_and_text():
     assert agy["items"][0]["label"] == "Gemini Models · 7d" and agy["items"][0]["used"] == 18 and agy["items"][0]["resets_at"] > 1e9
     assert parse_limits("x", "nonsense") is None
 
+
+def test_parse_limits_reads_a_window_kept_for_one_model():
+    from core import parse_limits
+    raw = '{"h5": {"used_percentage": 4, "resets_at": 100}, "d7": {"used_percentage": 16, "resets_at": 200}, "d7_fable": {"used_percentage": 61.6, "resets_at": 300}, "h5_claude-opus": {"used_percentage": 2}, "d7_": {"used_percentage": 9}, "d7_<b>": {"used_percentage": 9}, "d7_sonnet": "soon", "ts": 50}'
+    items = parse_limits("claude", raw)["items"]
+    assert [(i["label"], i["used"], i["resets_at"]) for i in items] == [("5h", 4, 100), ("7d", 16, 200), ("Fable · 7d", 62, 300), ("Claude-opus · 5h", 2, None)]
+    assert [i.get("model") for i in items] == [None, None, "fable", "claude-opus"]
+    # a model window alone is still a limit worth showing
+    assert [i["label"] for i in parse_limits("claude", '{"d7_fable": {"used_percentage": 1}}')["items"]] == ["Fable · 7d"]
+
 def test_dismiss_and_trust_prompts_carry_no_localised_text():
     trust = parse_prompt(open("fixtures/claude-trust.txt").read())
     assert trust["kind"] == "trust" and trust["header"] == "" and not any(ord(c) > 127 for c in trust["question"].replace("~", ""))
