@@ -217,17 +217,61 @@ def _usable(block):
 
 def claude_chat(path, max_messages=60, tail_bytes=700_000):
     """Parse the tail of a Claude JSONL file -> (messages, model)."""
-    path = Path(path)
-    with path.open("rb") as f:
-        f.seek(0, 2)
-        size = f.tell()
-        f.seek(max(0, size - tail_bytes))
-        data = f.read().decode("utf8", "replace")
-    lines = data.splitlines()
-    if size > tail_bytes and lines:
-        lines = lines[1:]  # first line is probably cut in half
-    msgs, model, tools = [], "", {}
-    for line in lines:
+    with Path(path).open("rb") as f:
+        size = f.seek(0, 2)
+        msgs, _, model = _parse(_whole_lines(f, max(0, size - tail_bytes), size))
+    return msgs[-max_messages:], pretty_model(model)
+
+
+ANCHOR_BYTES = 4_000_000  # the most a phone that scrolled back is sent again on each look
+
+
+def claude_page(path, end=None, start=None, max_messages=60, tail_bytes=700_000):
+    """A stretch of a transcript -> (messages, model, offset of the line the first one came from; 0 when nothing is older).
+
+    With `start`, everything from that offset on; otherwise the last messages before `end`. Pages are cut between lines."""
+    with Path(path).open("rb") as f:
+        size = f.seek(0, 2)
+        end = size if end is None else min(end, size)
+        window = tail_bytes
+        while True:
+            begin = max(0, end - window) if start is None else max(min(start, end), end - ANCHOR_BYTES)
+            msgs, offsets, model = _parse(_whole_lines(f, begin, end))
+            if msgs or begin == 0 or start is not None:
+                break
+            window *= 2  # one line wider than the window
+    older = begin > 0
+    if start is None and len(msgs) > max_messages:
+        cut = offsets[-max_messages]
+        keep = offsets.index(cut)
+        older = older or keep > 0
+        msgs, offsets = msgs[keep:], offsets[keep:]
+    return msgs, pretty_model(model), offsets[0] if msgs and older else 0
+
+
+def _whole_lines(f, begin, end):
+    """(offset, text) of every line that starts at or after `begin` and before `end`."""
+    f.seek(max(0, begin - 1))
+    offset = f.tell()
+    data = f.read(end - offset)
+    if begin:  # unless the byte before was a newline, the first piece is the end of an earlier line
+        first = data.find(b"\n") + 1
+        if not first:
+            return
+        data, offset = data[first:], offset + first
+    for line in data.split(b"\n"):
+        if line:
+            yield offset, line.decode("utf8", "replace")
+        offset += len(line) + 1
+
+
+def _parse(lines):
+    """Transcript lines -> (messages, the line offset of each, model id)."""
+    msgs, offsets, model, tools = [], [], "", {}
+    last = 0
+    for offset, line in lines:
+        offsets.extend([last] * (len(msgs) - len(offsets)))  # what the previous line added
+        last = offset
         if "<task-notification" in line:  # a background subagent stopped; the line type that carries this varies by version
             for use_id, status in NOTICE_RE.findall(line):
                 if "agent" in tools.get(use_id, {}):
@@ -283,4 +327,48 @@ def claude_chat(path, max_messages=60, tail_bytes=700_000):
                             continue  # still out there; the notice above closes it
                         m["agent"]["state"] = "failed" if block.get("is_error") else "done"
                     m["result"] = str(res or "").strip()[:400]
-    return msgs[-max_messages:], pretty_model(model)
+    offsets.extend([last] * (len(msgs) - len(offsets)))
+    return msgs, offsets, model
+
+
+def _first_words(path, cwd, head_bytes=1_000_000):
+    """What was asked first in a conversation held in `cwd`; empty if it is another folder's or nothing was asked."""
+    with path.open("rb") as f:
+        head = f.read(head_bytes)
+    folder = None
+    for line in head.split(b"\n"):
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(d, dict):
+            continue
+        folder = folder or d.get("cwd")
+        if folder and folder != cwd:
+            return ""
+        msgs = _parse([(0, line.decode("utf8", "replace"))])[0]
+        if folder and msgs and msgs[0]["role"] == "user":
+            return " ".join(msgs[0]["text"].split())[:80]
+    return ""
+
+
+def earlier_conversations(path, cwd, limit=20):
+    """The other conversations this folder has had, newest first. Only plain files beside the current one."""
+    found = []
+    for other in Path(path).parent.glob("*.jsonl"):
+        try:
+            if other.name != Path(path).name and not other.is_symlink() and other.is_file():
+                found.append((other.stat().st_mtime, other))
+        except OSError:
+            continue
+    items = []
+    for ts, other in sorted(found, reverse=True):
+        try:
+            title = _first_words(other, cwd)
+        except OSError:
+            continue
+        if title:
+            items.append({"id": other.stem, "ts": ts, "title": title})
+        if len(items) >= limit:
+            break
+    return items

@@ -164,7 +164,7 @@ State (`.state/`: pins, notification history, the decision log) lives on the ser
 ## API
 
 - `GET /api/sessions`: enriched cards, ordered blocked > working > done (five minutes) > unknown > idle.
-- `GET /api/sessions/{pane}/chat`: cleaned screen split into blocks (Claude JSONL when available).
+- `GET /api/sessions/{pane}/chat`: cleaned screen split into blocks (Claude JSONL when available; `?from=` keeps older messages in view). `GET .../history?before=` loads older ones, and `GET .../conversations` lists the earlier Claude conversations of the session's own folder (read-only; the phone names an id, never a path).
 - Read-only views: `GET /api/sessions/{pane}/screen` (the pane as text), `.../changes` (`git status` and a size-capped diff of the session's own folder; the phone sends no path), `.../commands` (names and one-line descriptions of the slash commands on the machine).
 - `POST /api/sessions/{pane}/prompt`: send text (409 for a pane with no agent in it, as for `.../keys` and `/api/quick`). `POST /api/sessions/{pane}/upload`: raw file body (image, PDF or text), returns its server path. `GET /api/sessions/{pane}/file`: open a supported document inside that workspace. `POST /api/quick`: quick send to a configured pane (see Configuration). `GET/PUT /api/pins`: server-side pins, shared across devices.
 - `POST /api/sessions/{pane}/approve`: approve/always/deny, bound to the screen fingerprint (409 if it changed; destructive = two steps).

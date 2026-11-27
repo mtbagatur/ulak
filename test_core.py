@@ -419,7 +419,7 @@ def test_destructive_deny_is_one_step(monkeypatch):
 
 
 # --- v2 tests: transcript cleaning, choices, push payload, sorting ---
-from chat import clean_transcript, screen_chat, preview_from_screen, detect_model, claude_chat, pretty_model
+from chat import clean_transcript, screen_chat, preview_from_screen, detect_model, claude_chat, claude_page, pretty_model
 from core import parse_prompt, build_push, bucket, project_name
 FX = Path(__file__).parent / "fixtures"
 def fx(name): return (FX / name).read_text()
@@ -1909,3 +1909,74 @@ def test_within_a_group_the_latest_conversation_comes_first():
     new = {"bucket": "idle", "since": 100, "active": 500, "workspace_label": "b"}
     unknown = {"bucket": "idle", "since": 300, "active": 0, "workspace_label": "c"}
     assert sorted([old, new, unknown], key=status_rank) == [new, unknown, old]
+
+
+def _lines(path, cwd, n, size=0, start=0):
+    with path.open("a") as f:
+        for i in range(start, start + n):
+            f.write(json.dumps({"type": "user", "cwd": cwd, "timestamp": f"t{i}", "message": {"content": f"m{i}" + " x" * size}}) + "\n")
+    return path
+
+
+def _all_pages(path, **kw):
+    seen, end = [], None
+    while True:
+        msgs, _, start = claude_page(path, end=end, **kw)
+        seen = [m["ts"] for m in msgs] + seen
+        if not start:
+            return seen
+        assert end is None or start < end
+        end = start
+
+
+def test_pages_cover_a_long_conversation_once_and_in_order(tmp_path):
+    log = _lines(tmp_path / "a.jsonl", "/p", 95, size=40)
+    assert _all_pages(log, max_messages=10, tail_bytes=900) == [f"t{i}" for i in range(95)]
+
+
+def test_a_line_bigger_than_the_window_does_not_stop_the_pages(tmp_path):
+    log = _lines(tmp_path / "a.jsonl", "/p", 2)
+    _lines(log, "/p", 1, size=5000, start=2)
+    _lines(log, "/p", 2, start=3)
+    assert _all_pages(log, max_messages=10, tail_bytes=600) == [f"t{i}" for i in range(5)]
+
+
+def _history(monkeypatch, tmp_path):
+    _, c, h = _cleared(monkeypatch, tmp_path)
+    folder = tmp_path / "project"; folder.mkdir()
+    now = _lines(folder / "new-session.jsonl", "/p", 80)
+    old = _lines(folder / "11111111-old.jsonl", "/p", 3)
+    _lines(folder / "22222222-other.jsonl", "/p-other", 2)
+    (folder / "33333333-link.jsonl").symlink_to(old)
+    _lines(tmp_path / "44444444-outside.jsonl", "/p", 2)
+    monkeypatch.setattr(api, "claude_path", lambda cwd, sid: now)
+    return c, h, now
+
+
+def test_loading_from_an_anchor_keeps_the_older_lines_when_new_ones_arrive(monkeypatch, tmp_path):
+    c, h, now = _history(monkeypatch, tmp_path)
+    first = c.get("/api/sessions/w9:p1/chat", headers=h).json()
+    assert first["conversation"] == "new-session" and first["start"] > 0 and first["messages"][0]["ts"] == "t20"
+    _lines(now, "/p", 5, start=80)
+    again = c.get(f"/api/sessions/w9:p1/chat?from={first['start']}", headers=h).json()
+    assert [m["ts"] for m in again["messages"]] == [f"t{i}" for i in range(20, 85)] and again["start"] == first["start"]
+    older = c.get(f"/api/sessions/w9:p1/history?before={first['start']}", headers=h).json()
+    assert [m["ts"] for m in older["messages"]] == [f"t{i}" for i in range(20)] and older["start"] == 0
+
+
+def test_earlier_conversations_are_those_of_this_folder_only(monkeypatch, tmp_path):
+    c, h, _ = _history(monkeypatch, tmp_path)
+    items = c.get("/api/sessions/w9:p1/conversations", headers=h).json()["items"]
+    assert [(i["id"], i["title"]) for i in items] == [("11111111-old", "m0")]
+    page = c.get("/api/sessions/w9:p1/history?conversation=11111111-old", headers=h).json()
+    assert [m["text"] for m in page["messages"]] == ["m0", "m1", "m2"] and page["start"] == 0
+    for wrong in ("22222222-other", "33333333-link", "..%2F44444444-outside", "nope", "new-session"):
+        assert c.get(f"/api/sessions/w9:p1/history?conversation={wrong}", headers=h).status_code == 404, wrong
+    assert c.get("/api/sessions/w9:p1/history?before=-1", headers=h).status_code == 400
+
+
+def test_a_pane_without_a_transcript_has_no_history(monkeypatch, tmp_path):
+    c, h, _ = _history(monkeypatch, tmp_path)
+    api.sessions["w9:p1"]["agent"] = "codex"
+    assert c.get("/api/sessions/w9:p1/conversations", headers=h).json() == {"items": []}
+    assert c.get("/api/sessions/w9:p1/history", headers=h).status_code == 404

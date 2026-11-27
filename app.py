@@ -12,13 +12,13 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 
-from chat import claude_chat, claude_path, detect_model, preview_from_screen, screen_chat, SPINNER, strip_ansi
+from chat import claude_chat, claude_page, claude_path, earlier_conversations, detect_model, preview_from_screen, screen_chat, SPINNER, strip_ansi
 from core import NotificationGate, tidy_details, bucket, build_push, is_destructive, parse_approval, parse_codex_limits, parse_limits, parse_prompt, project_name, status_rank, slash_commands, changes
 from herdr_client import HerdrClient, HerdrError, HerdrUnavailable
 
@@ -859,18 +859,20 @@ async def commands(pane: str):
 
 
 @app.get("/api/sessions/{pane}/chat")
-async def chat(pane: str, limit: int = 60):
+async def chat(pane: str, limit: int = 60, anchor: int | None = Query(None, alias="from", ge=0)):
     must_exist(pane)
     agent = await current_agent(pane)
     item = must_exist(pane)
     status = item.get("status", "unknown")
     sid = (agent.get("agent_session") or {}).get("value")
-    messages, source = None, "screen"
+    messages, source, start = None, "screen", 0
     if item.get("agent") == "claude" and sid:
         path = claude_path(agent.get("cwd"), sid)
         if path:
             try:
-                messages, _ = await asyncio.to_thread(claude_chat, path, max_messages=max(10, min(limit, 200)))
+                messages, _, start = await asyncio.to_thread(claude_page, path, start=anchor, max_messages=max(10, min(limit, 200)))
+                if anchor is not None:
+                    start = anchor
                 source = "transcript"
             except OSError:
                 messages = None
@@ -885,7 +887,42 @@ async def chat(pane: str, limit: int = 60):
     if messages is None:
         messages = screen_chat(screen, max(10, min(limit, 200)))
     hint = next((l.strip() for l in reversed(strip_ansi(screen).splitlines()[-12:]) if SPINNER.match(l)), "") if status == "working" else ""
-    return {"messages": messages, "source": source, "prompt": prompt, "status": status, "hint": hint, "session": item, "receipt": latest_receipt(pane)}
+    return {"messages": messages, "source": source, "prompt": prompt, "status": status, "hint": hint, "session": item, "receipt": latest_receipt(pane),
+            "start": start, "conversation": sid or ""}
+
+
+def transcript_of(pane):
+    """(path, folder) of the Claude conversation open in a pane, or (None, "")."""
+    item = must_exist(pane)
+    agent = raw_agents.get(pane, {})
+    sid = (agent.get("agent_session") or {}).get("value")
+    path = claude_path(agent.get("cwd"), sid) if item.get("agent") == "claude" and sid else None
+    return path, str(agent.get("cwd") or "")
+
+
+@app.get("/api/sessions/{pane}/conversations")
+async def conversations(pane: str):
+    """Earlier conversations of the session's own folder, the ones a /clear left behind. Read-only."""
+    path, cwd = transcript_of(pane)
+    return {"items": await asyncio.to_thread(earlier_conversations, path, cwd) if path else []}
+
+
+@app.get("/api/sessions/{pane}/history")
+async def history(pane: str, before: int | None = None, conversation: str = ""):
+    """Older messages. The phone names a conversation only by an id from the list above, never a path."""
+    if before is not None and before < 0:
+        raise HTTPException(400, "Wrong position")
+    path, cwd = transcript_of(pane)
+    if path and conversation:
+        known = await asyncio.to_thread(earlier_conversations, path, cwd)
+        path = path.parent / f"{conversation}.jsonl" if conversation in {item["id"] for item in known} else None
+    if not path:
+        raise HTTPException(404, "No such conversation")
+    try:
+        messages, _, start = await asyncio.to_thread(claude_page, path, end=before)
+    except OSError:
+        raise HTTPException(404, "No such conversation")
+    return {"messages": messages, "start": start}
 
 
 @app.post("/api/sessions/{pane}/prompt")
