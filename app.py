@@ -20,7 +20,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 
 from chat import claude_chat, claude_meters, claude_page, claude_path, earlier_conversations, detect_model, preview_from_screen, screen_chat, SPINNER, strip_ansi
-from core import NotificationGate, tidy_details, bucket, build_push, is_destructive, parse_approval, parse_codex_limits, parse_limits, parse_prompt, project_name, status_rank, slash_commands, changes
+from core import NotificationGate, tidy_details, bucket, build_push, clean_subscription, push_topic, is_destructive, parse_approval, parse_codex_limits, parse_limits, parse_prompt, project_name, status_rank, slash_commands, changes
 from herdr_client import HerdrClient, HerdrError, HerdrUnavailable
 
 ROOT = Path(__file__).parent
@@ -69,6 +69,7 @@ work_started = {}   # pane -> when the current working stretch began (kept while
 delivery_tasks = set()
 client_presence = {} # opaque browser UUID -> last visible heartbeat timestamp
 PRESENCE_TTL = 10
+MAX_SUBS = 20        # phones and browsers of one owner; the oldest goes first
 AUDIT_KEEP = 500
 DELIVERY_DELAYS = (0.4, 0.8, 1.5, 2.5, 3.0)  # when to look for the answered prompt leaving the screen
 gate = NotificationGate()
@@ -507,7 +508,9 @@ async def handle_event(msg):
             worked = None
             if card["status"] == "done":
                 began = work_started.pop(pane, None)
-                worked = None if began is None else now - began
+                if began is None:
+                    return  # the turn began before Ulak was watching, so nobody can say it was long enough to buzz for
+                worked = now - began
             elif card["status"] not in ("blocked", "working"):
                 work_started.pop(pane, None)
             if card["status"] in ("blocked", "done"):
@@ -582,7 +585,7 @@ async def send_push(item, prompt=None, destructive=False):
         dead = []
         for sub in subs:
             payload = build_push(item, prompt, destructive, lang=sub.get("lang", "en"))
-            topic = re.sub(r"[^A-Za-z0-9_-]", "-", payload.get("tag", "ulak"))[:32]
+            topic = push_topic(payload.get("tag", "ulak"))
             try:
                 await asyncio.to_thread(webpush, sub, json.dumps(payload), str(key), {"sub": os.environ.get("ULAK_VAPID_SUBJECT", "mailto:local@localhost")},
                                         ttl=3600, headers={"Urgency": "high", "Topic": topic})
@@ -1342,10 +1345,11 @@ async def push_public():
 
 @app.post("/api/push/subscribe")
 async def push_subscribe(request: Request):
-    body = await json_object(request)
-    subs = [s for s in read_subs() if s.get("endpoint") != body.get("endpoint")]
-    body["lang"] = "tr" if body.get("lang") == "tr" else "en"
-    subs.append(body)
+    sub = clean_subscription(await json_object(request))
+    if not sub:
+        raise HTTPException(400, "Not a push subscription")
+    subs = [s for s in read_subs() if s.get("endpoint") != sub["endpoint"]][-(MAX_SUBS - 1):]
+    subs.append(sub)
     write_subs(subs)
     return {"ok": True, "count": len(subs)}
 

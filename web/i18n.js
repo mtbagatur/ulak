@@ -78,7 +78,7 @@ const ERR_TR = {
   'No menu to choose from on screen': 'Ekranda seçilecek bir menü yok', 'The screen changed; refresh': 'Ekran değişti; yenile', 'No such option': 'Böyle bir seçenek yok',
   'Herdr is not reachable': 'Herdr yanıt vermiyor',
   'Document not found in this workspace': 'Bu çalışma alanında belge bulunamadı', 'Unsupported document type': 'Desteklenmeyen belge türü',
-  'Invalid client id': 'Geçersiz istemci kimliği', 'Invalid content length': 'Geçersiz içerik uzunluğu', 'Request body must be a JSON object': 'İstek gövdesi bir JSON nesnesi olmalı',
+  'Invalid client id': 'Geçersiz istemci kimliği', 'Invalid content length': 'Geçersiz içerik uzunluğu', 'Request body must be a JSON object': 'İstek gövdesi bir JSON nesnesi olmalı', 'Not a push subscription': 'Bu bir bildirim aboneliği değil',
   'Request from another web page refused': 'Başka bir web sayfasından gelen istek geri çevrildi', 'Unknown host name': 'Tanınmayan sunucu adı',
   'decision must be approve, deny, or always': 'Karar onayla, reddet ya da hep izin ver olmalı',
   'Invalid key': 'Geçersiz tuş', 'Destructive command: approve from the approval card (two steps)': 'Yıkıcı komut: onay kartından iki adımla onayla',

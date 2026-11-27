@@ -1,9 +1,11 @@
 import hashlib
+import ipaddress
 import json
 import os
 import re
 import subprocess
 import threading
+from urllib.parse import urlsplit
 from datetime import datetime, time
 
 from chat import RULE, strip_ansi
@@ -414,6 +416,37 @@ def build_push(session, prompt=None, destructive=False, lang="en", short=False):
         title = f"{project} · {text['done']}"
     return {"pane": pane, "status": status, "title": title, "body": body, "tag": f"ulak-{pane}", "url": f"/?pane={pane}",
             "project": project, "raw": raw, "destructive": bool(destructive)}
+
+
+def push_topic(tag):
+    """A push service replaces an undelivered message with a newer one of the same topic. Apple refuses some lengths, so every topic is a 24 character digest."""
+    return hashlib.sha256(str(tag).encode()).hexdigest()[:24]
+
+
+def clean_subscription(body):
+    """A browser's push subscription with only the fields Ulak uses, or None.
+
+    The server posts to this address on every notification, so it has to be a public https one."""
+    endpoint, keys = body.get("endpoint"), body.get("keys")
+    if not isinstance(endpoint, str) or not 0 < len(endpoint) <= 2048 or not isinstance(keys, dict):
+        return None
+    try:
+        url = urlsplit(endpoint)
+        host = url.hostname or ""
+    except ValueError:
+        return None
+    if url.scheme != "https" or "." not in host and ":" not in host or host.endswith((".localhost", ".local", ".internal")):
+        return None
+    try:
+        if not ipaddress.ip_address(host).is_global:
+            return None
+    except ValueError:
+        if ":" in host:
+            return None
+    kept = {k: keys.get(k) for k in ("p256dh", "auth")}
+    if not all(isinstance(v, str) and 0 < len(v) <= 256 for v in kept.values()):
+        return None
+    return {"endpoint": endpoint, "keys": kept, "lang": "tr" if body.get("lang") == "tr" else "en"}
 
 
 def parse_codex_limits(lines, mtime=None):

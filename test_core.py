@@ -2178,3 +2178,75 @@ def test_chat_carries_meters_only_for_a_transcript(monkeypatch, tmp_path):
     api.sessions["w9:p1"]["agent"] = "codex"
     r = c.get("/api/sessions/w9:p1/chat", headers=h).json()
     assert r["source"] == "screen" and r["meters"] == {}
+
+
+# --- Yayın 1b: push plumbing ---
+def test_push_topic_is_fixed_length_and_distinct():
+    from core import push_topic
+    a, b = push_topic("ulak-w2N:p1"), push_topic("ulak-w2NN:p10")
+    assert len(a) == len(b) == 24 and a != b and re.fullmatch(r"[0-9a-f]+", a)
+    assert push_topic("ulak-" + "x" * 40 + "1") != push_topic("ulak-" + "x" * 40 + "2")  # a cut tag used to collide
+
+
+GOOD_SUB = {"endpoint": "https://web.push.apple.com/QGx", "keys": {"p256dh": "BPk", "auth": "s3"}}
+
+
+@pytest.mark.parametrize("endpoint", ["http://web.push.apple.com/x", "https://127.0.0.1/x", "https://localhost/x", "https://10.0.0.5/x",
+    "https://[::1]/x", "https://169.254.169.254/x", "https://printer/x", "https://100.75.1.1/x", "ftp://a.example/x", "", None, 5,
+    "https://a.example/" + "x" * 2100, "https://user@/x", "https://[bad/x"])
+def test_subscription_with_a_bad_address_is_refused(endpoint):
+    from core import clean_subscription
+    assert clean_subscription({**GOOD_SUB, "endpoint": endpoint}) is None
+
+
+def test_subscription_keeps_only_known_fields():
+    from core import clean_subscription
+    body = {"endpoint": GOOD_SUB["endpoint"], "keys": {"p256dh": "BPk", "auth": "s3", "extra": "x"}, "lang": "tr", "expirationTime": None, "ok_at": 1}
+    assert clean_subscription(body) == {**GOOD_SUB, "lang": "tr"}
+    assert clean_subscription({**GOOD_SUB, "lang": "de"})["lang"] == "en"
+    assert clean_subscription({**GOOD_SUB, "endpoint": "https://8.8.8.8/x"})["endpoint"] == "https://8.8.8.8/x"
+    for keys in (None, {}, {"p256dh": "BPk"}, {"p256dh": "", "auth": "s3"}, {"p256dh": 5, "auth": "s3"}, {"p256dh": "x" * 300, "auth": "s3"}):
+        assert clean_subscription({**GOOD_SUB, "keys": keys}) is None
+
+
+def test_subscribe_refuses_a_bad_address_and_keeps_at_most_twenty(monkeypatch, tmp_path):
+    _, c, h = _setup(monkeypatch, CODEX)
+    monkeypatch.setattr(api, "ROOT", tmp_path)
+    (tmp_path / ".secrets").mkdir()
+    assert c.post("/api/push/subscribe", headers=h, json={**GOOD_SUB, "endpoint": "http://127.0.0.1:9/x"}).status_code == 400
+    assert api.read_subs() == []
+    for i in range(21):
+        assert c.post("/api/push/subscribe", headers=h, json={**GOOD_SUB, "endpoint": f"https://push.example/{i}", "junk": 1}).status_code == 200
+    subs = api.read_subs()
+    assert [s["endpoint"] for s in subs] == [f"https://push.example/{i}" for i in range(1, 21)]
+    assert set(subs[0]) == {"endpoint", "keys", "lang"}
+
+
+def test_a_finish_whose_start_was_not_seen_is_not_pushed(monkeypatch):
+    async def scenario():
+        monkeypatch.setattr(api, "raw_agents", {})
+        monkeypatch.setattr(api, "work_started", {})
+        status = {"now": "done"}
+        async def nothing(*a): return None
+        async def card(pane): return {"pane_id": pane, "status": status["now"]}
+        monkeypatch.setattr(api, "current_agent", nothing)
+        monkeypatch.setattr(api, "refresh_pane", card)
+        monkeypatch.setattr(api, "broadcast", nothing)
+        calls = []
+        async def grace(*a): calls.append(a)
+        monkeypatch.setattr(api, "push_after_grace", grace)
+        event = lambda s: {"event": "pane.agent_status_changed", "data": {"pane_id": "w9:p1", "agent_status": s}}
+        await api.handle_event(event("done"))  # the service came up mid-turn
+        await asyncio.sleep(0)
+        assert calls == []
+        status["now"] = "working"
+        await api.handle_event(event("working"))
+        status["now"] = "done"
+        await api.handle_event(event("done"))
+        await asyncio.sleep(0)
+        assert len(calls) == 1 and calls[0][:2] == ("w9:p1", "done") and calls[0][2] is not None
+        status["now"] = "blocked"
+        await api.handle_event(event("blocked"))  # a question is always worth a buzz
+        await asyncio.sleep(0)
+        assert len(calls) == 2
+    asyncio.run(scenario())
