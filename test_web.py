@@ -1288,7 +1288,7 @@ def test_a_quiet_screen_is_not_redrawn(api_fixture):
 @pytest.mark.parametrize("cards", [[], [card("idle")]], ids=["no sessions", "folded idle group"])
 def test_a_quiet_list_without_active_sessions_is_not_redrawn_either(api_fixture, cards):
     chrome, api, url = api_fixture
-    api.cards = cards
+    api.cards = [{**c, "since": time.time()} for c in cards]  # stamped now: an older card rightly rewrites its age as minutes pass
     chrome.cdp("Page.navigate", url=url)
     chrome.wait("document.querySelector('#groups')?.children.length > 0 && document.querySelector('#conn')?.hidden")
     time.sleep(1.8)
