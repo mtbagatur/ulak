@@ -2,7 +2,6 @@
 // Ulak v2 front end. No build step. Re-render only what changed: cards are patched by key,
 // chat messages are appended, the composer and its draft are never touched by updates.
 const $ = s => document.querySelector(s);
-const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 // The screens are repainted on a clock: write only what differs, so a quiet screen stays untouched.
 const put = (el, prop, value) => { if (el[prop] !== value) el[prop] = value; };
 const putHtml = (el, html) => { if (el._h !== html) { el.innerHTML = html; el._h = html; } };
@@ -440,57 +439,46 @@ function closedBanner() {
   $('#promptZone').innerHTML = `<div class="prompt"><p class="q">${esc(t('closedSession'))}</p><button class="primary" id="toList">${esc(t('backToList'))}</button></div>`;
   $('#toList').onclick = () => history.state ? history.back() : (location.hash = '', route());
 }
-const md = value => {
-  const held = [];
-  const hold = html => `\u0001${held.push(html) - 1}\u0002`;
-  const link = (label, href) => {
-    const external = /^https?:\/\//i.test(href);
-    let target = href;
-    if (!external) {
-      const suffix = href.split(/[?#]/, 1)[0].split('.').pop().toLowerCase();
-      if (!/^(pdf|png|jpe?g|webp|gif|heic|txt|md|csv|json)$/.test(suffix) || /^(?:[a-z]+:|\/\/)/i.test(href)) return null;
-      target = `/api/sessions/${encodeURIComponent(state.current)}/file?path=${encodeURIComponent(href)}`;
-    }
-    return `<a href="${esc(target)}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>`;
-  };
-  let source = String(value ?? '');
-  source = source.replace(/```[^\n]*\n([\s\S]*?)```/g, (_, code) => hold(`<pre><code>${esc(code.replace(/\n$/, ''))}</code></pre>`));
-  source = source.replace(/`([^`\n]+)`/g, (_, code) => hold(`<code>${esc(code)}</code>`));
-  source = source.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (whole, label, href) => {
-    const html = link(label, href);
-    return html ? hold(html) : whole;
-  });
-  // A path starts where a word starts, so docs/notes.md links whole (relative to the session's folder), not from its first slash.
-  source = source.replace(/(^|[^\w.\-\/])((?:\/|\.\.?\/|[\w.\-]+\/)[^\s<>"'`]+)/g, (raw, before, found) => {
-    let path = found, trailing = '';
-    while (/[),.!?;:]$/.test(path)) { trailing = path.slice(-1) + trailing; path = path.slice(0, -1); }
-    const html = link(path, path);
-    return html ? before + hold(html) + trailing : raw;
-  });
-  let html = esc(source).replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
-  html = html.replace(/https?:\/\/[^\s<>"']+/gi, raw => {
-    let url = raw, trailing = '';
-    while (/[),.!?;:]$/.test(url)) { trailing = url.slice(-1) + trailing; url = url.slice(0, -1); }
-    return (link(url, url) || esc(url)) + trailing;
-  });
-  return html.replace(/\u0001(\d+)\u0002/g, (_, n) => held[Number(n)] || '');
+// A link in a transcript opens on the web, or reads a file of the session's own folder. Anything else stays text.
+const fileLink = (label, href) => {
+  const external = /^https?:\/\//i.test(href);
+  let target = href;
+  if (!external) {
+    const suffix = href.split(/[?#]/, 1)[0].split('.').pop().toLowerCase();
+    if (!/^(pdf|png|jpe?g|webp|gif|heic|txt|md|csv|json)$/.test(suffix) || /^(?:[a-z]+:|\/\/)/i.test(href)) return null;
+    target = `/api/sessions/${encodeURIComponent(state.current)}/file?path=${encodeURIComponent(href)}`;
+  }
+  return `<a href="${esc(target)}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>`;
 };
+const md = value => inlineMd(value, fileLink);
+// What an agent wrote is markdown; what you typed and what the terminal shows stay as they are.
+const rich = value => renderMarkdown(value, {link: fileLink, copyLabel: t('copy')});
+document.addEventListener('click', async e => {
+  const button = e.target.closest('.code button.copy');
+  if (!button) return;
+  try {
+    await navigator.clipboard.writeText(button.closest('.code').querySelector('code').textContent);
+    button.textContent = t('copied');
+    setTimeout(() => { button.textContent = t('copy'); }, 2000);
+  } catch { toast(t('copyFail'), 'err'); }
+});
 // A subagent is not one more tool line: it is someone sent off on an errand, so it gets a card that says what for and whether it is back.
 function subNode(d, m) {
   const state = ['running', 'done', 'failed'].includes(m.agent.state) ? m.agent.state : 'running';
   d.className = 'tool sub'; d.dataset.state = state;
-  d.innerHTML = `<summary><span class="sub-mark" aria-hidden="true"></span><span class="sub-body"><span class="sub-kind">${esc(t('subagent') + (m.agent.kind ? ' · ' + m.agent.kind : ''))}</span><span class="sub-what">${esc(m.text || t('subagent'))}</span></span><span class="sub-state">${esc(t({running: 'subRunning', done: 'subDone', failed: 'subFailed'}[state]))}</span></summary>${m.result ? `<pre>${md(m.result)}</pre>` : ''}`;
+  d.innerHTML = `<summary><span class="sub-mark" aria-hidden="true"></span><span class="sub-body"><span class="sub-kind">${esc(t('subagent') + (m.agent.kind ? ' · ' + m.agent.kind : ''))}</span><span class="sub-what">${esc(m.text || t('subagent'))}</span></span><span class="sub-state">${esc(t({running: 'subRunning', done: 'subDone', failed: 'subFailed'}[state]))}</span></summary>${m.result ? `<div class="md">${rich(m.result)}</div>` : ''}`;
   return d;
 }
 const subSig = m => m.agent ? `${m.agent.state}|${(m.result || '').length}` : '';
-function msgNode(m) {
+function msgNode(m, source) {
   if (m.role === 'tool' && m.agent) { const d = subNode(document.createElement('details'), m); d.dataset.sig = subSig(m); return d; }
   if (m.role === 'tool') {
     const d = document.createElement('details'); d.className = 'tool';
     d.innerHTML = `<summary><b>${esc(m.tool || t('tool'))}</b><span>${md(m.text.split('\n')[0])}</span></summary>${m.result || m.text.includes('\n') ? `<pre>${md(m.result || m.text)}</pre>` : ''}`;
     return d;
   }
-  const d = document.createElement('div'); d.className = `msg ${m.role}`; d.innerHTML = m.role === 'command' ? esc(m.text) : md(m.text); return d;
+  const d = document.createElement('div'), blocks = source === 'transcript' && m.role === 'assistant';
+  d.className = `msg ${m.role}${blocks ? ' md' : ''}`; d.innerHTML = m.role === 'command' ? esc(m.text) : blocks ? rich(m.text) : md(m.text); return d;
 }
 // ---------- outbox: what you sent shows at once and stays until the conversation carries it ----------
 const outbox = new Map();  // pane -> [{text, status: 'sending' | 'sent' | 'unseen', seen, count}]
@@ -600,7 +588,7 @@ async function loadEarlier(button) {
   if (!r || view !== state.view || conversation !== state.conversation) return;
   const {box, past} = parts();
   const fromBottom = box.scrollHeight - box.scrollTop;
-  past.prepend(...r.messages.map(msgNode));
+  past.prepend(...r.messages.map(m => msgNode(m, 'transcript')));
   state.cursor = r.start;
   renderEarlier('transcript');
   box.scrollTop = box.scrollHeight - fromBottom;
@@ -628,7 +616,7 @@ async function pastSheet(pane, id, title) {
     if (!r || !box.isConnected) return;
     const fromBottom = box.scrollHeight - box.scrollTop;
     box.querySelector('.past-more')?.remove(); box.querySelector('.empty')?.remove();
-    box.prepend(...r.messages.map(msgNode));
+    box.prepend(...r.messages.map(m => msgNode(m, 'transcript')));
     if (r.start) {
       const more = document.createElement('button'); more.type = 'button'; more.className = 'past-more'; more.textContent = t('loadEarlier');
       more.onclick = () => { if (!more.classList.contains('loading')) page(r.start); };
@@ -648,7 +636,7 @@ function renderMessages(r, first) {
   if (!same) { live.innerHTML = ''; state.rendered = 0; }
   // A subagent comes back long after its card was drawn: update that card where it stands.
   msgs.slice(0, state.rendered).forEach((m, i) => { const el = live.children[i]; if (m.agent && el?.classList.contains('sub') && el.dataset.sig !== subSig(m)) { subNode(el, m); el.dataset.sig = subSig(m); } });
-  for (const m of msgs.slice(state.rendered)) live.appendChild(msgNode(m));
+  for (const m of msgs.slice(state.rendered)) live.appendChild(msgNode(m, r.source));
   state.rendered = msgs.length; state.sig = sig(msgs[msgs.length - 1]); state.source = r.source;
   if (!msgs.length) live.innerHTML = `<div class="empty">${t('noChat')}</div>`;
   if (r.hint) { const h = document.createElement('div'); h.className = 'hint'; h.textContent = r.hint.replace(/\(.*$/, '').trim() || t('working'); box.appendChild(h); }

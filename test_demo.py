@@ -101,7 +101,7 @@ def test_demo_refuses_an_answer_to_a_question_that_changed(site):
 
 def test_demo_never_serves_a_stale_app():
     client = TestClient(demo.app)
-    for path in ("/", "/static/app.js", "/static/i18n.js", "/static/demo.js"):
+    for path in ("/", "/static/app.js", "/static/i18n.js", "/static/md.js", "/static/demo.js"):
         assert client.get(path).headers["cache-control"] == "no-cache", path
 
 

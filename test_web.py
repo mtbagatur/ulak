@@ -45,6 +45,7 @@ class FakeAPI:
         self.cards = [card("blocked", pending=APPROVAL)]
         self.limits = []
         self.messages = [{"role": "assistant", "text": "Example answer"}]
+        self.source = "transcript"
         self.approval = APPROVAL
         self.events = []
         self.requests = []
@@ -122,7 +123,7 @@ class Handler(SimpleHTTPRequestHandler):
             anchor = self.path.partition("?from=")[2]
             self.api.anchors.append(anchor)
             self.json({
-                "messages": self.api.messages, "source": "transcript", "prompt": self.api.approval,
+                "messages": self.api.messages, "source": self.api.source, "prompt": self.api.approval,
                 "status": item["status"], "session": item, "receipt": self.api.receipt,
                 "start": self.api.moved or (int(anchor) if anchor else self.api.start), "conversation": self.api.conversation,
             })
@@ -481,7 +482,7 @@ def test_last_line_of_long_reply_is_reachable_above_composer(api_fixture):
         assert chrome.js("""(() => {
             const messages = document.querySelector('#messages');
             messages.scrollTop = messages.scrollHeight;
-            const tail = messages.querySelector('.msg').lastChild;
+            const tail = messages.querySelector('.msg > p:last-child').lastChild;
             const range = document.createRange();
             range.setStart(tail, tail.textContent.indexOf('Final response line.'));
             range.setEnd(tail, tail.length);
@@ -713,7 +714,7 @@ def test_a_timed_out_approval_is_on_the_record_and_the_setting_is_visible(api_fi
 
 def test_interface_uses_no_emoji_glyphs():
     pictographs = re.compile("[\U0001F000-\U0001FAFF☀-➿⌚-⏿⬀-⯿]")
-    for name in ("index.html", "app.js", "i18n.js"):
+    for name in ("index.html", "app.js", "i18n.js", "md.js"):
         found = pictographs.findall((WEB / name).read_text())
         assert not found, f"{name} still draws {found}"
 
@@ -1468,3 +1469,113 @@ def test_older_messages_are_dropped_rather_than_left_with_a_hole(api_fixture):
     api.moved = 900  # the server could not reach back to the anchor any more
     chrome.wait("document.querySelectorAll('#messages .msg').length === 1")
     chrome.wait(f"document.querySelector('{EARLIER}').textContent === 'Load earlier'")
+
+
+# --- reading: markdown blocks and code copy ---
+def open_reader(chrome, url):
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("typeof rich === 'function' && document.querySelector('.card') !== null")
+
+
+def rendered(chrome, source, expression):
+    """Draw `source` as an answer into a detached box and ask the box something."""
+    return chrome.js(f"(() => {{ const d = document.createElement('div'); d.innerHTML = rich({json.dumps(source)}); return {expression}; }})()")
+
+
+def texts(selector):
+    return f"[...d.querySelectorAll({json.dumps(selector)})].map(e => e.textContent)"
+
+
+def test_markdown_blocks_render(api_fixture):
+    chrome, api, url = api_fixture
+    open_reader(chrome, url)
+    source = ("# One\n## Two\n### Three\n#### Four\n\nplain **bold** `x<y`\n\n- a\n- b\n  - inner\n      - deeper\n\n3. c\n4. d\n\n"
+              "| h1 | h2 |\n|:---|---:|\n| 1 | 2 |\n\n```python\nif a < b:\n    pass\n```\n")
+    assert rendered(chrome, source, texts("h3")) == ["One", "Two"]
+    assert rendered(chrome, source, texts("h4")) == ["Three", "Four"]
+    assert rendered(chrome, source, texts("p")) == ["plain bold x<y"]
+    assert rendered(chrome, source, "d.querySelectorAll('ul > li').length") == 4
+    assert rendered(chrome, source, texts("ul ul > li")) == ["inner", "deeper"]
+    assert rendered(chrome, source, "d.querySelectorAll('ul ul ul').length") == 0
+    assert rendered(chrome, source, "[d.querySelector('ol').getAttribute('start'), d.querySelectorAll('ol > li').length]") == ["3", 2]
+    assert rendered(chrome, source, texts(".tbl > table th")) == ["h1", "h2"] and rendered(chrome, source, texts(".tbl td")) == ["1", "2"]
+    assert rendered(chrome, source, "d.querySelector('.code .bar span').textContent") == "python"
+    assert rendered(chrome, source, "d.querySelector('.code pre > code').textContent") == "if a < b:\n    pass"
+    assert rendered(chrome, source, "d.querySelector('.code .bar button.copy').textContent") == "Copy"
+
+
+def test_half_built_markdown_stays_visible(api_fixture):
+    chrome, api, url = api_fixture
+    open_reader(chrome, url)
+    for source in ("| a | b |\nnext", "> quoted", "##### five"):
+        assert rendered(chrome, source, "[d.textContent, d.querySelectorAll('table, h3, h4, blockquote').length]") == [source, 0], source
+    assert rendered(chrome, "```\nleft open\n| a |", "d.querySelector('.code code').textContent") == "left open\n| a |"
+
+
+def test_tables_survive_crlf_code_pipes_and_ragged_rows(api_fixture):
+    chrome, api, url = api_fixture
+    open_reader(chrome, url)
+    source = "| cmd | why | n |\r\n|---|---|---|\r\n| `a|b` | x \\| y | 1 |\r\n| short |\r\n| p | q | r | s | t |\r\n"
+    rows = "[...d.querySelectorAll('tbody tr')].map(r => [...r.cells].map(c => c.textContent))"
+    assert rendered(chrome, source, rows) == [["a|b", "x | y", "1"], ["short", "", ""], ["p", "q", "r | s | t"]]
+
+
+def test_markdown_never_lets_markup_through(api_fixture):
+    chrome, api, url = api_fixture
+    open_reader(chrome, url)
+    hostile = ('<script>window.pwned=1</script>\n<img src=x onerror=window.pwned=1>\n[x](javascript:alert(1))\n![y](javascript:alert(2))\n'
+               '# <img src=x onerror=window.pwned=1>\n| <script>a</script> |\n|---|\n| <img src=x onerror=window.pwned=1> |\n\n'
+               '- <svg onload=window.pwned=1>\n```"><img src=x onerror=window.pwned=1>\ncode\n```\n\u00010\u0002 [`z`](a.md)')
+    chrome.js(f"window.box = document.createElement('div'); document.body.appendChild(box); box.innerHTML = rich({json.dumps(hostile)})")
+    time.sleep(0.2)
+    assert chrome.js("window.pwned === undefined")
+    assert chrome.js("box.querySelectorAll('script, img, svg, [onerror], [onload], a[href^=javascript]').length") == 0
+    assert chrome.js("box.querySelector('a code').textContent") == "z"
+    assert chrome.js("!/[\\u0001\\u0002]/.test(box.textContent)")
+
+
+def test_markdown_stays_fast_on_hostile_text(api_fixture):
+    chrome, api, url = api_fixture
+    open_reader(chrome, url)
+    for source in ("'['.repeat(100000)", "'|'.repeat(100000) + '\\n|-|'", "'`'.repeat(100000)", "'a/'.repeat(100000)", "'- item\\n'.repeat(20000)",
+                   "'a/' + '!'.repeat(100000)", "'http://' + '.'.repeat(100000)", "' '.repeat(100000) + 'x'", "'|' + ' '.repeat(100000) + '\\n|-' + ' '.repeat(100000) + 'x'"):
+        for call in ("rich", "md"):
+            took = chrome.js(f"(() => {{ const s = {source}, a = performance.now(); {call}(s); return performance.now() - a; }})()")
+            assert took < 1000, (call, source, took)
+
+
+def test_user_and_screen_messages_stay_as_typed(api_fixture):
+    chrome, api, url = api_fixture
+    api.messages = [{"role": "user", "text": "# mine"}, {"role": "assistant", "text": "# theirs"}]
+    open_first(chrome, url)
+    assert chrome.js("document.querySelector('.msg.user').textContent") == "# mine"
+    assert chrome.js("document.querySelector('.msg.assistant.md h3').textContent") == "theirs"
+    api.source, api.messages = "screen", [{"role": "assistant", "text": "# terminal"}]
+    api.publish_session("working")
+    chrome.wait("document.querySelector('.msg.assistant')?.textContent === '# terminal'")
+    assert chrome.js("document.querySelector('.msg h3') === null")
+
+
+def test_wide_tables_scroll_inside_their_box(api_fixture):
+    chrome, api, url = api_fixture
+    row = "|" + "|".join(f" column number {i} " for i in range(8)) + "|"
+    api.messages = [{"role": "assistant", "text": "\n".join([row, "|" + "---|" * 8, row])}]
+    chrome.resize(320, 700)
+    open_first(chrome, url)
+    assert chrome.js("document.documentElement.scrollWidth") <= 320
+    assert chrome.js("(() => { const t = document.querySelector('.tbl'); return t.scrollWidth > t.clientWidth && t.getBoundingClientRect().right <= document.querySelector('#messages').getBoundingClientRect().right; })()")
+    assert chrome.js("getComputedStyle(document.querySelector('.tbl td')).position") == "sticky"
+
+
+def test_copy_puts_raw_code_on_the_clipboard(api_fixture):
+    chrome, api, url = api_fixture
+    api.messages = [{"role": "assistant", "text": "```sh\necho \"<a&b>\"\n  two\n```"}]
+    open_first(chrome, url)
+    chrome.js("Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {writeText: t => (window.copied = t, Promise.resolve())}})")
+    assert chrome.js("document.querySelector('button.copy').getBoundingClientRect().height") >= 44
+    chrome.click("button.copy")
+    chrome.wait("document.querySelector('button.copy').textContent === 'Copied'")
+    assert chrome.js("window.copied") == 'echo "<a&b>"\n  two'
+    chrome.js("Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {writeText: () => Promise.reject(new Error('no'))}})")
+    chrome.click("button.copy")
+    chrome.wait("document.querySelector('#toasts .err')?.textContent === 'Could not copy'")
