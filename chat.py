@@ -188,6 +188,17 @@ def _tool_summary(name, inp):
 HARNESS_PREFIX = ("<command-", "<local-command", "<task-notification", "<system-reminder", "Caveat:", "<user-prompt")
 
 
+def typed_command(text):
+    """What was typed, if this line is the harness recording a slash command; else an empty string."""
+    if not text.lstrip().startswith(("<command-name>", "<command-message>")):
+        return ""
+    name = re.search(r"<command-name>\s*(/[^<\s]+)\s*</command-name>", text)
+    if not name:
+        return ""
+    args = re.search(r"<command-args>(.*?)</command-args>", text, re.S)
+    return " ".join(filter(None, [name.group(1), args.group(1).strip() if args else ""]))
+
+
 def _harness(d):
     if d.get("isMeta") or d.get("isCompactSummary") or d.get("promptSource") == "system":
         return True
@@ -253,7 +264,9 @@ def claude_chat(path, max_messages=60, tail_bytes=700_000):
             if _harness(d):
                 continue
             if isinstance(content, str):
-                if content.strip() and not content.lstrip().startswith(HARNESS_PREFIX):
+                if command := typed_command(content):
+                    msgs.append({"role": "command", "text": command, "ts": ts})
+                elif content.strip() and not content.lstrip().startswith(HARNESS_PREFIX):
                     msgs.append({"role": "user", "text": content.strip(), "ts": ts})
                 continue
             for block in content if isinstance(content, list) else []:

@@ -229,7 +229,7 @@ diff --git a/tests/test_retry.py b/tests/test_retry.py
     if (verb && !s) return [404, {detail: 'Session not found'}];
     if (verb === 'approve') return approve(pane, body);
     if (verb === 'prompt') {
-      (chats[pane] ||= []).push(user(body.text || ''));
+      (chats[pane] ||= []).push((body.text || '').startsWith('/') ? {role: 'command', text: body.text} : user(body.text || ''));
       set(s, {status: 'working', hint: L('Thinking…', 'Düşünüyor…')});
       later(2.5, () => finish(s, [bot(L('This is a demo, so no agent is behind this session. On your own machine these words are typed into the agent\'s terminal, exactly as you wrote them.', 'Bu bir demo; bu oturumun arkasında ajan yok. Kendi makinende bu sözler, yazdığın gibi ajanın terminaline girilir.'))]));
       return {ok: true};

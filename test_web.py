@@ -56,6 +56,7 @@ class FakeAPI:
         self.config = {"quick_label": "", "approval_timeout_minutes": 0}
         self.changes = {"repo": False, "branch": "", "files": [], "more_files": 0, "diff": "", "truncated": False}
         self.presence = []
+        self.fail_prompt = False
         self.respond = threading.Event()
         self.respond.set()
         self.ended = threading.Event()
@@ -163,6 +164,10 @@ class Handler(SimpleHTTPRequestHandler):
         if self.path == "/api/presence":
             api.presence.append(body)
             self.json({"ok": True})
+            return
+        if self.path == "/api/sessions/fake%3Ap1/prompt":
+            assert api.respond.wait(8), "test did not release the held message"
+            self.json({"detail": "Herdr is down"}, 503) if api.fail_prompt else self.json({"ok": True})
             return
         if self.path != "/api/sessions/fake%3Ap1/approve":
             self.send_error(404)
@@ -1296,3 +1301,61 @@ def test_a_quiet_list_without_active_sessions_is_not_redrawn_either(api_fixture,
               ".observe(document.querySelector('#home'), {subtree: true, childList: true, attributes: true, characterData: true})")
     time.sleep(3.2)
     assert chrome.js("__changed") == 0
+
+
+def send(chrome, text):
+    chrome.js(f"(() => {{ const t = document.querySelector('#message'); t.value = {json.dumps(text)}; t.dispatchEvent(new Event('input')); document.querySelector('#composer').requestSubmit(); }})()")
+
+
+PENDING = "document.querySelector('#messages .msg.pending')"
+MINE = "[...document.querySelectorAll('#messages .msg.user')].map(e => e.querySelector('.body')?.textContent || e.textContent)"
+
+
+def test_sent_message_appears_at_once_and_settles_when_the_agent_has_it(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    api.respond.clear()
+    open_first(chrome, url)
+    send(chrome, "run the tests")
+    chrome.wait(f"{PENDING}?.textContent.includes('run the tests') && {PENDING}.textContent.includes('Sending')")
+    assert chrome.js("document.querySelector('#message').value") == ""
+    api.respond.set()
+    chrome.wait(f"{PENDING}.textContent.includes('waiting for the agent')")
+    api.messages = api.messages + [{"role": "user", "text": "run the tests", "ts": "t1"}]
+    chrome.wait(f"!{PENDING}")
+    assert chrome.js(MINE) == ["run the tests"]
+
+
+def test_failed_send_returns_the_draft(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    api.fail_prompt = True
+    open_first(chrome, url)
+    send(chrome, "keep me")
+    chrome.wait("document.querySelector('#message').value === 'keep me'")
+    assert chrome.js(f"!!{PENDING}") is False
+
+
+def test_repeating_an_earlier_message_waits_for_the_new_copy(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    api.messages = [{"role": "user", "text": "go on", "ts": "t0"}]
+    open_first(chrome, url)
+    chrome.wait("!!document.querySelector('#messages .msg.user')")
+    send(chrome, "go on")
+    chrome.wait(f"{PENDING}?.textContent.includes('waiting for the agent')")
+    time.sleep(2)  # a poll that brings only the old copy
+    assert chrome.js(f"!!{PENDING}") is True
+    api.messages = api.messages + [{"role": "user", "text": "go on", "ts": "t1"}]
+    chrome.wait(f"!{PENDING}")
+
+
+def test_unseen_message_says_so_and_a_command_settles_it(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    open_first(chrome, url)
+    chrome.js("window.UNSEEN_MS = 300")
+    send(chrome, "/clear")
+    chrome.wait(f"{PENDING}?.textContent.includes('Not in the conversation yet')")
+    api.messages = [{"role": "command", "text": "/clear", "ts": "t2"}]
+    chrome.wait(f"!{PENDING} && document.querySelector('#messages .msg.command')?.textContent === '/clear'")

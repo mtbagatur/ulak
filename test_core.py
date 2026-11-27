@@ -1840,3 +1840,18 @@ def test_herdr_error_keeps_the_known_session(monkeypatch, tmp_path):
     fake.broken = True
     r = c.get("/api/sessions/w9:p1/chat", headers=h).json()
     assert [m["text"] for m in r["messages"]] == ["the old conversation"]
+
+
+def test_typed_slash_commands_are_part_of_the_conversation(tmp_path):
+    def user(content, **extra):
+        return json.dumps({"type": "user", "timestamp": "2026-11-27T10:00:00Z", "message": {"content": content}, **extra})
+    log = tmp_path / "log.jsonl"
+    log.write_text("\n".join([
+        user("<command-name>/clear</command-name>\n   <command-message>clear</command-message>\n   <command-args></command-args>"),
+        user("<command-message>model</command-message>\n<command-name>/model</command-name>\n<command-args>opus</command-args>"),
+        user("<command-name>/hidden</command-name>", isMeta=True),
+        user("<local-command-stdout>done</local-command-stdout>"),
+        user("<system-reminder>remember</system-reminder>"),
+    ]) + "\n")
+    msgs, _ = claude_chat(log)
+    assert [(m["role"], m["text"]) for m in msgs] == [("command", "/clear"), ("command", "/model opus")]
