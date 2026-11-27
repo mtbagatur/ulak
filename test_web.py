@@ -1860,6 +1860,8 @@ def test_unknown_measures_are_absent_not_zero(api_fixture):
     open_first(chrome, url)
     chrome.wait(SHOWN)
     assert chrome.js(META) == "Context 124k"
+    # with no limit ring beside it, this line is the only way to the meters sheet: a full touch target
+    assert chrome.js("parseFloat(getComputedStyle(document.querySelector('#sMeta'), '::before').height)") >= 44
     api.meters = {"cache": meters()["cache"]}
     chrome.wait(f"{META} === 'Cache ~41m'")
     api.meters = {}
