@@ -176,10 +176,13 @@ def test_history_close_button_stays_off_the_tabs(site, width):
     assert overlapping == []
 
 
+@pytest.mark.parametrize("font", ("", "DejaVu Sans, Verdana"))  # the phone's own, and a wide one
 @pytest.mark.parametrize("lang", ("en", "tr"))
-def test_all_three_limits_fit_the_narrowest_phone(site, lang):
+def test_all_three_limits_fit_the_narrowest_phone(site, lang, font):
     chrome = site
     chrome.resize(320, 700)
+    if font:
+        chrome.js(f"document.documentElement.style.fontFamily = {json.dumps(font)}")
     chrome.js(f"if (LANG !== {json.dumps(lang)}) toggleLang()")
     chrome.wait("document.querySelectorAll('#limits .lim').length === 3")
     assert chrome.js("(() => { const box = document.querySelector('#limits'); return box.scrollWidth - box.clientWidth; })()") <= 0
