@@ -12,7 +12,9 @@
     : 'en' in v && 'tr' in v ? v[LANG] : Object.fromEntries(Object.entries(v).map(([k, x]) => [k, localise(x)]));
   const plain = said => L(said.en.replace(/[`*]/g, ''), said.tr.replace(/[`*]/g, ''));  // a card shows plain words
   const user = text => ({role: 'user', text}), bot = text => ({role: 'assistant', text});
-  const tool = (name, text, result, agent) => ({role: 'tool', tool: name, text, ...(result ? {result} : {}), ...(agent ? {agent} : {})});
+  // Every call has an id and an ending, as a transcript gives them: what went well folds, what failed or was refused stays in sight.
+  let calls = 0;
+  const tool = (name, text, result, agent, more) => ({role: 'tool', tool: name, text, id: `demo-call-${++calls}`, state: 'ok', ...(result ? {result} : {}), ...(agent ? {agent} : {}), ...more});
   const ask = (details, fingerprint, destructive, always) => ({kind: 'approval', question: 'Do you want to proceed?', destructive: !!destructive, cut: false,
     details, fingerprint, roles: always ? ['approve', 'always', 'deny'] : ['approve', 'deny']});
   const card = (pane, agent, status, project, ws, title, preview, ago, model, pending, hint) => ({pane_id: pane, agent, status, since: now() - ago, project, title,
@@ -35,13 +37,13 @@
       tool('Agent', L('Find every caller of retry_with_backoff', 'retry_with_backoff çağıran her yeri bul'), L('4 callers: feeds.py, exports.py, alerts.py, webhooks.py. Only feeds.py retries a write.', '4 çağıran var: feeds.py, exports.py, alerts.py, webhooks.py. Yazma işlemini yalnız feeds.py yeniden deniyor.'), {kind: 'Explore', state: 'done'}),
       tool('Agent', L('Run the sync suite 20 times and count the failures', 'Senkron testlerini 20 kez çalıştırıp kalanları say'), '', {kind: 'general-purpose', state: 'running'}),
       bot(L('Found it. `retry_with_backoff` sleeps with a **fixed** delay, so two workers retry in lockstep and collide on the same row.', 'Buldum. `retry_with_backoff` **sabit** süre bekliyor; iki işçi aynı anda yeniden deneyip aynı satırda çakışıyor.')),
-      tool('Edit', 'src/sync/retry.py', '+    delay = base * 2 ** attempt + random.uniform(0, base)'),
+      tool('Edit', 'src/sync/retry.py', '', null, {added: 2, removed: 1, diff: [[' ', '    """Call fn again after a failure, waiting longer each time."""'], ['-', '    delay = base * 2 ** attempt'], ['+', '    delay = base * 2 ** attempt + random.uniform(0, base)'], ['+', '    log.debug("retry %s in %.2fs", attempt, delay)']]}),
       bot(L('I added jitter to the backoff. Let me run the sync tests to confirm.', 'Beklemeye rastgele bir pay ekledim. Doğrulamak için senkron testlerini çalıştırayım.')),
     ],
     'd2:p1': [
       user(L('Cut the 2.4 release branch and write the notes. Ask me before anything leaves this machine.', '2.4 yayın dalını aç, notları yaz. Bu makineden bir şey çıkmadan önce bana sor.')),
       tool('Bash', 'git log --oneline v2.3.0..HEAD', '31 commits: 4 features, 19 fixes, 8 chores'),
-      tool('Write', 'docs/releases/2.4.md', '+ ## 2.4\n+ - Saved filters on the archive page\n+ - Faster first load (-38% JS)\n+ - 19 fixes'),
+      tool('Write', 'docs/releases/2.4.md', '+ ## 2.4\n+ - Saved filters on the archive page\n+ - Faster first load (-38% JS)\n+ - 19 fixes', null, {lines: 4}),
       bot(L('The notes are in `docs/releases/2.4.md` and the branch `release/2.4` exists locally. Pushing it starts the release pipeline.', 'Sürüm notları `docs/releases/2.4.md` dosyasında, `release/2.4` dalı da yerelde hazır. Göndermek yayın hattını başlatır.')),
     ],
     'd3:p1': [
@@ -53,12 +55,22 @@
       user(L('The quickstart is too long. Get a new user to a first request in five minutes.', 'Hızlı başlangıç çok uzun. Yeni bir kullanıcı beş dakikada ilk isteğini atabilsin.')),
       tool('Read', 'docs/quickstart.md', '412 lines'),
       bot(L('Most of the page is configuration reference. I am moving that to its own page and keeping three steps: install, key, first request.', 'Sayfanın çoğu ayar başvurusu. Onu ayrı sayfaya taşıyıp üç adım bırakıyorum: kurulum, anahtar, ilk istek.')),
-      tool('Edit', 'docs/quickstart.md', '- ## Advanced configuration\n+ See [Configuration](configuration.md) for every option.'),
+      tool('Edit', 'docs/quickstart.md', '', null, {added: 1, removed: 1, diff: [['-', '## Advanced configuration'], ['+', 'See [Configuration](configuration.md) for every option.']]}),
     ],
     'd5:p1': [
       user(L('Backfill the events table from the March export.', 'events tablosunu mart dışa aktarımından doldur.')),
-      tool('Bash', 'python jobs/backfill.py --from 2026-03-01 --to 2026-03-31', 'batches: 240/240\nrows: 1,204,118\nerrors: 0'),
-      bot(L('Backfill finished: 1.2M rows, 0 errors. Row counts match the export manifest.', 'Doldurma bitti: 1,2 milyon satır, 0 hata. Satır sayıları dışa aktarım dökümüyle tutuyor.')),
+      tool('Read', 'jobs/backfill.py', '212 lines'),
+      tool('Read', 'exports/2026-03/manifest.json', '240 batches, 1,204,118 rows'),
+      tool('Grep', 'tenant_id in jobs/', 'jobs/backfill.py:88:    row["tenant"] = batch["tenant_id"]'),
+      bot(L('The job reads the export batch by batch. I will do a dry run before anything is written.', 'İş dışa aktarımı parti parti okuyor. Bir şey yazılmadan önce deneme çalıştırması yapacağım.')),
+      tool('Bash', 'python jobs/backfill.py --dry-run', 'batch 17/240\nTraceback (most recent call last):\n  File "jobs/backfill.py", line 88, in load\n    row["tenant"] = batch["tenant_id"]\nKeyError: \'tenant_id\'\n1 batch failed', null, {state: 'failed'}),
+      bot(L('Batches written before 9 March have no `tenant_id`. I will fall back to the default tenant for those.', '9 Marttan önce yazılan partilerde `tenant_id` yok. Onlar için varsayılan kiracıya döneceğim.')),
+      tool('Edit', 'jobs/backfill.py', '', null, {added: 3, removed: 1, diff: [[' ', 'def load(batch):'], ['-', '    row["tenant"] = batch["tenant_id"]'], ['+', '    # exports from before 9 March carry no tenant'], ['+', '    tenant = batch.get("tenant_id", DEFAULT_TENANT)'], ['+', '    row["tenant"] = tenant']]}),
+      tool('Bash', 'python jobs/backfill.py --dry-run', 'batches: 240/240\nrows: 1,204,118\nerrors: 0'),
+      tool('Bash', 'psql -c "TRUNCATE events"', L('Do not empty the table. Insert only the rows that are missing.', 'Tabloyu boşaltma. Yalnız eksik satırları ekle.'), null, {state: 'rejected'}),
+      tool('Bash', 'python jobs/backfill.py --from 2026-03-01 --to 2026-03-31 --missing-only', 'batches: 240/240\nrows: 1,204,118\nerrors: 0'),
+      bot(L('## Backfill finished\n\n1.2M rows, 0 errors. Row counts match the export manifest.\n\n| Week | Rows | Errors |\n|---|---|---|\n| 1–7 March | 281,340 | 0 |\n| 8–14 March | 268,902 | 0 |\n| 15–21 March | 301,115 | 0 |\n| 22–31 March | 352,761 | 0 |\n\nTo check it yourself:\n\n```sql\nSELECT date_trunc(\'week\', ts) AS week, count(*)\nFROM events\nWHERE ts >= \'2026-03-01\' AND ts < \'2026-04-01\'\nGROUP BY 1 ORDER BY 1;\n```\n\nThe chart is in reports/backfill.png.',
+        '## Doldurma bitti\n\n1,2 milyon satır, 0 hata. Satır sayıları dışa aktarım dökümüyle tutuyor.\n\n| Hafta | Satır | Hata |\n|---|---|---|\n| 1–7 Mart | 281.340 | 0 |\n| 8–14 Mart | 268.902 | 0 |\n| 15–21 Mart | 301.115 | 0 |\n| 22–31 Mart | 352.761 | 0 |\n\nKendin kontrol etmek için:\n\n```sql\nSELECT date_trunc(\'week\', ts) AS week, count(*)\nFROM events\nWHERE ts >= \'2026-03-01\' AND ts < \'2026-04-01\'\nGROUP BY 1 ORDER BY 1;\n```\n\nGrafik reports/backfill.png dosyasında.')),
     ],
   };
   // What each agent does once its question is answered.
@@ -77,6 +89,15 @@
   const notes = [{ts: now() - 240, pane: 'd2:p1', status: 'blocked', title: 'tugra', body: needs('git push origin release/2.4')},
     {ts: now() - 90, pane: 'd1:p1', status: 'blocked', title: 'panel', body: needs('pytest -q tests/test_sync.py')}];
   let pins = ['work|panel'], made = 0, infraAsked = false;
+  // What a Claude session record says about itself. Other tools keep no such record, so their sessions show only the limit.
+  const T0 = now();
+  const METERS = {'d1:p1': {context: {tokens: 124300, ts: T0 - 40}, cache: {ttl: 3600, since: T0 - 19 * 60}},
+    'd2:p1': {context: {tokens: 61800, ts: T0 - 240}, cache: {ttl: 3600, since: T0 - 240}},
+    'd5:p1': {context: {tokens: 48200, ts: T0 - 120}, cache: {ttl: 3600, since: T0 - 120}}};
+  let limitRows = [
+    {id: 'claude', label: 'Claude', updated: now() - 120, items: [{label: '5h', used: 38, resets_at: now() + 2.4 * 3600}, {label: '7d', used: 71, resets_at: now() + 3.2 * 86400}]},
+    {id: 'codex', label: 'Codex', updated: now() - 300, items: [{label: '5h', used: 12, resets_at: now() + 4.1 * 3600}, {label: '7d', used: 91, resets_at: now() + 1.5 * 86400}]},
+    {id: 'agy', label: 'agy', updated: now() - 600, items: [{label: '7d', used: 24, resets_at: now() + 5.3 * 86400}]}];
 
   if (worst) {  // break-ui: long names, unbreakable strings, a huge command, RTL/CJK/emoji
     const long = 'x'.repeat(200), big = Array.from({length: 60}, (_, i) => `find / -name '*.log' -exec rm -f {} \; # step ${i} ${'a'.repeat(60)}`).join('\n');
@@ -88,7 +109,15 @@
       card('w3:p1', 'agy', 'done', '同じ名前', 'ws', 't'.repeat(90), 'y'.repeat(400), 99999999),
       card('w4:p1', 'claude', 'idle', 'same', 'w1', '', '', 7200, ''), card('w5:p1', 'claude', 'idle', 'same', 'w2', '', '', 7200, ''),
     ];
-    const hard = [user('z'.repeat(300) + '\n\n\n\n\nend'), bot('```\n' + 'long_line_'.repeat(40) + '\n```\n' + long + '\nhttps://example.com/' + 'p'.repeat(200)), tool('Bash', big.slice(0, 400), big)];
+    const wide = ['|' + Array.from({length: 12}, (_, i) => ` column_${i}_${'w'.repeat(20)} `).join('|') + '|', '|' + '---|'.repeat(12),
+      ...Array.from({length: 30}, (_, r) => '|' + Array.from({length: 12}, (_, c) => ` ${'v'.repeat(r + c + 1)} `).join('|') + '|')].join('\n');
+    const deep = 'src/' + 'very_long_directory/'.repeat(30) + 'file.py';
+    const hard = [user('z'.repeat(300) + '\n\n\n\n\nend'), bot('```\n' + 'long_line_'.repeat(40) + '\n```\n' + long + '\nhttps://example.com/' + 'p'.repeat(200)), tool('Bash', big.slice(0, 400), big),
+      ...Array.from({length: 200}, (_, i) => tool(i % 3 ? 'Read' : 'Edit', deep, '', null, i % 3 ? {} : {added: 99999, removed: 99999, diff: [['+', 'y'.repeat(200)], ['-', long]], diff_cut: true})),
+      tool('Bash', big.slice(0, 400), big, null, {state: 'failed'}), tool('Bash', deep, long, null, {state: 'rejected'}), tool('mcp__' + long, deep, '', null, {state: 'running'}),
+      bot('# ' + long + '\n\n' + wide + '\n\nmissing/1.png missing/2.png missing/3.png missing/4.png missing/5.png')];
+    METERS['d1:p1'] = {context: {tokens: 987654321, ts: T0 - 9e6}, cache: {ttl: 3600, since: T0 - 9e6}};
+    limitRows = [{id: 'claude', label: 'Claude ' + long, updated: now() - 9e6, items: Array.from({length: 12}, (_, i) => ({label: `window ${i} ${'n'.repeat(40)}`, used: i * 9, resets_at: now() + (i + 1) * 9e5}))}];
     sessions.forEach(s => { chats[s.pane_id] = hard.slice(); });
   }
 
@@ -149,7 +178,7 @@
     const s = find(pane);
     if (!s) return [404, {detail: 'Session not found'}];
     const p = s.pending, labels = {approve: 'Yes', always: "Yes, and don't ask again", deny: 'No'};
-    return [200, {messages: chats[pane] || [], source: 'transcript', status: s.status, hint: s.hint, session: view(s),
+    return [200, {messages: chats[pane] || [], source: 'transcript', status: s.status, hint: s.hint, session: view(s), meters: METERS[pane] || {}, now: now(),
       prompt: p && {...p, options: p.roles.map((role, i) => ({n: i + 1, label: labels[role], role}))},
       receipt: audit.find(a => a.pane === pane && a.outcome === 'sent') || null}];
   }
@@ -200,10 +229,7 @@ diff --git a/tests/test_retry.py b/tests/test_retry.py
     {name: '/review', description: L('Review the current diff before it ships', 'Yayından önce güncel farkı incele'), source: 'project'},
     {name: '/release-notes', description: L('Draft release notes from merged changes', 'Birleşen değişikliklerden sürüm notu taslağı çıkar'), source: 'project'},
     {name: '/git:sync', description: L('Rebase on main and rerun the tests', 'main üzerine taşı, testleri yeniden çalıştır'), source: 'user'}];
-  const limits = () => ({now: now(), providers: [
-    {id: 'claude', label: 'Claude', updated: now() - 120, items: [{label: '5h', used: 38, resets_at: now() + 2.4 * 3600}, {label: '7d', used: 71, resets_at: now() + 3.2 * 86400}]},
-    {id: 'codex', label: 'Codex', updated: now() - 300, items: [{label: '5h', used: 12, resets_at: now() + 4.1 * 3600}, {label: '7d', used: 91, resets_at: now() + 1.5 * 86400}]},
-    {id: 'agy', label: 'agy', updated: now() - 600, items: [{label: '7d', used: 24, resets_at: now() + 5.3 * 86400}]}]});
+  const limits = () => ({now: now(), providers: limitRows});
   const PROJECTS = {projects: ['panel', 'tugra', 'kurmay'].map(name => ({name, path: `/home/you/projects/${name}`, display: `~/projects/${name}`})),
     tools: {claude: ['sonnet', 'opus'], codex: [], agy: []}};
 
@@ -275,6 +301,13 @@ diff --git a/tests/test_retry.py b/tests/test_retry.py
     const body = written ? written.replace(/^[+-] ?/gm, '') : `${path}\n\nThis is a demo, so there is no file behind this link. On your own machine it opens the file from the session's folder.`;
     a.href = URL.createObjectURL(new Blob([body + '\n'], {type: 'text/plain;charset=utf-8'}));
   }, true);
+  // A picture would be asked from the server too. The demo draws one itself; a path it does not know stays missing, as a deleted file would.
+  const CHART = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180"><rect width="320" height="180" fill="#261d2b"/><path d="M36 150h260M36 110h260M36 70h260M36 30h260" stroke="#3f3149"/>'
+    + [[60, 97], [124, 93], [188, 104], [252, 122]].map(([x, h]) => `<rect x="${x}" y="${150 - h}" width="36" height="${h}" rx="4" fill="#d4ad62"/>`).join('')
+    + '<g fill="#a99caa" font="10px sans-serif" font-family="sans-serif" font-size="10" text-anchor="middle"><text x="78" y="166">1–7</text><text x="142" y="166">8–14</text><text x="206" y="166">15–21</text><text x="270" y="166">22–31</text></g></svg>');
+  new MutationObserver(() => document.querySelectorAll('img[src*="/file?path="]').forEach(img => {
+    if (!decodeURIComponent(img.getAttribute('src')).includes('path=missing/')) img.src = CHART;
+  })).observe(document.documentElement, {childList: true, subtree: true});
   // The language can change while the page is open: say every card again.
   new MutationObserver(() => sessions.forEach(s => set(s, {}))).observe(document.documentElement, {attributeFilter: ['lang']});
   // No service worker and no push: a demo must not install itself or ask for notification permission.

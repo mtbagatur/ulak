@@ -203,3 +203,42 @@ def test_history_tabs_are_a_full_touch_target(site):
     chrome.click("#history")
     chrome.wait("document.querySelector('#sheet [data-tab]') !== null")
     assert min(chrome.js("[...document.querySelectorAll('#sheet [data-tab]')].map(tab => tab.offsetHeight)")) >= 44
+
+
+@pytest.mark.parametrize("lang", ("en", "tr"))
+def test_demo_conversation_shows_what_this_release_reads(site, lang):
+    chrome = site
+    chrome.cdp("Page.navigate", url=chrome.js(f"location.origin + '/demo/?speed=8&lang={lang}'"))
+    chrome.wait(f"document.documentElement.lang === '{lang}' && document.querySelectorAll('.card').length === 6")
+    open_card(chrome, "d5:p1")
+    for piece in (".tbl", ".code", ".run", ".act.bad", ".act.denied"):
+        assert chrome.js(f"document.querySelector('#messages {piece}') !== null"), piece
+    chrome.wait("!document.querySelector('#sMeta').hidden && !document.querySelector('#sRing').hidden")
+    assert text(chrome, "#sMeta").startswith({"en": "Context 48k · Cache ~", "tr": "Bağlam 48k · Cache ~"}[lang])
+    assert {"en": "You said no", "tr": "Sen reddettin"}[lang] in text(chrome, "#messages .act.denied")
+    assert {"en": "Insert only the rows", "tr": "Yalnız eksik satırları"}[lang] in text(chrome, "#messages .act.denied")
+    chrome.wait("(() => { const i = document.querySelector('#messages .shot img'); return !!i && i.complete && i.naturalWidth > 0; })()")
+    chrome.click("#messages .shot")
+    chrome.wait("!document.querySelector('#viewer').hidden && document.querySelector('#viewer img').naturalWidth > 0")
+    assert chrome.js("performance.getEntriesByType('resource').filter(r => new URL(r.name).pathname.startsWith('/api')).length") == 0
+    assert "[object Object]" not in chrome.js("document.body.textContent")
+
+
+def test_worst_case_reading_data_stays_inside_a_narrow_phone(site):
+    chrome = site
+    chrome.resize(320, 700)
+    chrome.cdp("Page.navigate", url=chrome.js("location.origin + '/demo/?speed=8&worst'"))
+    chrome.wait("document.querySelectorAll('.card').length === 5")
+    open_card(chrome, "d1:p1")
+    chrome.wait("document.querySelector('#messages .run') !== null && document.querySelector('#messages .tbl') !== null")
+    inside = "document.documentElement.scrollWidth <= 320 && [...document.querySelectorAll('#messages .live > *, #session .top > *')].every(e => e.getBoundingClientRect().right <= 320 && e.getBoundingClientRect().left >= 0)"
+    assert chrome.js(inside)
+    assert chrome.js("document.querySelectorAll('#messages .act.bad, #messages .act.denied').length") == 2
+    chrome.wait("document.querySelector('#messages .shot') === null")  # four pictures that cannot load leave no empty boxes
+    chrome.click("#messages .run > button")
+    chrome.wait("document.querySelectorAll('#messages .run.open .step').length >= 200")
+    assert chrome.js(inside)
+    chrome.wait("!document.querySelector('#sRing').hidden && !document.querySelector('#sMeta').hidden")
+    chrome.click("#sRing")
+    chrome.wait("document.querySelectorAll('#sheet .meter').length === 14")
+    assert chrome.js("document.documentElement.scrollWidth <= 320 && [...document.querySelectorAll('#sheet .meter')].every(e => e.getBoundingClientRect().right <= 320)")

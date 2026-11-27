@@ -37,7 +37,7 @@ Ulak listens on `127.0.0.1:8765` and nowhere else. The phone reaches it through 
 - **Commands that hide what they do.** The destructive list is pattern matching on the text of the command. `./deploy.sh` or `make release` will not match unless you add a pattern. It is a speed bump for the obvious cases, not a sandbox.
 - **A command that lies.** The fingerprint proves the prompt did not change between your reading and your answer. It says nothing about whether the command does what it appears to.
 - **A tampered log.** The decision log is a plain file owned by your user. It is a record for you, not evidence against someone with access to your account.
-- **Eyes on your phone.** Conversations, the screen view and diffs can contain source code and secrets, and they are shown on the phone. Push notifications carry the project name and a short preview of the command or reply, which the phone may show on its lock screen.
+- **Eyes on your phone.** Conversations, the screen view and diffs can contain source code and secrets, and they are shown on the phone. So are the diff of each edit an agent made and the pictures a conversation points at. A picture is served under the same rules as the file endpoint above (the session's folder or Ulak's upload folder, no hidden files); one that lives on the web is not loaded. Push notifications carry the project name and a short preview of the command or reply, which the phone may show on its lock screen.
 
 ## What is stored, and where
 

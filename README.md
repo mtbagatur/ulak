@@ -30,10 +30,12 @@ Ulak carries one thing between you and your agents: the answer. It is a small we
   <img src="docs/screenshots/en/decisions.png" alt="The decision log: who answered what, and when the agent got it" width="195">
 </p>
 
-- **Your yes is bound to what you read.** Every approval carries a fingerprint of the prompt on your screen. If the agent is asking something else by the time your tap arrives, the server answers 409, shows you the new question, and approves nothing.
 - **Commands that leave a mark need two seals.** `rm`, `git push`, `ssh`, `terraform apply`, `kubectl delete`, cloud CLIs and your own patterns show the full command and need a second confirmation that expires in two minutes. A Claude command whose beginning has left the screen can only be denied; for Codex and agy Ulak cannot tell, as [SECURITY.md](SECURITY.md) explains.
+- **The record is on your phone.** Each decision, each refused answer and each timeout is logged on your machine with who, what and when, and you read it where you answered: the ledger icon.
+- **Your yes is bound to what you read.** Every approval carries a fingerprint of the prompt on your screen. If the agent is asking something else by the time your tap arrives, the server answers 409, shows you the new question, and approves nothing.
 - **You see the answer arrive.** A line above the composer follows it: sent, on its way, agent received it. If the prompt never leaves the agent's screen, Ulak says so instead of assuming.
-- **Everything is on the record.** Each decision, each refused answer and each timeout is logged on your machine with who, what and when. Open it from the ledger icon.
+
+None of this is a claim to be the only one. Other tools guard approvals in their own ways; the table below repeats only what their READMEs say.
 
 ## When to pick something else
 
@@ -44,18 +46,18 @@ Ulak is deliberately narrow. These projects solve the same problem with differen
 | Form | PWA served from your machine | native iPhone and iPad app; Android experimental | PWA served from your machine | desktop app, iPhone and Android apps, browser |
 | How the phone reaches it | Tailscale Serve only | SSH, usually through Tailscale | Tailscale Serve by default; other front doors documented | Wi-Fi, Tailscale, SSH, or the Ovis end-to-end encrypted relay |
 | Account | none | none | none; phones are paired | optional |
-| Agents | Claude Code, Codex, Antigravity | Claude Code, Codex, Grok, Antigravity, Pi, OMP | Claude Code, Codex, OpenCode among others | Claude Code, Codex and more |
-| Works beside | Herdr | Herdr | Herdr; tmux, zellij and others experimental | Herdr, or its own terminals |
+| Agents | Claude Code, Codex, Antigravity | Claude Code, Codex, Grok, Antigravity, Pi, OMP | Claude Code, Codex, OpenCode | Claude Code, Codex and other agents |
+| Works beside | Herdr | Herdr | Herdr; tmux, zellij, tuios, Tern and Rex experimental | Herdr, or its own terminals |
 | Terminal on the phone | no; a read-only text view of the agent's screen | yes, a full emulator | types keys into the live pane | yes |
-| Approvals | bound to the prompt you read; two steps for destructive commands; decision log | approval choices | the agent's prompts as buttons | cards |
+| Approvals | bound to the prompt you read; two steps for destructive commands; decision log read on the phone | approval choices; binding and a log are not described | the agent's prompts as buttons; binding is not described; an audit log is named in its durable-agent security notes | cards; binding and a log are not described |
 | Usage ping | none | not mentioned | on by default, can be turned off | on by default, can be turned off |
 
-Read from each project's README on 26 November 2026. They move fast; check theirs before deciding.
+Read from each project's README on 27 November 2026, not from their code: "not described" means the README does not say, not that the feature is missing. They move fast; check theirs before deciding.
 
 - **Pick HerdrChat** when you want a native app, a real terminal, subagent and workflow transcripts, an iPad layout, or several computers in one list.
 - **Pick ColliePWA** when you use tmux or zellij instead of Herdr, or want built-in voice input, themes and its durable-agent tools.
 - **Pick Ovis** when your phone cannot join a tailnet, or you want one app across desktop, phone and browser.
-- **Pick Ulak** when you want the phone to be able to answer and little else, every yes tied to the question you read, and code short enough to read before you trust it: about 3,800 lines of Python, JavaScript and CSS and four runtime dependencies.
+- **Pick Ulak** when you want the phone to be able to answer and little else, every yes tied to the question you read, and code short enough to read before you trust it: about 4,800 lines of Python, JavaScript and CSS and four runtime dependencies.
 
 What Ulak does not do: no terminal, one computer, one person, Herdr only. Conversations are fullest for Claude Code, where the transcript is read directly; other agents are read from the screen.
 
@@ -64,6 +66,7 @@ What Ulak does not do: no terminal, one computer, one person, Herdr only. Conver
 <p align="center">
   <img src="docs/screenshots/en/home.png" alt="Home: sessions grouped by what needs you, with usage limits on top" width="195">
   <img src="docs/screenshots/en/approval.png" alt="A session with an approval waiting under the conversation" width="195">
+  <img src="docs/screenshots/en/reading.png" alt="A conversation: finished work folded into one line, a failed command left open, context and cache in the header" width="195">
   <img src="docs/screenshots/en/changes.png" alt="Read-only view of the uncommitted changes in a session's folder" width="195">
   <img src="docs/screenshots/en/light.png" alt="The light theme" width="195">
   <br>
@@ -71,7 +74,10 @@ What Ulak does not do: no terminal, one computer, one person, Herdr only. Conver
 </p>
 
 - **See what needs you.** Sessions are grouped as Needs you, Working, Just finished (for five minutes) and Idle. Pins live on the server, so every device shows the same list.
-- **Read it like a chat.** Claude Code transcripts become messages and tool cards. Subagents show as cards that say what they were asked and whether they are done.
+- **Read it like a chat.** Claude Code transcripts become messages with their headings, lists and tables, and code blocks you can copy with one tap. Subagents show as cards that say what they were asked and whether they are done.
+- **Work that went well folds away.** A turn's reads, edits and commands collapse into one line you can open, edits with their diff. A command that failed and a request you refused never fold; they stay in sight.
+- **Know how much room is left.** The header of a Claude conversation shows the context in use and how long the prompt cache still lives, both read from the transcript, and a ring for the tightest usage limit. Context and cache are Claude only; the Claude limit needs `limit_files`, Codex limits need no setup.
+- **See the pictures.** An image the conversation points at shows as a thumbnail and opens full screen. It is served under the same rules as any file in the session's folder; a picture from the web is never loaded.
 - **Answer questions and menus.** Single and multi-select questions, trust dialogs, and a small key bar (arrows, Esc, Enter, digits) when a prompt needs it.
 - **The agent's own slash commands.** Type `/` for the commands and skills that exist on that machine, with a built-in list as fallback.
 - **Look without touching.** Agent screen shows the pane as text, Changes shows `git status` and the diff since the last commit. Both are read-only.
@@ -156,6 +162,7 @@ State (`.state/`: pins, notification history, the decision log) lives on the ser
 ## Architecture
 
 - `app.py` serves a FastAPI backend on `127.0.0.1:8765` and a static PWA.
+- `web/md.js` turns a message into headings, lists, tables and code blocks. Text is escaped first and tags come only from the renderer, so nothing in a transcript runs.
 - `herdr_client.py` speaks newline-delimited JSON over `~/.config/herdr/herdr.sock` (`HERDR_SOCKET_PATH` points it elsewhere).
 - Startup subscribes to the current pane set and adds/removes pane subscriptions as lifecycle events arrive.
 - Herdr events flow through the backend to browser clients as Server-Sent Events; the PWA uses REST for reads and actions.
@@ -164,7 +171,7 @@ State (`.state/`: pins, notification history, the decision log) lives on the ser
 ## API
 
 - `GET /api/sessions`: enriched cards, ordered blocked > working > done (five minutes) > unknown > idle.
-- `GET /api/sessions/{pane}/chat`: cleaned screen split into blocks (Claude JSONL when available; `?from=` keeps older messages in view). `GET .../history?before=` loads older ones, and `GET .../conversations` lists the earlier Claude conversations of the session's own folder (read-only; the phone names an id, never a path).
+- `GET /api/sessions/{pane}/chat`: cleaned screen split into blocks (Claude JSONL when available; `?from=` keeps older messages in view), with `meters` (context and cache, when the transcript has them) and the server's clock as `now`. `GET .../history?before=` loads older ones, and `GET .../conversations` lists the earlier Claude conversations of the session's own folder (read-only; the phone names an id, never a path).
 - Read-only views: `GET /api/sessions/{pane}/screen` (the pane as text), `.../changes` (`git status` and a size-capped diff of the session's own folder; the phone sends no path), `.../commands` (names and one-line descriptions of the slash commands on the machine).
 - `POST /api/sessions/{pane}/prompt`: send text (409 for a pane with no agent in it, as for `.../keys` and `/api/quick`). `POST /api/sessions/{pane}/upload`: raw file body (image, PDF or text), returns its server path. `GET /api/sessions/{pane}/file`: open a supported document inside that workspace. `POST /api/quick`: quick send to a configured pane (see Configuration). `GET/PUT /api/pins`: server-side pins, shared across devices.
 - `POST /api/sessions/{pane}/approve`: approve/always/deny, bound to the screen fingerprint (409 if it changed; destructive = two steps).
