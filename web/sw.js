@@ -4,8 +4,9 @@ self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
 self.addEventListener('push', event => {
   const d = event.data ? event.data.json() : {};
   // App open and visible: the list already updates live, so no system notification (WebKit allows this when a client is visible).
+  // A test the owner asked for is always shown: seeing it arrive is the point.
   event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
-    if (list.some(c => c.visibilityState === 'visible')) { list.forEach(c => c.postMessage({ type: 'pushed', pane: d.pane })); return; }
+    if (!d.test && list.some(c => c.visibilityState === 'visible')) { list.forEach(c => c.postMessage({ type: 'pushed', pane: d.pane })); return; }
     return self.registration.showNotification(d.title || 'Ulak', {
     body: d.body || (d.status === 'blocked' ? 'Session needs you' : 'Session finished'),
     tag: d.tag || `ulak-${d.pane}`, renotify: true, icon: '/static/icon-192.png', badge: '/static/icon-192.png',

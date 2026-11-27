@@ -2250,3 +2250,75 @@ def test_a_finish_whose_start_was_not_seen_is_not_pushed(monkeypatch):
         await asyncio.sleep(0)
         assert len(calls) == 2
     asyncio.run(scenario())
+
+
+# --- Yayın 1b: push health ---
+def _push_setup(monkeypatch, tmp_path, subs, codes):
+    """Subscriptions on disk and a push service that answers each endpoint with the given code (None raises without a response)."""
+    import pywebpush
+    monkeypatch.setattr(api, "ROOT", tmp_path)
+    monkeypatch.setattr(api, "STATE", tmp_path)
+    (tmp_path / ".secrets").mkdir()
+    (tmp_path / ".secrets/vapid_private.pem").write_text("key")
+    api.write_subs(subs)
+    sent = []
+    def fake(sub, data, key, claims, ttl=0, headers=None):
+        sent.append((sub["endpoint"], json.loads(data), headers))
+        code = codes.get(sub["endpoint"], 201)
+        if code != 201:
+            raise pywebpush.WebPushException("refused", response=None if code is None else type("R", (), {"status_code": code})())
+    monkeypatch.setattr(pywebpush, "webpush", fake)
+    monkeypatch.setattr(api.time, "time", lambda: 5000.0)
+    return sent
+
+
+def test_each_delivery_leaves_a_health_mark_on_its_subscription(monkeypatch, tmp_path):
+    ok, bad, gone, old = ({**GOOD_SUB, "endpoint": f"https://push.example/{n}", "lang": "en"} for n in ("ok", "bad", "gone", "old"))
+    del old["lang"]  # a line written before health marks and languages existed
+    sent = _push_setup(monkeypatch, tmp_path, [ok, {**bad, "ok_at": 10.0}, gone, old], {bad["endpoint"]: 500, gone["endpoint"]: 410})
+    asyncio.run(api.send_push({"pane_id": "w9:p1", "status": "done", "preview": "All tests pass"}))
+    assert [s[0] for s in sent] == [ok["endpoint"], bad["endpoint"], gone["endpoint"], old["endpoint"]]
+    assert sent[0][2]["Topic"] == api.push_topic("ulak-w9:p1")
+    by = {s["endpoint"].rsplit("/", 1)[1]: s for s in api.read_subs()}
+    assert set(by) == {"ok", "bad", "old"}
+    assert by["ok"]["ok_at"] == 5000.0 and "fail_at" not in by["ok"]
+    assert by["bad"]["ok_at"] == 10.0 and by["bad"]["fail_at"] == 5000.0 and by["bad"]["fail_code"] == 500
+    assert by["old"]["ok_at"] == 5000.0
+
+
+def test_a_subscription_made_while_a_push_was_on_its_way_is_kept(monkeypatch, tmp_path):
+    first = {**GOOD_SUB, "endpoint": "https://push.example/first", "lang": "en"}
+    late = {**GOOD_SUB, "endpoint": "https://push.example/late", "lang": "en"}
+    _push_setup(monkeypatch, tmp_path, [first], {})
+    real = api.deliver
+    async def slow(sub, payload):
+        api.write_subs(api.read_subs() + [late])
+        return await real(sub, payload)
+    monkeypatch.setattr(api, "deliver", slow)
+    asyncio.run(api.send_push({"pane_id": "w9:p1", "status": "done"}))
+    assert [s["endpoint"] for s in api.read_subs()] == [first["endpoint"], late["endpoint"]]
+
+
+def test_known_reports_health_and_test_push_reaches_only_the_asking_phone(monkeypatch, tmp_path):
+    _, c, h = _setup(monkeypatch, CODEX)
+    mine = {**GOOD_SUB, "endpoint": "https://push.example/mine", "lang": "tr", "ok_at": 10.0, "fail_at": 20.0, "fail_code": 403}
+    other = {**GOOD_SUB, "endpoint": "https://push.example/other", "lang": "en"}
+    sent = _push_setup(monkeypatch, tmp_path, [mine, other], {})
+    assert c.post("/api/push/known", headers=h, json={"endpoint": mine["endpoint"]}).json() == {"known": True, "ok_at": 10.0, "fail_at": 20.0, "fail_code": 403}
+    assert c.post("/api/push/known", headers=h, json={"endpoint": "https://push.example/nobody"}).json() == {"known": False, "ok_at": None, "fail_at": None, "fail_code": None}
+    r = c.post("/api/push/test", headers=h, json={"endpoint": mine["endpoint"]})
+    assert r.status_code == 200 and r.json() == {"ok": True, "code": 201}
+    assert [s[0] for s in sent] == [mine["endpoint"]]
+    assert sent[0][1]["test"] is True and sent[0][1]["tag"] == "ulak-test" and sent[0][1]["body"] == "Deneme bildirimi: bu telefona ulaşıyor"
+    assert api.read_subs()[0]["ok_at"] == 5000.0
+    assert not (tmp_path / "notifications.json").exists()  # a test is not history
+    assert c.post("/api/push/test", headers=h, json={"endpoint": "https://push.example/nobody"}).status_code == 404
+    assert c.post("/api/push/test", json={"endpoint": mine["endpoint"]}).status_code == 403
+
+
+def test_a_test_push_that_the_service_refuses_says_so(monkeypatch, tmp_path):
+    _, c, h = _setup(monkeypatch, CODEX)
+    mine = {**GOOD_SUB, "endpoint": "https://push.example/mine", "lang": "en"}
+    _push_setup(monkeypatch, tmp_path, [mine], {mine["endpoint"]: 403})
+    assert c.post("/api/push/test", headers=h, json={"endpoint": mine["endpoint"]}).json() == {"ok": False, "code": 403}
+    assert api.read_subs()[0]["fail_code"] == 403

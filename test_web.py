@@ -56,6 +56,8 @@ class FakeAPI:
     def __init__(self):
         self.cards = [card("blocked", pending=APPROVAL)]
         self.limits = []
+        self.push_tests = []
+        self.push_test_reply = {"ok": True, "code": 201}
         self.messages = [{"role": "assistant", "text": "Example answer"}]
         self.source = "transcript"
         self.approval = APPROVAL
@@ -205,6 +207,10 @@ class Handler(SimpleHTTPRequestHandler):
         if self.path == "/api/presence":
             api.presence.append(body)
             self.json({"ok": True})
+            return
+        if self.path == "/api/push/test":
+            api.push_tests.append(body)
+            self.json(api.push_test_reply)
             return
         if self.path == "/api/sessions/fake%3Ap1/prompt":
             assert api.respond.wait(8), "test did not release the held message"
@@ -2107,3 +2113,40 @@ def test_a_picture_loading_does_not_move_the_text(api_fixture):
     api.file_gate.set()
     chrome.wait(LOADED)
     assert chrome.js(below) == before
+
+
+# --- Yayın 1b: notification health ---
+def test_settings_say_whether_notifications_still_reach_this_phone(api_fixture):
+    chrome, api, url = api_fixture
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelector('.card') !== null")
+    states = chrome.js("""[bellFrom('denied', true, {known: true}), bellFrom('granted', false, null), bellFrom('default', false, null),
+        bellFrom('granted', true, {known: false}), bellFrom('granted', true, {known: true, ok_at: 10, fail_at: 20}),
+        bellFrom('granted', true, {known: true, ok_at: 30, fail_at: 20}), bellFrom('granted', true, {known: true, ok_at: null, fail_at: 20}),
+        bellFrom('granted', true, {known: true, ok_at: null, fail_at: null})]""")
+    assert states == ["denied", "off", "off", "off", "stopped", "on", "stopped", "on"]
+    open_settings(chrome)
+    row = "document.querySelector('#sheet .rows').firstElementChild"
+    chrome.js("bellEndpoint = 'https://push.example/mine'; bellHealth = {known: true, ok_at: Date.now() / 1000 - 185, fail_at: null}; setBell('on')")
+    assert chrome.js(f"{row}.textContent") == "Notifications onreached this phone 3m ago"
+    assert chrome.js("document.querySelector('#settings').classList.contains('dot')") is False
+    chrome.js("bellHealth = {known: true, ok_at: null, fail_at: null}; setBell('on')")
+    assert chrome.js(f"{row}.textContent") == "Notifications on"
+    chrome.click("#sheet #bellTest")
+    chrome.wait("document.querySelector('#toasts .ok')?.textContent === 'Test sent. It should arrive in a moment'")
+    assert api.push_tests == [{"endpoint": "https://push.example/mine"}]
+    api.push_test_reply = {"ok": False, "code": 403}
+    chrome.click("#sheet #bellTest")
+    chrome.wait("document.querySelector('#toasts .err')?.textContent === 'The push service refused the test (403)'")
+    chrome.wait("document.querySelector('#sheet #bell') !== null")
+    assert chrome.js("document.querySelector('#sheet #bell').textContent") == "Notifications stopped on this device. Turn them on again"
+    assert chrome.js("document.querySelector('#sheet #bellTest')") is None
+    assert chrome.js("document.querySelector('#settings').classList.contains('dot')") is True
+    chrome.js("setBell('denied')")
+    assert chrome.js(f"{row}.textContent") == "Notifications are turned off for Ulak in this device's settings"
+    assert chrome.js("document.querySelector('#sheet #bell, #sheet #bellTest')") is None
+    assert chrome.js("document.querySelector('#settings').classList.contains('dot')") is True
+    chrome.js("LANG = 'tr'; bellHealth = {known: true, ok_at: Date.now() / 1000 - 185}; setBell('on')")
+    assert chrome.js(f"{row}.textContent") == "Bildirimler açık3dk önce bu telefona ulaştı"
+    assert chrome.js("document.querySelector('#sheet #bellTest').textContent") == "Deneme bildirimi gönder"
+    assert chrome.js("document.documentElement.scrollWidth <= document.documentElement.clientWidth")

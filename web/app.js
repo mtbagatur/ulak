@@ -1370,23 +1370,37 @@ $('#sMenu').onclick = () => {
 
 // ---------- push ----------
 let swReg = null;
+// 'none' = this browser cannot push, 'off' = it can and is not set up, 'on' = done,
+// 'stopped' = the push service last refused this device, 'denied' = switched off in the device's own settings. The settings button carries a dot for the three that need the owner.
+let bellState = 'none', bellHealth = null, bellEndpoint = null;
+const bellFrom = (permission, subscribed, health) => permission === 'denied' ? 'denied'
+  : !(subscribed && permission === 'granted' && health?.known) ? 'off'
+  : health.fail_at && health.fail_at > (health.ok_at || 0) ? 'stopped' : 'on';
 async function pushState() {
   if (!('serviceWorker' in navigator) || !('PushManager' in window) || !swReg) { setBell('none'); return; }
   const sub = await swReg.pushManager.getSubscription();
-  let known = false;
-  if (sub && Notification.permission === 'granted') { try { known = (await api('/api/push/known', {endpoint: sub.endpoint})).known; } catch { known = true; } }
-  setBell(known ? 'on' : 'off');
+  bellEndpoint = sub?.endpoint || null;
+  bellHealth = null;
+  if (sub && Notification.permission === 'granted') { try { bellHealth = await api('/api/push/known', {endpoint: sub.endpoint}); } catch { bellHealth = {known: true}; } }
+  setBell(bellFrom(Notification.permission, !!sub, bellHealth));
 }
-// 'none' = this browser cannot push, 'off' = it can and is not set up (the settings button carries a dot), 'on' = done
-let bellState = 'none';
-function setBell(v) { bellState = v; $('#settings').classList.toggle('dot', v === 'off'); if ($('#sheet [data-settings]')) settingsSheet(); }
+function setBell(v) { bellState = v; $('#settings').classList.toggle('dot', ['off', 'stopped', 'denied'].includes(v)); if ($('#sheet [data-settings]')) settingsSheet(); }
 const enableBell = btn => act(btn, async () => {
   if (Notification.permission !== 'granted' && await Notification.requestPermission() !== 'granted') throw new Error(t('noPermission'));
   const {key} = await api('/api/push/public'); if (!key) throw new Error(t('noPushKey'));
   const pad = key.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(key.length / 4) * 4, '=');
-  const sub = await swReg.pushManager.getSubscription() || await swReg.pushManager.subscribe({userVisibleOnly: true, applicationServerKey: Uint8Array.from(atob(pad), c => c.charCodeAt(0))});
+  let sub = await swReg.pushManager.getSubscription();
+  if (sub && bellState === 'stopped') { await sub.unsubscribe().catch(() => {}); sub = null; }  // the old address is the one that stopped working
+  sub = sub || await swReg.pushManager.subscribe({userVisibleOnly: true, applicationServerKey: Uint8Array.from(atob(pad), c => c.charCodeAt(0))});
   await api('/api/push/subscribe', {...sub.toJSON(), lang: LANG}); await pushState();
 }, t('bellOn'));
+const testBell = btn => act(btn, async () => {
+  const r = await api('/api/push/test', {endpoint: bellEndpoint});
+  if (r.ok) { bellHealth = {...bellHealth, known: true, ok_at: serverNow()}; return toast(t('bellTestSent'), 'ok'); }
+  bellHealth = {...bellHealth, known: true, fail_at: serverNow(), fail_code: r.code};
+  setBell(r.code === 404 || r.code === 410 ? 'off' : 'stopped');
+  throw new Error(t('bellTestFailed', {n: r.code ?? '?'}));
+});
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').then(r => { swReg = r; pushState(); }).catch(() => {});
   navigator.serviceWorker.addEventListener('message', e => { if (e.data?.type === 'open' && e.data.pane) { history.pushState({pane: e.data.pane}, '', `#/s/${e.data.pane}`); route(); } });
@@ -1435,7 +1449,9 @@ async function toggleLang() {
   try { const sub = await swReg?.pushManager.getSubscription(); if (sub) await api('/api/push/lang', {endpoint: sub.endpoint, lang: LANG}); } catch {}
 }
 function settingsSheet() {
-  const bell = bellState === 'off' ? `<button id="bell" class="row">${icon('bell', 20)}<span>${esc(t('enableBell'))}</span></button>` : `<div class="row quiet">${icon('bell', 20)}<span>${esc(t(bellState === 'on' ? 'bellOn' : 'bellNone'))}</span></div>`;
+  const reached = bellState === 'on' && bellHealth?.ok_at ? `<small>${esc(t('bellReached', {t: fmtIn(Math.max(1, serverNow() - bellHealth.ok_at))}))}</small>` : '';
+  const bell = bellState === 'off' || bellState === 'stopped' ? `<button id="bell" class="row">${icon('bell', 20)}<span>${esc(t(bellState === 'off' ? 'enableBell' : 'bellStopped'))}</span></button>`
+    : `<div class="row quiet">${icon('bell', 20)}<span>${esc(t(bellState === 'on' ? 'bellOn' : bellState === 'denied' ? 'bellDenied' : 'bellNone'))}</span>${reached}</div>${bellState === 'on' ? `<button id="bellTest" class="row">${icon('bell', 20)}<span>${esc(t('bellTest'))}</span></button>` : ''}`;
   showSheet(`<h3 data-settings>${esc(t('settings'))}</h3><div class="rows">${bell}
     <button id="lang" class="row"><b class="lang">${LANG.toUpperCase()}</b><span>${esc(t('language'))}</span><small>${LANG === 'tr' ? 'English' : 'Türkçe'}</small></button>
     <button class="row" data-theme-toggle><svg class="moon" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><defs><mask id="hilal2"><rect x="-4" y="-4" width="32" height="32" fill="#fff"/><circle class="bite" cx="16.4" cy="8.6" r="7.2" fill="#000"/></mask></defs><circle class="halo" cx="12" cy="12" r="9.5"/><circle class="disc" cx="12" cy="12" r="8.2" fill="currentColor" mask="url(#hilal2)"/></svg><span>${esc(t('appearance'))}</span><small><i class="when-dark">${esc(t('themeDark'))}</i><i class="when-light">${esc(t('themeLight'))}</i></small></button>
@@ -1444,6 +1460,7 @@ function settingsSheet() {
   $('#sheet #lang').onclick = toggleLang;
   $('#sheet #refresh').onclick = e => act(e.currentTarget, loadList, t('refreshed'));
   const b = $('#sheet #bell'); if (b) b.onclick = e => enableBell(e.currentTarget);
+  const bt = $('#sheet #bellTest'); if (bt) bt.onclick = e => testBell(e.currentTarget);
 }
 $('#settings').onclick = settingsSheet;
 setTimeout(() => $('#home .mark').classList.remove('draw'), 1300);  // drawn once per opening, not each time the home screen comes back

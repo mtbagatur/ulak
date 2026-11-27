@@ -574,28 +574,53 @@ def log_notification(payload):
         pass
 
 
+async def deliver(sub, payload):
+    """One message to one subscription -> the push service's status code (201 when it took it, None when it could not be reached)."""
+    from pywebpush import WebPushException, webpush
+    key = ROOT / ".secrets/vapid_private.pem"
+    target = {"endpoint": sub.get("endpoint"), "keys": sub.get("keys")}
+    try:
+        await asyncio.to_thread(webpush, target, json.dumps(payload), str(key), {"sub": os.environ.get("ULAK_VAPID_SUBJECT", "mailto:local@localhost")},
+                                ttl=3600, headers={"Urgency": "high", "Topic": push_topic(payload.get("tag", "ulak"))})
+        return 201
+    except WebPushException as exc:
+        code = getattr(getattr(exc, "response", None), "status_code", None)
+        print(f"Push delivery failed ({code}): {exc}", flush=True)
+        return code
+    except Exception as exc:
+        print(f"Push delivery failed: {exc}", flush=True)
+        return None
+
+
+def mark_deliveries(results):
+    """Write what each push service answered onto its subscription; one that is gone for good is dropped.
+
+    The file is read again here, so a phone that subscribed while the messages were on their way is kept."""
+    now = time.time()
+    subs = []
+    for sub in read_subs():
+        if sub.get("endpoint") in results:
+            code = results[sub["endpoint"]]
+            if code in (404, 410):
+                continue
+            if code == 201:
+                sub["ok_at"] = now
+            else:
+                sub["fail_at"], sub["fail_code"] = now, code
+        subs.append(sub)
+    write_subs(subs)
+
+
 async def send_push(item, prompt=None, destructive=False):
     log_notification(build_push(item, prompt, destructive))
     try:
-        from pywebpush import WebPushException, webpush
-        key = ROOT / ".secrets/vapid_private.pem"
         subs = read_subs()
-        if not key.exists() or not subs:
+        if not (ROOT / ".secrets/vapid_private.pem").exists() or not subs:
             return
-        dead = []
+        results = {}
         for sub in subs:
-            payload = build_push(item, prompt, destructive, lang=sub.get("lang", "en"))
-            topic = push_topic(payload.get("tag", "ulak"))
-            try:
-                await asyncio.to_thread(webpush, sub, json.dumps(payload), str(key), {"sub": os.environ.get("ULAK_VAPID_SUBJECT", "mailto:local@localhost")},
-                                        ttl=3600, headers={"Urgency": "high", "Topic": topic})
-            except WebPushException as exc:
-                code = getattr(getattr(exc, "response", None), "status_code", None)
-                if code in (404, 410):
-                    dead.append(sub)
-                print(f"Push delivery failed ({code}): {exc}", flush=True)
-        if dead:
-            write_subs([s for s in subs if s not in dead])
+            results[sub.get("endpoint")] = await deliver(sub, build_push(item, prompt, destructive, lang=sub.get("lang", "en")))
+        mark_deliveries(results)
         print(f"Push sent: {item.get('pane_id')} {item.get('status')}", flush=True)
     except Exception as exc:
         print(f"Push delivery failed: {exc}", flush=True)
@@ -1369,7 +1394,23 @@ async def push_lang(request: Request):
 @app.post("/api/push/known")
 async def push_known(request: Request):
     body = await json_object(request)
-    return {"known": any(s.get("endpoint") == body.get("endpoint") for s in read_subs())}
+    sub = next((s for s in read_subs() if s.get("endpoint") == body.get("endpoint")), None)
+    return {"known": sub is not None, **{k: (sub or {}).get(k) for k in ("ok_at", "fail_at", "fail_code")}}
+
+
+TEST_PUSH = {"en": "Test notification: it reaches this phone", "tr": "Deneme bildirimi: bu telefona ulaşıyor"}
+
+
+@app.post("/api/push/test")
+async def push_test(request: Request):
+    """Send one message to the asking phone only, so its owner can see that notifications still arrive."""
+    body = await json_object(request)
+    sub = next((s for s in read_subs() if s.get("endpoint") == body.get("endpoint")), None)
+    if not sub:
+        raise HTTPException(404, "This device is not subscribed")
+    code = await deliver(sub, {"test": True, "title": "Ulak", "body": TEST_PUSH.get(sub.get("lang"), TEST_PUSH["en"]), "tag": "ulak-test", "url": "/"})
+    mark_deliveries({sub["endpoint"]: code})
+    return {"ok": code == 201, "code": code}
 
 
 if __name__ == "__main__":
