@@ -355,7 +355,7 @@ async def make_card(agent, force=False):
         card["bucket"] = "blocked"
         card["pending"] = {"kind": p["kind"], "question": p["question"], "details": "\n".join(p["details"].splitlines()[-4:]),
                            "destructive": p["kind"] == "approval" and is_destructive(p["details"], RULES),
-                           "fingerprint": p["fingerprint"], "cut": p.get("cut", False),
+                           "fingerprint": p["fingerprint"], "cut": p.get("cut", False), "hidden": p.get("hidden", []),
                            "roles": [o["role"] for o in p["options"]]}
     discard_changed_confirmation(pane, (card["pending"] or {}).get("fingerprint"))
     card["active"] = active.get(pane, 0)

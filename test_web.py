@@ -2140,13 +2140,33 @@ def test_settings_say_whether_notifications_still_reach_this_phone(api_fixture):
     chrome.wait("document.querySelector('#toasts .err')?.textContent === 'The push service refused the test (403)'")
     chrome.wait("document.querySelector('#sheet #bell') !== null")
     assert chrome.js("document.querySelector('#sheet #bell').textContent") == "Notifications stopped on this device. Turn them on again"
-    assert chrome.js("document.querySelector('#sheet #bellTest')") is None
+    assert chrome.js("document.querySelector('#sheet #bellTest') === null")
     assert chrome.js("document.querySelector('#settings').classList.contains('dot')") is True
     chrome.js("setBell('denied')")
     assert chrome.js(f"{row}.textContent") == "Notifications are turned off for Ulak in this device's settings"
-    assert chrome.js("document.querySelector('#sheet #bell, #sheet #bellTest')") is None
+    assert chrome.js("document.querySelector('#sheet #bell, #sheet #bellTest') === null")
     assert chrome.js("document.querySelector('#settings').classList.contains('dot')") is True
     chrome.js("LANG = 'tr'; bellHealth = {known: true, ok_at: Date.now() / 1000 - 185}; setBell('on')")
     assert chrome.js(f"{row}.textContent") == "Bildirimler açık3dk önce bu telefona ulaştı"
     assert chrome.js("document.querySelector('#sheet #bellTest').textContent") == "Deneme bildirimi gönder"
     assert chrome.js("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
+
+
+# --- Yayın 1b: characters nobody can see ---
+def test_an_approval_with_hidden_characters_warns_and_cannot_be_approved_from_the_list(api_fixture):
+    chrome, api, url = api_fixture
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelector('.card [data-act=approve]') !== null")  # a plain short command is approved from the list
+    assert chrome.js("document.querySelector('.hidden-note') === null")
+    api.publish_prompt({**APPROVAL, "fingerprint": "hidden-chars", "details": "r⟨U+200B⟩m notes.txt", "hidden": ["U+200B", "U+202E"]})
+    chrome.wait("document.querySelector('.card .c-cmd')?.textContent.includes('⟨U+200B⟩')")
+    assert chrome.js("document.querySelector('.card [data-act=approve]') === null")
+    assert chrome.js("document.querySelector('.card .hidden-note').textContent") == "Has characters you cannot see: U+200B, U+202E"
+    chrome.click(".card-open")
+    chrome.wait("document.querySelector('#promptZone .hidden-note') !== null")
+    assert chrome.js("document.querySelector('#promptZone .hidden-note').textContent") == "This command has characters you cannot see: U+200B, U+202E. They are written out where they stand."
+    assert chrome.js("document.querySelector('#promptZone pre').textContent") == "r⟨U+200B⟩m notes.txt"
+    assert chrome.js("document.querySelector('#promptZone [data-d=approve]') !== null && document.querySelector('#promptZone [data-d=deny]') !== null")
+    assert chrome.js("document.querySelector('#promptZone [data-d=always]') === null")
+    note = chrome.js("(() => { const r = document.querySelector('#promptZone .hidden-note').getBoundingClientRect(); return [r.width > 0, r.right <= innerWidth]; })()")
+    assert note == [True, True]

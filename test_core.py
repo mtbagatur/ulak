@@ -2322,3 +2322,31 @@ def test_a_test_push_that_the_service_refuses_says_so(monkeypatch, tmp_path):
     _push_setup(monkeypatch, tmp_path, [mine], {mine["endpoint"]: 403})
     assert c.post("/api/push/test", headers=h, json={"endpoint": mine["endpoint"]}).json() == {"ok": False, "code": 403}
     assert api.read_subs()[0]["fail_code"] == 403
+
+
+# --- Yayın 1b: characters nobody can see ---
+def test_hidden_chars_are_named():
+    from core import hidden_chars, show_hidden
+    assert hidden_chars("ls​ -la ‮​") == ["U+200B", "U+202E"]
+    assert hidden_chars("çğıöşü İ\n\ttamam ✓ 日本 👍️") == []
+    assert hidden_chars("a\x1b[31m\x07") == ["U+0007", "U+001B"]
+    assert hidden_chars("\U000e0041") == ["U+E0041"]
+    assert show_hidden("r​m ‮x\n\tok") == "r⟨U+200B⟩m ⟨U+202E⟩x\n\tok"
+
+
+def test_a_command_split_by_a_hidden_char_is_still_destructive():
+    assert is_destructive("r​m -rf /tmp/x", "/missing")
+    assert is_destructive("git⁠ push", "/missing")
+    assert is_destructive("r⟨U+200B⟩m -rf /tmp/x", "/missing")  # the text the phone is shown
+    assert not is_destructive("ls​ -la", "/missing")
+
+
+def test_an_approval_names_its_hidden_chars_and_shows_where_they_are():
+    from core import parse_prompt
+    plain = parse_prompt(CODEX, "codex")
+    assert plain["hidden"] == []
+    word = plain["details"].split()[0]
+    dirty = parse_prompt(CODEX.replace(word, word[0] + "​" + word[1:], 1), "codex")
+    assert dirty["hidden"] == ["U+200B"] and word[0] + "⟨U+200B⟩" + word[1:] in dirty["details"] and "​" not in dirty["details"]
+    assert dirty["fingerprint"] != plain["fingerprint"]  # a different command is a different request
+    assert parse_prompt("nothing is being asked here", "codex") is None

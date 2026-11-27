@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import threading
+import unicodedata
 from urllib.parse import urlsplit
 from datetime import datetime, time
 
@@ -19,8 +20,23 @@ DESTRUCTIVE = [
 ]
 
 
+def _hidden(ch):
+    return unicodedata.category(ch) == "Cf" or unicodedata.category(ch) == "Cc" and ch not in "\n\t\r"
+
+
+def hidden_chars(text):
+    """Names of the characters in `text` that take no room on a screen: zero-width, direction-changing and control ones."""
+    return [f"U+{n:04X}" for n in sorted({ord(ch) for ch in str(text or "") if _hidden(ch)})]
+
+
+def show_hidden(text):
+    """The same text with each such character written out, so what is read is what would run."""
+    return "".join(f"⟨U+{ord(ch):04X}⟩" if _hidden(ch) else ch for ch in str(text or ""))
+
+
 def is_destructive(command, rules_path=None):
-    text = str(command or "")
+    # Judged without the characters nobody can see: `r<zero width space>m` would run as something, and reads as rm.
+    text = "".join(ch for ch in re.sub(r"⟨U\+[0-9A-F]{4,6}⟩", "", str(command or "")) if not _hidden(ch))
     texts = (text, re.sub(r"\s*\n\s*", " ", text))  # a narrow terminal wraps a long command over several lines
     for pattern in DESTRUCTIVE:
         if any(re.search(pattern, t, re.I) for t in texts):
@@ -180,6 +196,19 @@ def mention_popup(text):
 
 
 def parse_prompt(text, agent="claude"):
+    """`read_prompt`, with every character that cannot be seen named in `hidden` and written out where it stands."""
+    p = read_prompt(text, agent)
+    if p:
+        seen = [p.get("question", ""), p.get("details", "")] + [o.get("label", "") + o.get("desc", "") for o in p["options"]]
+        p["hidden"] = hidden_chars("\n".join(seen))
+        if p["hidden"]:
+            p["question"], p["details"] = show_hidden(p.get("question", "")), show_hidden(p.get("details", ""))
+            for o in p["options"]:
+                o["label"], o["desc"] = show_hidden(o.get("label", "")), show_hidden(o.get("desc", ""))
+    return p
+
+
+def read_prompt(text, agent="claude"):
     """What a blocked pane is asking, in a form the phone can render.
 
     Returns None, or {kind: approval|choice|trust|dismiss, question, header,

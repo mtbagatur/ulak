@@ -150,9 +150,10 @@ function cardHtml(s) {
   const p = s.pending;
   // Inline actions include the full command. Longer commands require opening the session.
   const shown = p ? (p.details || p.question || '') : '';
-  const inline = p && p.kind === 'approval' && !p.destructive && !p.cut && p.roles.includes('approve') && shown.length <= 160 && shown.split('\n').length <= 3;
+  const unseen = p && p.hidden && p.hidden.length ? p.hidden.join(', ') : '';
+  const inline = p && p.kind === 'approval' && !p.destructive && !p.cut && !unseen && p.roles.includes('approve') && shown.length <= 160 && shown.split('\n').length <= 3;
   const stateText = s.bucket === 'idle' && s.status === 'done' ? (ago(s.since) ? t('doneAgo', {t: ago(s.since)}) : statusText('done')) : [statusText(s.status), s.status === 'unknown' ? '' : ago(s.since)].filter(Boolean).join(' · ');
-  const body = p ? `<pre class="c-cmd${inline ? ' full-command' : ''}">${esc(p.details || p.question)}</pre>` : (s.preview ? `<div class="c-prev">${esc(s.preview)}</div>` : '');
+  const body = p ? `<pre class="c-cmd${inline ? ' full-command' : ''}">${esc(p.details || p.question)}</pre>${unseen ? `<div class="hidden-note">${esc(t('hiddenShort', {c: unseen}))}</div>` : ''}` : (s.preview ? `<div class="c-prev">${esc(s.preview)}</div>` : '');
   const pinned = isPinned(s);
   return `<button class="card-open" type="button" aria-label="${esc(t('openSession', {project: s.project}))}"></button><div class="c-top"><span class="proj">${esc(s.project)}</span>${dup && s.workspace_label ? `<span class="ws">${esc(s.workspace_label)}</span>` : ''}<span class="chip ${esc(s.agent)}">${esc(TOOLNAME[s.agent] || s.agent)}</span><span class="model">${esc(s.model)}</span><button class="pin ${pinned ? 'on' : ''}" data-pin aria-label="${esc(t(pinned ? 'unpin' : 'pin'))}" aria-pressed="${pinned}">${icon('pin', 16)}</button></div>
     <div class="state"><span class="d"></span><span>${s.bucket === 'working' && stateText.startsWith(statusText('working')) ? `<span class="blink">${esc(statusText('working'))}</span>${esc(stateText.slice(statusText('working').length))}` : esc(stateText)}</span></div>
@@ -925,9 +926,10 @@ function renderPrompt(p, status) {
   if (p.kind === 'approval') {
     const roles = Object.fromEntries(p.options.map(o => [o.role, o]));
     const denyOnly = p.cut;
-    zone.innerHTML = `<div class="prompt${two}${isSealed(state.current, p) ? ' stamped' : ''}"><h3>${p.destructive ? `${icon('seal', 15)}${icon('seal', 15)}<span>${esc(t('destructive'))}</span>` : esc(t('waitingApproval'))}</h3><pre>${esc(p.details)}</pre>${p.hook_note ? `<p class="hook-note">${esc(p.hook_note)}</p>` : ''}${denyOnly ? `<p class="q">${esc(t('cutNote'))}</p>` : ''}${p.destructive && !denyOnly ? `<p class="hook-note two-note">${esc(t('twoSealsNote'))}</p>` : ''}
+    const unseen = (p.hidden || []).join(', ');  // a command that is not what it looks like is answered once, here, never for the whole session
+    zone.innerHTML = `<div class="prompt${two}${isSealed(state.current, p) ? ' stamped' : ''}"><h3>${p.destructive ? `${icon('seal', 15)}${icon('seal', 15)}<span>${esc(t('destructive'))}</span>` : esc(t('waitingApproval'))}</h3><pre>${esc(p.details)}</pre>${unseen ? `<p class="hidden-note">${esc(t('hiddenNote', {c: unseen}))}</p>` : ''}${p.hook_note ? `<p class="hook-note">${esc(p.hook_note)}</p>` : ''}${denyOnly ? `<p class="q">${esc(t('cutNote'))}</p>` : ''}${p.destructive && !denyOnly ? `<p class="hook-note two-note">${esc(t('twoSealsNote'))}</p>` : ''}
       <div class="acts"><button class="deny" data-d="deny">${esc(t('deny'))}</button>${denyOnly ? '' : p.destructive ? `<button class="seal red" data-d="approve">${esc(t('review'))}</button>` : `<button class="seal" data-d="approve">${icon('seal', 18)}${esc(t('approve'))}</button>`}</div>
-      ${!denyOnly && roles.always && !p.destructive ? `<details class="more"><summary>${esc(t('otherAnswers'))}</summary><p>${esc(t('alwaysNote'))}</p><button class="also" data-d="always">${esc(t('alwaysAllow'))}</button></details>` : ''}${isSealed(state.current, p) ? stampHtml(p) : ''}</div>`;
+      ${!denyOnly && roles.always && !p.destructive && !unseen ? `<details class="more"><summary>${esc(t('otherAnswers'))}</summary><p>${esc(t('alwaysNote'))}</p><button class="also" data-d="always">${esc(t('alwaysAllow'))}</button></details>` : ''}${isSealed(state.current, p) ? stampHtml(p) : ''}</div>`;
     zone.querySelectorAll('[data-d]').forEach(b => b.onclick = () => decide(b.dataset.d, b));
     return;
   }

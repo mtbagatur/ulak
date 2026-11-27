@@ -281,6 +281,8 @@ details.tool pre{margin:6px 0 0;padding:8px 10px;background:var(--bg2);border-ra
 .prompt.two-seals h3{color:var(--lal-t)}.prompt.two-seals h3 span{margin-left:4px}
 .prompt .hook-note.two-note{white-space:normal;margin:-2px 0 10px;font-size:13px}
 .prompt .q{color:var(--strong);margin:0 0 8px;font-size:15px;overflow-wrap:anywhere}
+.hidden-note{margin:6px 0 0;color:var(--strong);font-size:12.5px;font-weight:600;line-height:1.35;overflow-wrap:anywhere}
+.prompt .hidden-note{margin:-2px 0 10px}
 .prompt .hook-note{color:var(--muted);margin:-4px 0 10px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .prompt pre{margin:0 0 10px;padding:9px 11px;background:var(--bg2);border-radius:10px;font:12.5px/1.4 ui-monospace,Menlo,monospace;color:var(--strong);white-space:pre-wrap;word-break:break-all;max-height:30vh;overflow:auto;user-select:text;-webkit-user-select:text}
 .tag{font-size:11px;border-radius:6px;padding:1px 7px;border:1px solid var(--lal);color:var(--lal-t)}
