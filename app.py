@@ -6,6 +6,7 @@ import mimetypes
 import os
 import re
 import secrets
+import sys
 import time
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime
@@ -917,7 +918,8 @@ async def history(pane: str, before: int | None = None, conversation: str = ""):
     if not path:
         raise HTTPException(404, "No such conversation")
     try:
-        messages, _, start = await asyncio.to_thread(claude_page, path, end=before)
+        # History is settled: with no position given it ends at the end of the file, and nothing there is still running.
+        messages, _, start = await asyncio.to_thread(claude_page, path, end=sys.maxsize if before is None else before)
     except OSError:
         raise HTTPException(404, "No such conversation")
     return {"messages": messages, "start": start}

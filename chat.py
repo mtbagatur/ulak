@@ -5,6 +5,7 @@ Two sources:
 - the terminal screen (Codex, agy, or when no transcript is found), cleaned of
   UI chrome and cut into blocks.
 """
+import difflib
 import json
 import re
 from pathlib import Path
@@ -215,6 +216,59 @@ def _usable(block):
     return isinstance(block, dict) and all(isinstance(block.get(key, ""), str) for key in ("type", "text", "id", "name", "tool_use_id"))
 
 
+REJECTED_NOTE = "User rejected tool use"
+REJECTED_TEXT = "The user doesn't want to proceed with this tool use"
+DIFF_LINES, DIFF_WIDTH, DIFF_INPUT = 40, 200, 2000
+
+
+def _edit_facts(name, inp):
+    """What a file change did, as far as the call itself says: a capped line diff for Edit, a line count for Write."""
+    inp = inp if isinstance(inp, dict) else {}
+    if name == "Write" and isinstance(inp.get("content"), str):
+        return {"lines": len(inp["content"].splitlines())}
+    old, new = inp.get("old_string"), inp.get("new_string")
+    if name != "Edit" or not isinstance(old, str) or not isinstance(new, str):
+        return {}
+    old, new = old.splitlines(), new.splitlines()
+    if max(len(old), len(new)) > DIFF_INPUT:
+        return {}
+    diff, added, removed, cut = [], 0, 0, False
+    for n, line in enumerate(list(difflib.unified_diff(old, new, n=2, lineterm=""))[2:]):
+        if line.startswith("@@"):
+            if n:
+                diff.append(["…", ""])
+            continue
+        kind, text = line[0], line[1:]
+        added += kind == "+"
+        removed += kind == "-"
+        cut = cut or len(text) > DIFF_WIDTH
+        diff.append([kind, text[:DIFF_WIDTH]])
+    facts = {"diff": diff[:DIFF_LINES], "added": added, "removed": removed}
+    if cut or len(diff) > DIFF_LINES:
+        facts["diff_cut"] = True
+    return facts
+
+
+def _outcome(block, record):
+    """A tool result block -> (state, the part of its output worth reading, or None)."""
+    res = block.get("content")
+    if isinstance(res, list):
+        res = " ".join(x.get("text", "") for x in res if isinstance(x, dict) and isinstance(x.get("text", ""), str))
+    text = str(res or "").strip()
+    if not block.get("is_error"):
+        return "ok", text[:400]
+    state = "failed"
+    # Only the user's own refusal counts; a rule, a mode or a hook that blocked the call is a failure with a reason.
+    if record.get("toolUseResult") == REJECTED_NOTE or text.startswith(REJECTED_TEXT):
+        state = "rejected"
+        text = text.partition("the user said:")[2].partition("\n\nNote: The user's next message")[0].strip()
+        if not text:
+            return state, None
+    if len(text) > 600:  # the end of a long error is where the summary is
+        text = text[:200] + "\n…\n" + text[-400:]
+    return state, text
+
+
 def claude_chat(path, max_messages=60, tail_bytes=700_000):
     """Parse the tail of a Claude JSONL file -> (messages, model)."""
     with Path(path).open("rb") as f:
@@ -232,11 +286,13 @@ def claude_page(path, end=None, start=None, max_messages=60, tail_bytes=700_000)
     With `start`, everything from that offset on (a later offset if that is out of reach); otherwise the last messages before `end`. Pages are cut between lines."""
     with Path(path).open("rb") as f:
         size = f.seek(0, 2)
-        end = size if end is None else min(end, size)
+        upto = None if end is None else min(end, size)
+        end = size if upto is None else upto
+        reach = end if upto is None else min(size, end + 1_000_000)  # a page's last calls are answered just past it
         window = tail_bytes
         while True:
             begin = max(0, end - window) if start is None else max(min(start, end), end - ANCHOR_BYTES)
-            msgs, offsets, model = _parse(_whole_lines(f, begin, end))
+            msgs, offsets, model = _parse(_whole_lines(f, begin, reach), upto)
             if begin == 0 or start is not None or len(msgs) >= min(max_messages, 20) or msgs and window >= ANCHOR_BYTES:
                 break
             window *= 2  # screenshots and long tool output make lines wider than the window
@@ -267,8 +323,10 @@ def _whole_lines(f, begin, end):
         offset += len(line) + 1
 
 
-def _parse(lines):
-    """Transcript lines -> (messages, the line offset of each, model id)."""
+def _parse(lines, upto=None):
+    """Transcript lines -> (messages, the line offset of each, model id).
+
+    Lines at or past `upto` add no message; they only settle calls left open before it. A call never settled there is "unknown"."""
     msgs, offsets, model, tools = [], [], "", {}
     last = 0
     for offset, line in lines:
@@ -292,14 +350,18 @@ def _parse(lines):
         if isinstance(content, list):
             content = [block for block in content if _usable(block)]
         ts = d.get("timestamp", "")
+        past = upto is not None and offset >= upto
         if kind == "assistant":
+            if past:
+                continue
             named = d["message"].get("model")
             model = named if isinstance(named, str) and named else model
             for block in content if isinstance(content, list) else []:
                 if block.get("type") == "text" and block.get("text", "").strip():
                     msgs.append({"role": "assistant", "text": block["text"].strip(), "ts": ts})
                 elif block.get("type") == "tool_use" and block.get("id") not in tools:
-                    m = {"role": "tool", "tool": block.get("name", ""), "text": _tool_summary(block.get("name"), block.get("input")), "ts": ts}
+                    m = {"role": "tool", "tool": block.get("name", ""), "text": _tool_summary(block.get("name"), block.get("input")), "ts": ts,
+                         "id": block.get("id", ""), "state": "running", **_edit_facts(block.get("name"), block.get("input"))}
                     if m["tool"] in SUBAGENT_TOOLS:  # a card of its own: what it was sent to do and whether it is back
                         inp = block.get("input") if isinstance(block.get("input"), dict) else {}
                         m["text"] = str(inp.get("description") or "").strip()[:160]
@@ -310,26 +372,31 @@ def _parse(lines):
             if _harness(d):
                 continue
             if isinstance(content, str):
+                if past:
+                    continue
                 if command := typed_command(content):
                     msgs.append({"role": "command", "text": command, "ts": ts})
                 elif content.strip() and not content.lstrip().startswith(HARNESS_PREFIX):
                     msgs.append({"role": "user", "text": content.strip(), "ts": ts})
                 continue
             for block in content if isinstance(content, list) else []:
-                if block.get("type") == "text" and block.get("text", "").strip() and not block["text"].lstrip().startswith(HARNESS_PREFIX):
+                if not past and block.get("type") == "text" and block.get("text", "").strip() and not block["text"].lstrip().startswith(HARNESS_PREFIX):
                     msgs.append({"role": "user", "text": block["text"].strip(), "ts": ts})
                 elif block.get("type") == "tool_result" and block.get("tool_use_id") in tools:
-                    res = block.get("content")
-                    if isinstance(res, list):
-                        res = " ".join(x.get("text", "") for x in res if isinstance(x, dict))
                     m = tools[block["tool_use_id"]]
                     if "agent" in m:
                         launch = d.get("toolUseResult")
                         if isinstance(launch, dict) and launch.get("status") == "async_launched":
                             continue  # still out there; the notice above closes it
                         m["agent"]["state"] = "failed" if block.get("is_error") else "done"
-                    m["result"] = str(res or "").strip()[:400]
+                    m["state"], result = _outcome(block, d)
+                    if result is not None:
+                        m["result"] = result
     offsets.extend([last] * (len(msgs) - len(offsets)))
+    if upto is not None:
+        for m in msgs:
+            if m.get("state") == "running":
+                m["state"] = "unknown"
     return msgs, offsets, model
 
 

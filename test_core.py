@@ -1995,3 +1995,92 @@ def test_a_page_of_heavy_lines_still_brings_a_screenful(tmp_path):
     log = _lines(tmp_path / "a.jsonl", "/p", 60, size=300)   # about 700 bytes a line
     msgs, _, start = claude_page(log, tail_bytes=2000)
     assert len(msgs) >= 20 and start > 0
+
+
+# --- tool calls: how each ended and what an edit changed ---
+REFUSAL = ("The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, "
+           "the new_string was NOT written to the file). To tell you how to proceed, the user said:\nuse a branch")
+
+
+def _use(id, name="Bash", input=None):
+    return {"type": "assistant", "timestamp": f"use-{id}", "message": {"content": [{"type": "tool_use", "id": id, "name": name, "input": input or {}}]}}
+
+
+def _res(id, content="done", error=False, toolUseResult=None):
+    block = {"type": "tool_result", "tool_use_id": id, "content": content, **({"is_error": True} if error else {})}
+    return {"type": "user", "timestamp": f"res-{id}", "message": {"content": [block]}, **({"toolUseResult": toolUseResult} if toolUseResult else {})}
+
+
+def _log(path, *lines):
+    path.write_text("".join(json.dumps(line) + "\n" for line in lines))
+    return path
+
+
+def _tools(path, *lines):
+    return {m["id"]: m for m in claude_chat(_log(path, *lines))[0] if m["role"] == "tool"}
+
+
+def test_tool_calls_carry_a_state(tmp_path):
+    t = _tools(tmp_path / "a.jsonl",
+               _use("run"), _use("ok"), _res("ok"), _use("bad"), _res("bad", "boom", error=True),
+               _use("no"), _res("no", "x", error=True, toolUseResult="User rejected tool use"),
+               _use("why"), _res("why", REFUSAL, error=True))
+    assert {k: v["state"] for k, v in t.items()} == {"run": "running", "ok": "ok", "bad": "failed", "no": "rejected", "why": "rejected"}
+    assert t["why"]["result"] == "use a branch" and "result" not in t["no"]
+
+
+def test_a_blocked_by_rule_call_is_a_failure_not_your_no(tmp_path):
+    for why in ("PreToolUse:Bash hook error: blocked by policy", "Permission to use Bash has been denied."):
+        m = _tools(tmp_path / "a.jsonl", _use("a"), _res("a", why, error=True))["a"]
+        assert m["state"] == "failed" and why in m["result"]
+
+
+def test_successful_output_quoting_the_refusal_stays_ok(tmp_path):
+    assert _tools(tmp_path / "a.jsonl", _use("a"), _res("a", REFUSAL))["a"]["state"] == "ok"
+
+
+def test_long_errors_keep_head_and_tail(tmp_path):
+    m = _tools(tmp_path / "a.jsonl", _use("a"), _res("a", "HEAD" + "x" * 5000 + "1 failed", error=True))["a"]
+    assert m["result"].startswith("HEAD") and m["result"].endswith("1 failed") and len(m["result"]) <= 603
+
+
+def test_edit_carries_a_capped_diff(tmp_path):
+    def edit(old, new):
+        return _tools(tmp_path / "a.jsonl", _use("e", "Edit", {"file_path": "/p/a.py", "old_string": old, "new_string": new}))["e"]
+    m = edit("a\nb\nc", "a\nB\nc")
+    assert m["added"] == m["removed"] == 1 and ["-", "b"] in m["diff"] and ["+", "B"] in m["diff"] and "diff_cut" not in m
+    m = edit("", "\n".join(f"n{i}" for i in range(100)))
+    assert m["added"] == 100 and len(m["diff"]) == 40 and m["diff_cut"]
+    m = edit("a", "y" * 500)
+    assert max(len(text) for _, text in m["diff"]) == 200 and m["diff_cut"]
+    far = [f"l{i}" for i in range(30)]
+    changed = ["X", *far[1:-1], "Y"]
+    assert ["…", ""] in edit("\n".join(far), "\n".join(changed))["diff"]
+    for old, new in ((None, "a"), ("a", 3), ("a\n" * 2001, "b")):
+        m = edit(old, new)
+        assert not {"diff", "added", "removed"} & set(m), (str(old)[:10], new)
+
+
+def test_write_reports_only_its_line_count(tmp_path):
+    m = _tools(tmp_path / "a.jsonl", _use("w", "Write", {"file_path": "/p/a", "content": "a\nb\n"}))["w"]
+    assert m["lines"] == 2 and "added" not in m
+
+
+def test_a_result_past_the_page_end_still_settles_the_call(tmp_path):
+    later = {"type": "assistant", "timestamp": "later", "message": {"content": [{"type": "text", "text": "after"}]}}
+    log = _log(tmp_path / "a.jsonl", _use("a"), _res("a"), later)
+    end = len(json.dumps(_use("a")) + "\n")
+    msgs = claude_page(log, end=end)[0]
+    assert [(m["ts"], m["state"]) for m in msgs] == [("use-a", "ok")]
+    log = _log(tmp_path / "b.jsonl", _use("a"), later)
+    assert claude_page(log, end=end)[0][0]["state"] == "unknown"
+    assert claude_page(log)[0][0]["state"] == "running"
+
+
+def test_an_old_conversation_has_nothing_still_running(monkeypatch, tmp_path):
+    c, h, now = _history(monkeypatch, tmp_path)
+    old = now.parent / "11111111-old.jsonl"
+    with old.open("a") as f:
+        f.write(json.dumps(_use("a")) + "\n")
+    page = c.get("/api/sessions/w9:p1/history?conversation=11111111-old", headers=h).json()
+    assert page["messages"][-1]["state"] == "unknown"
