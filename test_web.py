@@ -264,7 +264,7 @@ def open_chrome(profile):
             return port_file.exists() and port_file.stat().st_size > 0
 
         try:
-            wait_for(port_ready, "Chrome's DevTools port")
+            wait_for(port_ready, "Chrome's DevTools port", timeout=60)  # a cold CI machine takes a while the first time
             port = port_file.read_text().splitlines()[0]
             devtools = HTTPConnection("127.0.0.1", int(port), timeout=5)
             try:
