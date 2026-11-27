@@ -8,6 +8,7 @@ Two sources:
 import difflib
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07")
@@ -398,6 +399,55 @@ def _parse(lines, upto=None):
             if m.get("state") == "running":
                 m["state"] = "unknown"
     return msgs, offsets, model
+
+
+def claude_meters(path, tail_bytes=700_000):
+    """What the end of a transcript says about the conversation's size and its prompt cache. An unknown measure has no key."""
+    with Path(path).open("rb") as f:
+        size = f.seek(0, 2)
+        lines = [line for _, line in _whole_lines(f, max(0, size - tail_bytes), size)]
+    meters, since, seen = {}, None, False
+    for line in reversed(lines):
+        if '"usage"' not in line and "compact_boundary" not in line:
+            continue
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(d, dict) or d.get("isSidechain"):
+            continue
+        if d.get("subtype") == "compact_boundary":
+            break  # nothing older describes the conversation as it is now
+        usage = d["message"].get("usage") if d.get("type") == "assistant" and isinstance(d.get("message"), dict) else None
+        if not isinstance(usage, dict):
+            continue
+        tokens = sum(_count(usage.get(key)) for key in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
+        if not tokens:  # a reply the harness made up measures nothing
+            continue
+        ts = _epoch(d.get("timestamp"))
+        if not seen:
+            seen, since = True, ts
+            if ts is not None:
+                meters["context"] = {"tokens": tokens, "ts": ts}
+        written = usage.get("cache_creation") if isinstance(usage.get("cache_creation"), dict) else {}
+        # Both lifetimes written at once: promise only the shorter one.
+        ttl = 300 if _count(written.get("ephemeral_5m_input_tokens")) else 3600 if _count(written.get("ephemeral_1h_input_tokens")) else 0
+        if ttl:
+            if since is not None:
+                meters["cache"] = {"ttl": ttl, "since": since}
+            break
+    return meters
+
+
+def _count(value):
+    return value if type(value) is int and value > 0 else 0
+
+
+def _epoch(stamp):
+    try:
+        return datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp()
+    except (AttributeError, ValueError, OverflowError):
+        return None
 
 
 def _first_words(path, cwd, head_bytes=1_000_000):

@@ -2084,3 +2084,74 @@ def test_an_old_conversation_has_nothing_still_running(monkeypatch, tmp_path):
         f.write(json.dumps(_use("a")) + "\n")
     page = c.get("/api/sessions/w9:p1/history?conversation=11111111-old", headers=h).json()
     assert page["messages"][-1]["state"] == "unknown"
+
+
+# --- context size and cache lifetime ---
+import time
+from chat import claude_meters
+
+
+def _reply(ts="2026-11-27T10:00:00.000Z", usage=None, **extra):
+    return {"type": "assistant", "timestamp": ts, "message": {"content": [], "usage": usage}, **extra}
+
+
+def _usage(read=0, hour=0, five=0, fresh=10):
+    return {"input_tokens": fresh, "cache_read_input_tokens": read, "cache_creation_input_tokens": hour + five,
+            "cache_creation": {"ephemeral_1h_input_tokens": hour, "ephemeral_5m_input_tokens": five}}
+
+
+T0 = 1795773600.0  # 2026-11-27T10:00:00Z
+BOUNDARY = {"type": "system", "subtype": "compact_boundary"}
+
+
+def _meters(path, *lines):
+    return claude_meters(_log(path, *lines))
+
+
+def test_context_is_the_sum_of_the_last_reply_usage(tmp_path):
+    usage = {"input_tokens": 10, "cache_read_input_tokens": 100_000, "cache_creation_input_tokens": 2_000}
+    m = _meters(tmp_path / "a.jsonl", _reply(usage=_usage(read=5)), _reply(usage=usage))
+    assert m["context"] == {"tokens": 102_010, "ts": T0}
+
+
+def test_a_compaction_makes_the_context_unknown_until_the_next_reply(tmp_path):
+    before = _reply(usage=_usage(read=100, hour=10))
+    assert _meters(tmp_path / "a.jsonl", before, BOUNDARY) == {}
+    after = _meters(tmp_path / "a.jsonl", before, BOUNDARY, _reply(usage=_usage(read=7)))
+    assert after == {"context": {"tokens": 17, "ts": T0}}
+
+
+def test_subagent_and_synthetic_replies_do_not_measure(tmp_path):
+    m = _meters(tmp_path / "a.jsonl", _reply(usage=_usage(read=50)), _reply(usage=_usage(read=9999), isSidechain=True),
+                _reply(usage={"input_tokens": 0, "output_tokens": 0}))
+    assert m["context"]["tokens"] == 60
+
+
+def test_cache_lifetime_comes_from_the_last_write_and_counts_from_the_last_reply(tmp_path):
+    hour = _meters(tmp_path / "a.jsonl", _reply(usage=_usage(hour=5)))
+    assert hour["cache"] == {"ttl": 3600, "since": T0}
+    both = _meters(tmp_path / "a.jsonl", _reply(usage=_usage(hour=5, five=5)))
+    assert both["cache"]["ttl"] == 300  # the shorter one: never promise more than is sure
+    later = _meters(tmp_path / "a.jsonl", _reply(usage=_usage(hour=5)), _reply("2026-11-27T10:01:00.000Z", usage=_usage(read=40)))
+    assert later["cache"] == {"ttl": 3600, "since": T0 + 60}
+    assert "cache" not in _meters(tmp_path / "a.jsonl", _reply(usage=_usage(read=40)))
+
+
+def test_unreadable_records_leave_the_measure_out(tmp_path):
+    log = tmp_path / "a.jsonl"
+    log.write_text('{"usage": broken\n' + json.dumps(_reply(usage="lots")) + "\n")
+    assert claude_meters(log) == {}
+    assert _meters(log, _reply("yesterday", usage=_usage(read=1, hour=1))) == {}
+    assert _meters(log, _reply(usage={"input_tokens": "12", "cache_read_input_tokens": None})) == {}
+
+
+def test_chat_carries_meters_only_for_a_transcript(monkeypatch, tmp_path):
+    c, h, now = _history(monkeypatch, tmp_path)
+    with now.open("a") as f:
+        f.write(json.dumps(_reply(usage=_usage(read=500, hour=1))) + "\n")
+    r = c.get("/api/sessions/w9:p1/chat", headers=h).json()
+    assert r["meters"]["context"]["tokens"] == 511 and r["meters"]["cache"]["ttl"] == 3600
+    assert abs(r["now"] - time.time()) < 60
+    api.sessions["w9:p1"]["agent"] = "codex"
+    r = c.get("/api/sessions/w9:p1/chat", headers=h).json()
+    assert r["source"] == "screen" and r["meters"] == {}

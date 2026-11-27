@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 
-from chat import claude_chat, claude_page, claude_path, earlier_conversations, detect_model, preview_from_screen, screen_chat, SPINNER, strip_ansi
+from chat import claude_chat, claude_meters, claude_page, claude_path, earlier_conversations, detect_model, preview_from_screen, screen_chat, SPINNER, strip_ansi
 from core import NotificationGate, tidy_details, bucket, build_push, is_destructive, parse_approval, parse_codex_limits, parse_limits, parse_prompt, project_name, status_rank, slash_commands, changes
 from herdr_client import HerdrClient, HerdrError, HerdrUnavailable
 
@@ -866,7 +866,7 @@ async def chat(pane: str, limit: int = 60, anchor: int | None = Query(None, alia
     item = must_exist(pane)
     status = item.get("status", "unknown")
     sid = (agent.get("agent_session") or {}).get("value")
-    messages, source, start = None, "screen", 0
+    messages, source, start, meters = None, "screen", 0, {}
     if item.get("agent") == "claude" and sid:
         path = claude_path(agent.get("cwd"), sid)
         if path:
@@ -875,6 +875,11 @@ async def chat(pane: str, limit: int = 60, anchor: int | None = Query(None, alia
                 source = "transcript"
             except OSError:
                 messages = None
+        if path and messages is not None:
+            try:
+                meters = await asyncio.to_thread(claude_meters, path)
+            except OSError:
+                meters = {}
     # Long terminal history is slow to fetch from Herdr; it is only needed when there is no transcript to show.
     screen = await read_screen(pane, status, max_age=1.0, history=messages is None)
     prompt = None
@@ -887,7 +892,7 @@ async def chat(pane: str, limit: int = 60, anchor: int | None = Query(None, alia
         messages = screen_chat(screen, max(10, min(limit, 200)))
     hint = next((l.strip() for l in reversed(strip_ansi(screen).splitlines()[-12:]) if SPINNER.match(l)), "") if status == "working" else ""
     return {"messages": messages, "source": source, "prompt": prompt, "status": status, "hint": hint, "session": item, "receipt": latest_receipt(pane),
-            "start": start, "conversation": sid or ""}
+            "start": start, "conversation": sid or "", "meters": meters, "now": time.time()}
 
 
 def transcript_of(pane):
