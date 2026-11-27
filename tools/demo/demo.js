@@ -95,7 +95,7 @@
     'd2:p1': {context: {tokens: 61800, ts: T0 - 240}, cache: {ttl: 3600, since: T0 - 240}},
     'd5:p1': {context: {tokens: 48200, ts: T0 - 120}, cache: {ttl: 3600, since: T0 - 120}}};
   let limitRows = [
-    {id: 'claude', label: 'Claude', updated: now() - 120, items: [{label: '5h', used: 38, resets_at: now() + 2.4 * 3600}, {label: '7d', used: 71, resets_at: now() + 3.2 * 86400}]},
+    {id: 'claude', label: 'Claude', updated: now() - 120, items: [{label: '5h', used: 38, resets_at: now() + 2.4 * 3600}, {label: '7d', used: 71, resets_at: now() + 3.2 * 86400}, {label: 'Fable · 7d', used: 46, resets_at: now() + 3.2 * 86400, model: 'fable'}]},
     {id: 'codex', label: 'Codex', updated: now() - 300, items: [{label: '5h', used: 12, resets_at: now() + 4.1 * 3600}, {label: '7d', used: 91, resets_at: now() + 1.5 * 86400}]},
     {id: 'agy', label: 'agy', updated: now() - 600, items: [{label: '7d', used: 24, resets_at: now() + 5.3 * 86400}]}];
 

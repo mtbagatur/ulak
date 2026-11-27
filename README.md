@@ -151,7 +151,7 @@ Optional, in `.secrets/config.json` (untracked):
 
 - `rules_file`: extra destructive regexes, one per line. Blank lines and lines starting with `#` are ignored. Also accepted: markdown list ``- pattern: `regex` ``.
 - `quick_targets` / `quick_label`: workspace or project names that get the quick-send button.
-- `limit_files`: usage-limit files shown in the limits strip. Two formats are understood: JSON `{"h5": {"used_percentage": 4, "resets_at": 1795200600}, "d7": {...}, "ts": 1795183857}` (epoch seconds), or tab-separated text `name<TAB>window<TAB>NN%<TAB>ISO-reset` where NN% is what is *remaining*.
+- `limit_files`: usage-limit files shown in the limits strip. Two formats are understood: JSON `{"h5": {"used_percentage": 4, "resets_at": 1795200600}, "d7": {...}, "ts": 1795183857}` (epoch seconds; a key such as `d7_fable` or `h5_<model>` adds a window kept for one model, shown on its own line), or tab-separated text `name<TAB>window<TAB>NN%<TAB>ISO-reset` where NN% is what is *remaining*.
 - `project_roots`: folders whose subfolders appear in the new-session picker (default `["~"]`). New sessions can only start inside your home folder.
 - `allowed_hosts`: extra host names Ulak answers to. `localhost`, `127.0.0.1`, names without a dot and `*.ts.net` already work; any other name gets 403.
 - `min_work_seconds`: a "finished" push is skipped when the turn took less than this (default 120).
