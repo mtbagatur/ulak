@@ -1774,7 +1774,8 @@ def test_terminal_history_is_read_only_when_the_conversation_has_to_come_from_it
     asked = []
 
     async def call(method, params=None):
-        asked.append(params.get("source"))
+        if method == "agent.read":
+            asked.append(params.get("source"))
         return {"read": {"text": "words"}}
 
     monkeypatch.setattr(fake, "call", call)
@@ -1786,3 +1787,56 @@ def test_terminal_history_is_read_only_when_the_conversation_has_to_come_from_it
     monkeypatch.setattr(api, "claude_path", lambda *a: log if transcript else None)
     body = c.get("/api/sessions/w9:p1/chat", headers=h).json()
     assert (body["source"], asked) == ("transcript" if transcript else "screen", [source])
+
+
+def _transcript(path, cwd, *texts):
+    lines = [json.dumps({"type": "assistant", "cwd": cwd, "timestamp": f"2026-11-27T10:00:{i:02d}Z",
+                         "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}}) for i, text in enumerate(texts)]
+    path.write_text("".join(line + "\n" for line in lines))
+    return path
+
+
+class SessionHerdr(FakeHerdr):
+    """Herdr after a /clear: agent.get already names the new session."""
+    def __init__(self, sid): super().__init__("the cleared screen"); self.sid, self.broken = sid, False
+    async def call(self, method, params=None):
+        if method == "agent.get":
+            if self.broken: raise api.HerdrError("down")
+            return {"agent": {"pane_id": params["target"], "agent": "claude", "agent_session": {"value": self.sid}}}
+        return await super().call(method, params)
+
+
+def _cleared(monkeypatch, tmp_path, new_text="the new conversation"):
+    _, c, h = _setup(monkeypatch, "")
+    fake = SessionHerdr("new-session")
+    paths = {"old-session": _transcript(tmp_path / "old.jsonl", "/p", "the old conversation")}
+    if new_text:
+        paths["new-session"] = _transcript(tmp_path / "new.jsonl", "/p", new_text)
+    monkeypatch.setattr(api, "client", fake)
+    monkeypatch.setattr(api, "claude_path", lambda cwd, sid: paths.get(sid))
+    monkeypatch.setattr(api, "read_cache", {})
+    monkeypatch.setattr(api, "since", {})
+    monkeypatch.setattr(api, "raw_agents", {"w9:p1": {"pane_id": "w9:p1", "agent": "claude", "agent_status": "idle", "cwd": "/p", "agent_session": {"value": "old-session"}}})
+    api.sessions["w9:p1"] = {"pane_id": "w9:p1", "agent": "claude", "status": "idle", "preview": "the old conversation"}
+    return fake, c, h
+
+
+def test_open_chat_follows_a_cleared_session(monkeypatch, tmp_path):
+    _, c, h = _cleared(monkeypatch, tmp_path)
+    r = c.get("/api/sessions/w9:p1/chat", headers=h).json()
+    assert [m["text"] for m in r["messages"]] == ["the new conversation"]
+    assert r["session"]["preview"] == "the new conversation"
+    assert api.sessions["w9:p1"]["preview"] == "the new conversation"
+
+
+def test_cleared_session_without_a_transcript_yet_shows_the_screen(monkeypatch, tmp_path):
+    _, c, h = _cleared(monkeypatch, tmp_path, new_text="")
+    r = c.get("/api/sessions/w9:p1/chat", headers=h).json()
+    assert r["source"] == "screen" and "the old conversation" not in json.dumps(r["messages"])
+
+
+def test_herdr_error_keeps_the_known_session(monkeypatch, tmp_path):
+    fake, c, h = _cleared(monkeypatch, tmp_path)
+    fake.broken = True
+    r = c.get("/api/sessions/w9:p1/chat", headers=h).json()
+    assert [m["text"] for m in r["messages"]] == ["the old conversation"]

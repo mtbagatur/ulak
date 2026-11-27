@@ -342,6 +342,26 @@ async def refresh_pane(pane, force=True):
     return card
 
 
+async def current_agent(pane):
+    """The agent record with the session Herdr knows now: /clear starts a new one and no event says so."""
+    agent = raw_agents.get(pane, {})
+    try:
+        info = await client.call("agent.get", {"target": pane})
+    except HerdrError:
+        return agent
+    named = info.get("agent") if isinstance(info.get("agent"), dict) else info
+    session = named.get("agent_session")
+    if not session or pane not in raw_agents or session == agent.get("agent_session"):
+        return agent
+    agent["agent_session"] = session
+    if pane in sessions:  # what the card says belongs to the conversation that was cleared
+        sessions[pane].update(preview="", model="")
+        card = await refresh_pane(pane)
+        if card:
+            await broadcast({"type": "session", "session": card})
+    return agent
+
+
 async def load_all():
     snap, agents, panes = await get_panes()
     refresh_pane.labels = {w["workspace_id"]: w.get("label", "") for w in snap.get("workspaces", [])}
@@ -447,6 +467,7 @@ async def handle_event(msg):
         now = time.time()
         if agent["agent_status"] == "working":
             work_started.setdefault(pane, now)
+        await current_agent(pane)
         card = await refresh_pane(pane)
         if card:
             await broadcast({"type": "session", "session": card})
@@ -807,9 +828,10 @@ async def commands(pane: str):
 
 @app.get("/api/sessions/{pane}/chat")
 async def chat(pane: str, limit: int = 60):
+    must_exist(pane)
+    agent = await current_agent(pane)
     item = must_exist(pane)
     status = item.get("status", "unknown")
-    agent = raw_agents.get(pane, {})
     sid = (agent.get("agent_session") or {}).get("value")
     messages, source = None, "screen"
     if item.get("agent") == "claude" and sid:
