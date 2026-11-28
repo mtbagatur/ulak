@@ -214,7 +214,9 @@ def test_demo_conversation_shows_what_this_release_reads(site, lang):
     for piece in (".tbl", ".code", ".run", ".act.bad", ".act.denied"):
         assert chrome.js(f"document.querySelector('#messages {piece}') !== null"), piece
     chrome.wait("!document.querySelector('#sMeta').hidden && !document.querySelector('#sRing').hidden")
-    assert text(chrome, "#sMeta").startswith({"en": "Context 48k · Cache ~", "tr": "Bağlam 48k · Cache ~"}[lang])
+    meta = text(chrome, "#sMeta")
+    assert meta.startswith({"en": "handoff written · ", "tr": "devir yazıldı · "}[lang])
+    assert {"en": " · Context 48k · Cache ~", "tr": " · Bağlam 48k · Cache ~"}[lang] in meta
     assert {"en": "You said no", "tr": "Sen reddettin"}[lang] in text(chrome, "#messages .act.denied")
     assert {"en": "Insert only the rows", "tr": "Yalnız eksik satırları"}[lang] in text(chrome, "#messages .act.denied")
     chrome.wait("(() => { const i = document.querySelector('#messages .shot img'); return !!i && i.complete && i.naturalWidth > 0; })()")
@@ -242,3 +244,21 @@ def test_worst_case_reading_data_stays_inside_a_narrow_phone(site):
     chrome.click("#sRing")
     chrome.wait("document.querySelectorAll('#sheet .meter').length === 14")
     assert chrome.js("document.documentElement.scrollWidth <= 320 && [...document.querySelectorAll('#sheet .meter')].every(e => e.getBoundingClientRect().right <= 320)")
+
+
+def test_demo_shows_one_handoff_counting_down_and_one_switched_off(site):
+    cards = {pane: (handoff, line) for pane, handoff, line in site.js(
+        "[...state.sessions.values()].map(s => [s.pane_id, s.handoff || null, document.querySelector(`.card[data-key=\"${s.pane_id}\"] [data-handoff]`)?.textContent || ''])")}
+    assert cards["d5:p1"][0]["phase"] == "written" and cards["d5:p1"][1].startswith("handoff written · clears in ")
+    assert cards["d6:p1"][0] == {"on": False, "phase": "armed", "due": None} and cards["d6:p1"][1] == ""
+    assert cards["d3:p1"][0] is None and cards["d4:p1"][0] is None  # Codex and agy sessions have no such switch
+    site.click('.card[data-key="d5:p1"] [data-handoff-cancel]')
+    site.wait("document.querySelector('.card[data-key=\"d5:p1\"] [data-handoff-cancel]') === null")
+    assert site.js("state.sessions.get('d5:p1').handoff.phase") == "held"
+    site.js("state.idleOpen = true; renderHome()")
+    site.click('.card[data-key="d6:p1"] .card-open')
+    site.wait("location.hash === '#/s/d6:p1' && !document.querySelector('#sMeta').hidden")
+    site.click("#sMeta")
+    site.click("#sheet [role=switch]")
+    site.wait("state.sessions.get('d6:p1').handoff.on === true && !document.querySelector('#sheet [role=switch]').disabled")
+    assert site.js("document.querySelector('#sheet [role=switch]').getAttribute('aria-checked')") == "true"

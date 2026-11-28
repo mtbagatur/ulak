@@ -80,6 +80,7 @@ class FakeAPI:
         self.fail_prompt = False
         self.prompts = []
         self.pins = []
+        self.notifications, self.handoff_calls, self.handoff_fail = [], [], False
         self.moved = None
         self.start, self.conversation, self.conversations, self.pages, self.anchors = None, "one", [], {}, []
         self.meters, self.clock_shift = {}, 0
@@ -189,7 +190,7 @@ class Handler(SimpleHTTPRequestHandler):
         elif self.path == "/api/audit":
             self.json({"items": self.api.audit})
         elif self.path == "/api/notifications":
-            self.json({"items": []})
+            self.json({"items": self.api.notifications})
         elif self.path == "/api/pins":
             self.json({"pins": self.api.pins})
         elif self.path == "/api/limits":
@@ -218,6 +219,29 @@ class Handler(SimpleHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass
 
+    def handoff(self, change):
+        """The card the real server answers with: the session as it now stands."""
+        api = self.api
+        api.handoff_calls.append((self.command, change))
+        assert api.respond.wait(8), "test did not release the held handoff call"
+        if api.handoff_fail:
+            self.json({"detail": "Herdr is not reachable"}, 503)
+            return
+        was = api.cards[0].get("handoff") or {}
+        now = {"on": change["on"], "phase": "armed", "due": None} if "on" in change else {**was, "phase": "held", "due": None}
+        api.cards = [{**api.cards[0], "handoff": now}]
+        self.json(api.cards[0])
+
+    def do_PUT(self):
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        if self.path == "/api/sessions/fake%3Ap1/handoff":
+            self.handoff(body)
+        elif self.path == "/api/pins":
+            self.api.pins = body.get("pins", [])
+            self.json({"pins": self.api.pins})
+        else:
+            self.send_error(404)
+
     def do_POST(self):
         api = self.api
         if self.path == "/api/sessions/fake%3Ap1/upload":
@@ -235,6 +259,9 @@ class Handler(SimpleHTTPRequestHandler):
         if self.path == "/api/push/test":
             api.push_tests.append(body)
             self.json(api.push_test_reply)
+            return
+        if self.path == "/api/sessions/fake%3Ap1/handoff/cancel":
+            self.handoff({})
             return
         if self.path == "/api/sessions/fake%3Ap1/prompt":
             api.prompts.append(body["text"])
@@ -3267,3 +3294,210 @@ def test_the_measuring_strip_sends_what_it_measured_to_the_machine_and_not_the_c
     chrome.wait("document.querySelector('.card-open') !== null")
     assert chrome.js("document.querySelector('#debugSend') === null") and not api.files
 
+
+
+# --- automatic handoff: the switch, the countdown and the way out ---
+OFF = {"on": False, "phase": "armed", "due": None}
+HAND = "document.querySelector('.card .c-meters [data-handoff]')?.textContent"
+SWITCH = "document.querySelector('#sheet [role=switch]')"
+LONG_NAME = "a-project-name-of-forty-characters-long-x"[:40]
+
+
+def written(minutes=7):
+    return {"on": True, "phase": "written", "due": time.time() + minutes * 60 - 20}
+
+
+def token(chrome, name):
+    return chrome.js(f"(() => {{ const p = document.createElement('i'); p.style.color = 'var({name})'; document.body.append(p); const c = getComputedStyle(p).color; p.remove(); return c; }})()")
+
+
+def open_meters(chrome, api, url, lang="en", measured=None, **fields):
+    api.cards, api.meters = [card("idle", **fields)], measured or {}
+    chrome.cdp("Page.navigate", url=url)
+    chrome.js(f"localStorage.setItem('lang', {json.dumps(lang)})")
+    open_first(chrome, url)
+    chrome.wait(SHOWN)
+    chrome.click("#sMeta")
+    chrome.wait("document.querySelector('#sheet h3') !== null")
+
+
+def test_meters_sheet_turns_automatic_handoff_on(api_fixture):
+    chrome, api, url = api_fixture
+    api.config = {**api.config, "auto_handoff": {"min_tokens": 80000, "grace_seconds": 600}}
+    open_meters(chrome, api, url, handoff=OFF)  # nothing measured yet: the line names the switch, and the sheet opens on it alone
+    assert chrome.js(META) == "Automatic handoff off"
+    assert chrome.js(f"[{SWITCH}.getAttribute('aria-checked'), {SWITCH}.textContent, {SWITCH}.getBoundingClientRect().height >= 44, {SWITCH}.getBoundingClientRect().right <= innerWidth]") == ["false", "Automatic handoff", True, True]
+    assert chrome.js("document.querySelector('#sheet .switch-note').textContent") == "Has the handoff written at minute 50 and clears 10 min later"
+    api.respond.clear()
+    chrome.click("#sheet [role=switch]")
+    wait_for(lambda: api.handoff_calls, "the switch to reach the server")
+    assert chrome.js(f"{SWITCH}.disabled") is True
+    chrome.js(f"{SWITCH}.click()")  # a second tap while the first is on its way sends nothing
+    api.respond.set()
+    chrome.wait(f"{SWITCH}.getAttribute('aria-checked') === 'true' && !{SWITCH}.disabled")
+    assert api.handoff_calls == [("PUT", {"on": True})]
+    chrome.wait(f"{META} === 'Automatic handoff on'")
+    api.handoff_fail = True  # the server could not keep it: the switch goes back and says why
+    chrome.click("#sheet [role=switch]")
+    chrome.wait("document.querySelector('.toast.err') !== null")
+    assert chrome.js(f"[{SWITCH}.getAttribute('aria-checked'), {SWITCH}.disabled]") == ["true", False]
+    assert api.handoff_calls[1] == ("PUT", {"on": False})
+    api.config = {**api.config, "auto_handoff": {"min_tokens": 80000, "grace_seconds": 300}}
+    open_meters(chrome, api, url, lang="tr", measured=meters(), handoff=OFF)
+    assert chrome.js("document.querySelectorAll('#sheet .meter').length") == 2  # the switch is the last row, under what was measured
+    assert chrome.js(f"[{SWITCH}.textContent, document.querySelector('#sheet .switch-note').textContent, {SWITCH}.compareDocumentPosition(document.querySelector('#sheet .meter')) & 2]") == ["Otomatik devir", "50. dakikada devir yazdırır, 5 dk sonra temizler", 2]
+
+
+def test_codex_session_has_no_handoff_switch(api_fixture):
+    chrome, api, url = api_fixture
+    open_meters(chrome, api, url, agent="codex", measured=meters())  # the server sends the field for Claude sessions only
+    assert chrome.js("document.querySelectorAll('#sheet .meter').length") == 2
+    assert chrome.js(f"{SWITCH} === null && document.querySelector('#sheet .switch-note') === null")
+    api.cards, api.meters = [card("idle", agent="codex")], {}
+    open_first(chrome, url)
+    assert chrome.js("document.querySelector('#sMeta').hidden && document.querySelector('#handBar').hidden")
+
+
+@pytest.mark.parametrize("width", [320, 390])
+def test_written_handoff_leads_the_meter_line_and_can_be_cancelled(api_fixture, width):
+    chrome, api, url = api_fixture
+    chrome.resize(width, 700)
+    home(chrome, api, url, project=LONG_NAME, handoff=written(), meters={**meters(), "agents": {"running": 3}})
+    # a session is asked after fifty idle minutes, and the idle group is folded: the card comes up to where it is seen
+    assert chrome.js("[document.querySelector('#idleCards'), document.querySelector('.g-done .card')?.dataset.key, document.querySelector('.card').className]") == [None, PANE, "card b-idle"]
+    assert chrome.js(HAND) == "handoff written · clears in 7 min"
+    assert chrome.js("document.querySelector('.card .c-meters').textContent").startswith("handoff written · clears in 7 min · 3 subagents")
+    cancel = "document.querySelector('.card [data-handoff-cancel]')"
+    box = chrome.js(f"(() => {{ const b = {cancel}, r = b.getBoundingClientRect(), h = document.querySelector('.card [data-handoff]').getBoundingClientRect(), c = document.querySelector('.card').getBoundingClientRect(), hit = getComputedStyle(b, '::before'); return [b.textContent, r.width > 0, r.right <= innerWidth && r.right <= c.right, h.right <= r.left, r.height + 2 * Math.abs(parseFloat(hit.top)), document.documentElement.scrollWidth, document.elementFromPoint(r.left + r.width / 2, r.top - 8) === b]; }})()")
+    assert box[:4] == ["Cancel", True, True, True] and box[4] >= 44 and box[5:] == [width, True], box  # the countdown is whole, the finger has 44 px
+    colours = chrome.js(f"[getComputedStyle({cancel}).color, getComputedStyle({cancel}).borderTopColor, getComputedStyle({cancel}).backgroundColor]")
+    assert colours[0] == token(chrome, "--strong") and colours[1] == token(chrome, "--line") and not {token(chrome, "--lal"), token(chrome, "--lal-t")} & set(colours)
+    api.respond.clear()
+    chrome.js(f"{cancel}.click()")
+    wait_for(lambda: api.handoff_calls, "Cancel to reach the server")
+    chrome.js(f"{cancel}?.click()")
+    api.respond.set()
+    chrome.wait(f"{cancel} === null")  # the card answers with the session as it now stands
+    assert api.handoff_calls == [("POST", {})]
+    assert chrome.js("document.querySelector('#session').hidden") is True  # Cancel is not a tap on the card
+    assert chrome.js(CARD_METERS) == "3 subagents · Context 124k · Cache ~41m"
+    # the longest it gets: Turkish, two-digit minutes, a card with a border; the countdown is never the part that is cut
+    api.cards = [card("blocked", pending=APPROVAL, project=LONG_NAME, handoff=written(10), meters={**meters(), "agents": {"running": 3}})]
+    chrome.js("localStorage.setItem('lang', 'tr')")
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait(f"{HAND} === 'devir yazıldı · 10 dk sonra temizlenecek'")
+    fit = chrome.js(f"(() => {{ const h = document.querySelector('.card [data-handoff]'), s = h.parentElement.getBoundingClientRect(), x = {cancel}.getBoundingClientRect(), r = document.createRange(); r.selectNodeContents(h); return [[...r.getClientRects()].every(b => b.left >= s.left - 1 && b.right <= s.right + 1 && b.bottom <= s.bottom + 1), s.right <= x.left, s.height <= 36, x.right <= document.querySelector('.card').getBoundingClientRect().right, document.documentElement.scrollWidth]; }})()")
+    assert fit == [True, True, True, True, width], fit
+
+
+@pytest.mark.parametrize("width", [320, 390])
+def test_open_session_says_the_handoff_countdown_whole_with_cancel_beside_it(api_fixture, width):
+    chrome, api, url = api_fixture
+    chrome.resize(width, 700)
+    api.meters, api.limits = meters(), [limit("claude", ("5h", 93, None))]  # the ring leaves the header line 94 px at 320
+    api.cards = [card("idle", project=LONG_NAME, handoff=written())]
+    chrome.cdp("Page.navigate", url=url)
+    chrome.js("localStorage.setItem('lang', 'tr')")
+    open_first(chrome, url)
+    chrome.wait("!document.querySelector('#handBar').hidden && !document.querySelector('#sRing').hidden && document.querySelector('#session').getAnimations().length === 0")
+    assert chrome.js(META).startswith("devir yazıldı · 7 dk sonra temizlenecek · Bağlam")
+    bar = chrome.js("(() => { const b = document.querySelector('#handBar'), s = b.querySelector('span'), x = b.querySelector('[data-handoff-cancel]'), r = x.getBoundingClientRect(), hit = getComputedStyle(x, '::before'); return [s.textContent, x.textContent, s.scrollWidth <= s.clientWidth, r.right <= innerWidth, r.height + 2 * Math.abs(parseFloat(hit.top)) >= 44, b.getBoundingClientRect().bottom <= document.querySelector('#composer').getBoundingClientRect().top, document.documentElement.scrollWidth, b.getAttribute('role')]; })()")
+    assert bar == ["devir yazıldı · 7 dk sonra temizlenecek", "Vazgeç", True, True, True, True, width, "status"], bar
+    chrome.click("#handBar [data-handoff-cancel]")
+    chrome.wait("document.querySelector('#handBar').hidden")
+    assert api.handoff_calls == [("POST", {})]
+    chrome.wait(f"{META}.startsWith('Bağlam')")
+
+
+def test_asked_handoff_says_it_is_being_written(api_fixture):
+    chrome, api, url = api_fixture
+    asked = {"on": True, "phase": "asked", "due": None}
+    home(chrome, api, url, handoff=asked)  # nothing else is known about the session: the line is there all the same
+    assert chrome.js(CARD_METERS) == "writing handoffCancel"
+    home(chrome, api, url, lang="tr", handoff=asked, meters=meters())
+    assert chrome.js(HAND) == "devir yazılıyor" and chrome.js("document.querySelector('.card [data-handoff-cancel]').textContent") == "Vazgeç"
+    assert chrome.js("document.querySelector('.card .c-meters').firstElementChild.firstElementChild.matches('[data-handoff]')")
+    for quiet in (OFF, {"on": True, "phase": "armed", "due": None}, {"on": True, "phase": "held", "due": None}, {"on": True, "phase": "<b>new</b>", "due": None}):
+        home(chrome, api, url, handoff=quiet, meters=meters())
+        assert chrome.js(CARD_METERS) == "Bağlam 124k · Cache ~41 dk" and chrome.js("document.querySelector('.card [data-handoff-cancel]')") is None
+
+
+def test_handoff_countdown_moves_with_the_minute_and_ends_in_shortly(api_fixture):
+    chrome, api, url = api_fixture
+    home(chrome, api, url, handoff=written(10))
+    assert chrome.js(HAND) == "handoff written · clears in 10 min"
+    api.list_started.clear()
+    chrome.js("state.skew = (state.skew || 0) + 8 * 60")
+    chrome.wait(f"{HAND} === 'handoff written · clears in 2 min'")
+    chrome.js("state.skew += 60")
+    chrome.wait(f"{HAND} === 'handoff written · clears shortly'")
+    chrome.js("state.skew += 3600")  # the server is late: no minus minutes
+    time.sleep(1.7)
+    assert chrome.js(HAND) == "handoff written · clears shortly" and not api.list_started.is_set()
+    home(chrome, api, url, handoff={"on": True, "phase": "written", "due": "<img src=x onerror=window.pwned=1>"})
+    assert chrome.js(HAND) == "handoff written · clears shortly" and chrome.js("window.pwned") is None
+
+
+def handoff_note(kind, body, raw=""):
+    return {"ts": time.time(), "pane": PANE, "status": "handoff-" + kind, "title": "fixture · auto handoff", "body": body, "project": "fixture", "raw": raw}
+
+
+def open_history(chrome, url, tab="notifications"):
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelector('#history') !== null && document.querySelector('.card') !== null")
+    chrome.click("#history")
+    chrome.wait("document.querySelector('#sheet [data-tab=decisions]') !== null")
+    if tab == "decisions":
+        chrome.click("#sheet [data-tab=decisions]")
+
+
+def test_handoff_refusal_reason_is_shown_as_text(api_fixture):
+    chrome, api, url = api_fixture
+    evil = "<img src=x onerror=window.pwned=1> tests are still red"
+    api.notifications = [handoff_note("refused", "Not cleared. " + evil, evil), handoff_note("stopped", "Clearing stopped half way (/rename). Have a look at the session.", "/rename")]
+    api.audit = [{"id": "h1", "ts": time.time(), "pane": PANE, "project": "fixture", "decision": "auto-handoff", "outcome": "<b onclick=window.pwned=2>odd</b>", "reason": "", "command": "", "destructive": False, "login": "ulak", "delivered": None},
+                 {"id": "h2", "ts": time.time(), "pane": PANE, "project": "fixture", "decision": "auto-handoff", "outcome": "refused", "reason": evil, "command": "", "destructive": False, "login": "ulak", "delivered": None}]
+    open_history(chrome, url)
+    first, second = chrome.js("[...document.querySelectorAll('#sheet [data-panel=notifications] .card')].map(e => [e.querySelector('b').textContent, e.querySelector('div').textContent])")
+    assert first == ["fixture · auto handoff", "Not cleared. " + evil] and second == ["fixture · auto handoff", "Clearing stopped half way (/rename). Have a look at the session."]
+    chrome.click("#sheet [data-tab=decisions]")
+    odd, refused = chrome.js("[...document.querySelectorAll('#sheet .audit span')].map(e => e.textContent)")
+    assert odd == "Ulak · <b onclick=window.pwned=2>odd</b>" and refused == "Ulak · not cleared: " + evil
+    assert chrome.js("[document.querySelector('#sheet img'), document.querySelector('#sheet [onclick]'), window.pwned ?? null]") == [None, None, None]
+
+
+@pytest.mark.parametrize("scheme", ["dark", "light"])
+def test_handoff_rows_in_both_languages_and_both_schemes(api_fixture, scheme):
+    chrome, api, url = api_fixture
+    chrome.cdp("Emulation.setEmulatedMedia", features=[{"name": "prefers-color-scheme", "value": scheme}])
+    bodies = {"written": "Handoff written. Unless you come back within 10 min, the conversation is cleared and carries on.", "cleaned": "Cleared; carrying on from the handoff note.",
+              "refused": "Not cleared. mid-migration", "failed": "The handoff could not be written; the session is as it was.", "stopped": "Clearing stopped half way (/clear). Have a look at the session."}
+    api.notifications = [handoff_note(kind, body, {"refused": "mid-migration", "stopped": "/clear"}.get(kind, "")) for kind, body in bodies.items()]
+    outcomes = ["ask", "clear", "rename", "continue", "cancelled", "refused", "failed"]
+    api.audit = [{"id": f"h{i}", "ts": time.time(), "pane": PANE, "project": "fixture", "decision": "auto-handoff", "outcome": o, "reason": "mid-migration" if o in ("refused", "failed") else "",
+                  "command": "/clear" if o == "clear" else "", "destructive": False, "login": "ulak", "delivered": None} for i, o in enumerate(outcomes)]
+    notes = "[...document.querySelectorAll('#sheet [data-panel=notifications] .card')].map(e => [e.querySelector('b').textContent, e.querySelector('div').textContent])"
+    rows = "[...document.querySelectorAll('#sheet .audit span')].map(e => e.textContent)"
+    open_history(chrome, url)
+    assert chrome.js(notes) == [["fixture · auto handoff", body] for body in bodies.values()]
+    assert chrome.js(rows) == ["Ulak · asked for the handoff", "Ulak · cleared", "Ulak · renamed", "Ulak · asked to carry on", "Ulak · handoff cancelled", "Ulak · not cleared: mid-migration", "Ulak · stopped: mid-migration"]
+    chrome.js("localStorage.setItem('lang', 'tr')")
+    open_history(chrome, url)
+    assert chrome.js(notes) == [["fixture · otomatik devir", body] for body in (
+        "Devir yazıldı. 10 dk içinde dönmezsen temizlenip devam edecek.", "Temizlendi, devir notundan devam ediyor.", "Kesilmedi. mid-migration",
+        "Devir yazılamadı, oturum olduğu gibi duruyor.", "Temizleme yarıda kaldı (/clear). Oturuma bak.")]
+    assert chrome.js(rows) == ["Ulak · devir istendi", "Ulak · temizlendi", "Ulak · ad verildi", "Ulak · devam istendi", "Ulak · devirden vazgeçildi", "Ulak · kesilmedi: mid-migration", "Ulak · yarıda kaldı: mid-migration"]
+    words = (WEB / "i18n.js").read_text()
+    en, tr = words.split("\n  tr: {")[0], words.split("\n  tr: {")[1].split("\n};")[0]
+    new = set(re.findall(r"\b(ho[A-Z]\w*):", words))
+    assert len(new) >= 20 and all(re.search(rf"\b{k}:", en) and re.search(rf"\b{k}:", tr) for k in new), sorted(new)
+    # the switch and the way out read on both grounds
+    api.cards = [card("idle", handoff={"on": True, "phase": "written", "due": time.time() + 400}, meters=meters())]
+    open_first(chrome, url)
+    chrome.wait(SHOWN + " && !document.querySelector('#handBar').hidden")
+    assert chrome.js("matchMedia('(prefers-color-scheme: light)').matches") is (scheme == "light")
+    assert chrome.js("getComputedStyle(document.querySelector('#handBar [data-handoff-cancel]')).color") == token(chrome, "--strong")
+    chrome.click("#sMeta")
+    chrome.wait(f"{SWITCH} !== null")
+    assert chrome.js(f"[{SWITCH}.getAttribute('aria-checked'), getComputedStyle({SWITCH}.querySelector('i')).backgroundColor === '{token(chrome, '--seal')}', getComputedStyle({SWITCH}).opacity]") == ["true", True, "1"]
+    chrome.cdp("Emulation.setEmulatedMedia", features=[])

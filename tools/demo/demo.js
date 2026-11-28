@@ -89,6 +89,9 @@
   const notes = [{ts: now() - 240, pane: 'd2:p1', status: 'blocked', title: 'tugra', body: needs('git push origin release/2.4')},
     {ts: now() - 90, pane: 'd1:p1', status: 'blocked', title: 'panel', body: needs('pytest -q tests/test_sync.py')}];
   let pins = ['work|panel'], made = 0, infraAsked = false;
+  // Automatic handoff: one finished session has its note written and is counting down, the rest have the switch off.
+  const HANDOFF = {'d5:p1': {on: true, phase: 'written', due: now() + 7 * 60}};
+  const handoff = s => s.agent === 'claude' ? (HANDOFF[s.pane_id] ||= {on: false, phase: 'armed', due: null}) : undefined;
   // What a Claude session record says about itself. Other tools keep no such record, so their sessions show only the limit.
   const T0 = now();
   const METERS = {'d1:p1': {context: {tokens: 124300, ts: T0 - 40}, cache: {ttl: 3600, since: T0 - 19 * 60}},
@@ -118,6 +121,8 @@
       bot('# ' + long + '\n\n' + wide + '\n\nmissing/1.png missing/2.png missing/3.png missing/4.png missing/5.png')];
     METERS['d1:p1'] = {context: {tokens: 987654321, ts: T0 - 9e6}, cache: {ttl: 3600, since: T0 - 9e6}};
     limitRows = [{id: 'claude', label: 'Claude ' + long, updated: now() - 9e6, items: Array.from({length: 12}, (_, i) => ({label: `window ${i} ${'n'.repeat(40)}`, used: i * 9, resets_at: now() + (i + 1) * 9e5}))}];
+    METERS['d1:p1'].agents = {running: 3};
+    HANDOFF['d1:p1'] = {on: true, phase: 'written', due: now() + 10 * 60}; HANDOFF['w4:p1'] = {on: true, phase: 'asked', due: null};
     sessions.forEach(s => { chats[s.pane_id] = hard.slice(); });
   }
 
@@ -125,7 +130,7 @@
   const streams = new Set();
   const emit = message => streams.forEach(s => s.ready && s.onmessage?.({data: JSON.stringify(localise(message))}));
   const find = pane => sessions.find(s => s.pane_id === pane);
-  const view = ({hint, ...s}) => ({...s, meters: METERS[s.pane_id] || {}, bucket: s.status === 'done' && now() - s.since > 300 ? 'idle' : s.status});  // done is news for five minutes
+  const view = ({hint, ...s}) => ({...s, ...(handoff(s) ? {handoff: handoff(s)} : {}), meters: METERS[s.pane_id] || {}, bucket: s.status === 'done' && now() - s.since > 300 ? 'idle' : s.status});  // done is news for five minutes
   function set(s, patch) {
     const was = s.status;
     Object.assign(s, patch);
@@ -234,7 +239,7 @@ diff --git a/tests/test_retry.py b/tests/test_retry.py
     tools: {claude: ['sonnet', 'opus'], codex: [], agy: []}};
 
   function route(method, path, body) {
-    const [, pane, verb] = path.match(/^\/api\/sessions\/([^/]+)\/(\w+)$/) || [];
+    const [, pane, verb] = path.replace(/\/handoff\/cancel$/, '/unhand').match(/^\/api\/sessions\/([^/]+)\/(\w+)$/) || [];
     const s = pane && find(pane);
     if (method === 'GET') {
       if (path === '/api/sessions') return sessions.map(view);
@@ -243,7 +248,7 @@ diff --git a/tests/test_retry.py b/tests/test_retry.py
       if (verb === 'changes') return changes(pane);
       if (verb === 'screen') return screen(pane);
       if (verb === 'conversations') return {items: []};
-      return {'/api/config': {quick_label: '', approval_timeout_minutes: 0}, '/api/pins': {pins}, '/api/audit': {items: audit}, '/api/notifications': {items: notes},
+      return {'/api/config': {quick_label: '', approval_timeout_minutes: 0, auto_handoff: {min_tokens: 80000, grace_seconds: 600}}, '/api/pins': {pins}, '/api/audit': {items: audit}, '/api/notifications': {items: notes},
         '/api/limits': limits(), '/api/push/public': {key: ''}, '/api/projects': PROJECTS}[path] || [404, {detail: 'Not found'}];
     }
     if (path === '/api/pins') { pins = body.pins || []; return {pins}; }
@@ -254,6 +259,12 @@ diff --git a/tests/test_retry.py b/tests/test_retry.py
       return {ok: true, pane: fresh.pane_id};
     }
     if (verb && !s) return [404, {detail: 'Session not found'}];
+    if (verb === 'handoff' || verb === 'unhand') {
+      if (!handoff(s)) return [409, {detail: 'Automatic handoff is for Claude sessions only'}];
+      HANDOFF[pane] = verb === 'unhand' ? {...HANDOFF[pane], phase: 'held', due: null} : {on: !!body.on, phase: 'armed', due: null};
+      emit({type: 'session', session: view(s)});
+      return view(s);
+    }
     if (verb === 'approve') return approve(pane, body);
     if (verb === 'prompt') {
       (chats[pane] ||= []).push((body.text || '').startsWith('/') ? {role: 'command', text: body.text} : user(body.text || ''));

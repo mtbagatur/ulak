@@ -112,6 +112,11 @@ button.loading::after{content:"";position:absolute;left:calc(50% - 8px);top:calc
 .b-done .state{color:var(--ok)}.b-done .d{background:var(--ok)}
 @keyframes pulse{50%{opacity:.35}}
 .c-meters{font-size:12.5px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.c-meters b{font-weight:600}
+.c-meters.has-x{display:flex;align-items:center;gap:8px;overflow:visible;margin-top:4px;white-space:normal;line-height:1.35}.c-meters.has-x>span{flex:1;min-width:0;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;overflow-wrap:anywhere}
+.hand-x{flex:none;position:relative;min-height:0;padding:3px 11px;border-radius:999px;background:transparent;border:1px solid var(--line);color:var(--strong);font-size:12.5px;line-height:1.3}
+.hand-x::before{content:"";position:absolute;top:-11px;bottom:-11px;left:-8px;right:-6px}
+.hand-bar{flex:none;display:flex;align-items:center;gap:10px;margin:0 14px 8px;font-size:12.5px;line-height:1.35;color:var(--muted)}.hand-bar[hidden]{display:none}
+.hand-bar span{flex:1;min-width:0;overflow-wrap:anywhere}
 .c-title{font-size:13px;color:var(--text);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .c-prev{font-size:13px;color:var(--muted);margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
 .c-cmd{margin:10px 0 0;padding:9px 11px;border-radius:9px;background:var(--bg2);font:12.5px/1.4 var(--mono);color:var(--strong);white-space:pre-wrap;word-break:break-all;max-height:84px;overflow:hidden}
@@ -203,6 +208,12 @@ details.sub[data-state=failed] .sub-state{color:var(--strong)}
 .meter .bar{height:6px;border-radius:3px;background:var(--bg2);overflow:hidden;margin:5px 0 4px}
 .meter .bar i{display:block;height:100%;background:var(--zer)}
 .meter small{display:block;font-size:12px;color:var(--muted)}
+.switch{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-height:44px;padding:0;background:transparent;border-radius:8px;font-size:14px;color:var(--strong);text-align:left}
+.switch:active{transform:none}.switch:disabled{opacity:1}
+.switch i{flex:none;position:relative;width:44px;height:26px;border-radius:13px;background:var(--card2);border:1px solid var(--line);transition:background .15s,border-color .15s}
+.switch i::after{content:"";position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:var(--muted);transition:transform .16s var(--ease-out),background .15s}
+.switch[aria-checked=true] i{background:var(--seal);border-color:var(--seal)}.switch[aria-checked=true] i::after{transform:translateX(18px);background:var(--zer-ink)}
+.switch-note{display:block;font-size:12px;color:var(--muted);margin:-6px 56px 14px 0}
 .shots{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px;white-space:normal;max-width:460px}
 .shots:has(.shot:only-child){grid-template-columns:minmax(0,1fr)}
 .shot{display:block;min-width:0;border:1px solid var(--line);border-radius:12px;overflow:hidden;padding:0;min-height:0;background:var(--bg2);text-align:left}
@@ -393,6 +404,7 @@ input::placeholder,textarea::placeholder{color:var(--muted);opacity:1}
 @keyframes drop{from{opacity:0;transform:translateY(-10px)}}
 .toast.out{opacity:0;transform:translateY(-6px);transition:opacity .18s,transform .18s var(--ease-out)}
 @media (prefers-reduced-motion:reduce){
+  .switch i,.switch i::after{transition:none}
   #session,.card,.prompt,.sheet-back,.sheet,.toast{animation:fade .15s ease-out both!important}
   .b-working .state .d,.b-working .blink,.hint,details.sub .sub-mark,.receipt .leg,.receipt svg,.mark.draw *,.stamp svg,button.loading::after{animation:none!important}
   button{transition:opacity .15s ease,background .15s ease!important}

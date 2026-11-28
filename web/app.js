@@ -112,6 +112,8 @@ function ago(ts) {
 // ---------- home ----------
 const GROUPS = ['blocked', 'working', 'done', 'unknown', 'idle'];
 const rank = s => ({blocked: 0, working: 1, done: 2, unknown: 3, idle: 4}[s.bucket] ?? 3);
+// An idle session whose handoff is under way is listed with what just finished: the idle group is folded, and its countdown has a deadline.
+const shelf = s => s.bucket === 'idle' && s.handoff && ['asked', 'written'].includes(s.handoff.phase) ? 'done' : s.bucket;
 function sorted() {
   return [...state.sessions.values()].sort((a, b) => rank(a) - rank(b) || ((b.active || b.since) - (a.active || a.since)));
 }
@@ -177,9 +179,15 @@ function cardHtml(s) {
   const body = p ? `<pre class="c-cmd${inline ? ' full-command' : choices.length ? ' full-command asked' : ''}">${esc(p.details || p.question)}</pre>${unseen ? `<div class="hidden-note">${esc(t('hiddenShort', {c: unseen}))}</div>` : ''}` : (s.preview ? `<div class="c-prev">${esc(s.preview)}</div>` : '');
   const pinned = isPinned(s);
   return `<button class="card-open" type="button" aria-label="${esc(t('openSession', {project: s.project}))}"></button><div class="c-top"><span class="proj">${esc(s.project)}</span>${dup && s.workspace_label ? `<span class="ws">${esc(s.workspace_label)}</span>` : ''}<span class="chip ${esc(s.agent)}">${esc(TOOLNAME[s.agent] || s.agent)}</span><span class="model">${esc(s.model)}</span><button class="pin ${pinned ? 'on' : ''}" data-pin aria-label="${esc(t(pinned ? 'unpin' : 'pin'))}" aria-pressed="${pinned}">${icon('pin', 16)}</button></div>
-    <div class="state"><span class="d"></span><span>${s.bucket === 'working' && stateText.startsWith(statusText('working')) ? `<span class="blink">${esc(statusText('working'))}</span>${esc(stateText.slice(statusText('working').length))}` : esc(stateText)}</span></div>${meterLine(s.meters, true) ? `<div class="c-meters">${meterLine(s.meters, true)}</div>` : ''}
+    <div class="state"><span class="d"></span><span>${s.bucket === 'working' && stateText.startsWith(statusText('working')) ? `<span class="blink">${esc(statusText('working'))}</span>${esc(stateText.slice(statusText('working').length))}` : esc(stateText)}</span></div>${cardMeters(s)}
     ${s.title ? `<div class="c-title">${esc(s.title)}</div>` : ''}${p && p.destructive ? `<div class="seals">${icon('seal', 14)}${icon('seal', 14)}<span>${esc(t('destructive'))}</span></div>` : ''}${body}
     ${inline ? `<div class="c-act"><button class="deny" data-act="deny">${esc(t('deny'))}</button><button class="seal" data-act="approve">${icon('seal', 17)}${esc(t('approve'))}</button></div>` : ''}${choices.length ? `<div class="c-act choices">${choices.map(o => `<button data-n="${+o.n}">${esc(o.label)}</button>`).join('')}</div>` : ''}${isSealed(s.pane_id, p) ? stampHtml(p) : ''}`;
+}
+// While a handoff is under way the line leads with it and its way out sits at the end, a button of its own above the card's.
+function cardMeters(s) {
+  const line = meterLine(s.meters, true, s.handoff);
+  if (!line) return '';
+  return handoffText(s.handoff) ? `<div class="c-meters has-x"><span>${line}</span><button type="button" class="hand-x" data-handoff-cancel>${esc(t('cancel'))}</button></div>` : `<div class="c-meters">${line}</div>`;
 }
 function patch(container, items, keyOf, htmlOf, make) {
   const existing = new Map([...container.children].map(el => [el.dataset.key, el]));
@@ -212,7 +220,7 @@ function renderHome() {
   if (!all.length) { putHtml(groups, `<div class="empty">${t('empty')}</div>`); return; }
   if (groups.querySelector('.empty')) { groups.innerHTML = ''; groups._h = ''; }
   const pinned = all.filter(isPinned);
-  const defs = [...(pinned.length ? [{id: 'pinned', title: t('g_pinned'), items: pinned}] : []), ...GROUPS.map(id => ({id, title: t('g_' + id), items: all.filter(s => !isPinned(s) && s.bucket === id)}))].filter(g => g.items.length);
+  const defs = [...(pinned.length ? [{id: 'pinned', title: t('g_pinned'), items: pinned}] : []), ...GROUPS.map(id => ({id, title: t('g_' + id), items: all.filter(s => !isPinned(s) && shelf(s) === id)}))].filter(g => g.items.length);
   patch(groups, defs, g => g.id, g => {
     const label = `${g.title} · ${g.items.length}`;
     return g.id === 'idle'
@@ -242,6 +250,7 @@ $('#groups').addEventListener('click', e => {
   const pb = e.target.closest('[data-pin]');
   if (pb) { e.stopPropagation(); const s = state.sessions.get(card.dataset.key); if (s) { const pane = card.dataset.key, k = pinKey(s); pins.has(k) ? pins.delete(k) : pins.add(k); renderHome(); savePins(); requestAnimationFrame(() => [...document.querySelectorAll('.card')].find(el => el.dataset.key === pane)?.querySelector('[data-pin]')?.focus({preventScroll: true})); } return; }
   const pane = card.dataset.key, a = e.target.closest('[data-act]');
+  if (e.target.closest('[data-handoff-cancel]')) { e.stopPropagation(); cancelHandoff(pane, e.target.closest('[data-handoff-cancel]')); return; }
   if (a) { e.stopPropagation(); inlineDecide(pane, a.dataset.act, a); return; }
   const c = e.target.closest('[data-n]');
   if (c) { e.stopPropagation(); cardChoose(pane, +c.dataset.n, c); return; }
@@ -501,8 +510,31 @@ function sessionLimits() {
 }
 // The same words above a conversation and on its card. Nothing known, nothing said.
 // The card says the count short: at 320 px the long form pushes the cache off the line.
-function meterLine(meters, short) {
-  const m = meters || {}, left = cacheLeft(m), bits = [], out = m.agents?.running;
+// What an automatic handoff under way says of itself, or nothing. The minutes are the computer's, rounded up; a late server never shows less than "shortly".
+function handoffText(h) {
+  if (h?.phase === 'asked') return t('hoAsked');
+  if (h?.phase !== 'written') return '';
+  const left = typeof h.due === 'number' ? h.due - serverNow() : 0;
+  return left < 60 ? t('hoSoon') : t('hoWritten', {n: Math.ceil(left / 60)});
+}
+const handCancelling = new Set();
+async function cancelHandoff(pane, btn) {
+  if (handCancelling.has(pane)) return;
+  handCancelling.add(pane);
+  try { applySession(await act(btn, () => api(`/api/sessions/${encodeURIComponent(pane)}/handoff/cancel`, {}), t('hoCancelled'))); }
+  finally { handCancelling.delete(pane); }
+}
+// The server answers a handoff call with the session as it now stands.
+function applySession(card) {
+  if (!card?.pane_id || !state.sessions.has(card.pane_id)) return;
+  state.sessions.set(card.pane_id, {...state.sessions.get(card.pane_id), ...card});
+  renderHome();
+  if (card.pane_id === state.current) updateSessionHeader();
+}
+function meterLine(meters, short, handoff) {
+  const m = meters || {}, left = cacheLeft(m), bits = [], out = m.agents?.running, hand = handoffText(handoff);
+  // The handoff leads: it is the one part with a deadline, and at a narrow width the end is what gets cut.
+  if (hand) bits.push(`<span data-handoff>${esc(hand).replace(/\d+/, '<b>$&</b>')}</span>`);
   // First in the line: at a narrow width the end is what gets cut, and this is the part that changes.
   if (Number.isInteger(out) && out > 0) bits.push(`<span data-agents>${esc(many(short ? 'agentsShort' : 'agentsRunning', out)).replace(/\d+/, '<b>$&</b>')}</span>`);
   if (typeof m.context?.tokens === 'number') bits.push(t('ctxShort', {n: `<b>${fmtTokens(m.context.tokens)}</b>`}));
@@ -510,8 +542,12 @@ function meterLine(meters, short) {
   return bits.join(' · ');
 }
 function renderMeters() {
-  const meta = $('#sMeta'), ring = $('#sRing'), line = meterLine(state.meters);
+  const meta = $('#sMeta'), ring = $('#sRing'), hand = state.sessions.get(state.current)?.handoff, live = handoffText(hand);
+  // A Claude session with nothing measured yet still has the switch: the line names it, so the sheet can be reached.
+  const line = meterLine(state.meters, false, hand) || (hand ? esc(t(hand.on ? 'hoOn' : 'hoOff')) : '');
   put(meta, 'hidden', !line); putHtml(meta, `<span>${line}</span>`);
+  // The header line is 94 px wide on a narrow phone with the ring up, so the countdown is said whole above the message box, its way out beside it.
+  put($('#handBar'), 'hidden', !live); put($('#handBar span'), 'textContent', live); put($('#handBar button'), 'textContent', t('cancel'));
   const lim = sessionLimits();
   put(ring, 'hidden', !lim);
   if (!lim) return;
@@ -528,9 +564,23 @@ function metersSheet() {
   if (typeof m.context?.tokens === 'number') rows.push(row(t('mContext'), t('tokens', {n: m.context.tokens.toLocaleString(LANG === 'tr' ? 'tr-TR' : 'en-US')}), record(m.context.ts)));
   if (left !== null) rows.push(row(`${t('mCache')} · ${t(m.cache.ttl >= 3600 ? 'cache1h' : 'cache5m')}`, left > 0 ? t('cacheLeft', {n: cacheMins(left)}) : t('cacheCold'), record(m.cache.since)));
   for (const i of lim?.items || []) rows.push(row(`${lim.label} · ${i.label}`, t('used', {n: i.used}), [resetText(i.resets_at, now), t(lim.id === 'codex' ? 'limCodex' : 'limFile'), lim.updated ? agoText(now - lim.updated) : ''].filter(Boolean).join(' · '), Math.max(0, Math.min(100, i.used))));
-  if (rows.length) showSheet(`<h3>${esc(t('metersTitle'))}</h3><div class="scroll" style="max-height:65vh">${rows.join('')}</div>`);
+  const pane = state.current, hand = state.sessions.get(pane)?.handoff;
+  if (hand) rows.push(`<button type="button" class="switch" role="switch" aria-checked="${!!hand.on}"><span>${esc(t('hoSwitch'))}</span><i></i></button><small class="switch-note">${esc(t('hoNote', {n: +(handoffGrace / 60).toFixed(1)}))}</small>`);
+  if (!rows.length) return;
+  showSheet(`<h3>${esc(t('metersTitle'))}</h3><div class="scroll" style="max-height:65vh">${rows.join('')}</div>`);
+  const sw = $('#sheet [role=switch]');
+  if (sw) sw.onclick = async () => {
+    const on = sw.getAttribute('aria-checked') !== 'true';
+    sw.disabled = true; sw.setAttribute('aria-checked', String(on));
+    let card = null;
+    try { card = await api(`/api/sessions/${encodeURIComponent(pane)}/handoff`, {on}, 'PUT'); }
+    catch (e) { toast(e.message, 'err'); }
+    if (sw.isConnected) { sw.setAttribute('aria-checked', String(card ? !!card.handoff?.on : !on)); sw.disabled = false; }
+    applySession(card);
+  };
 }
 $('#sRing').onclick = metersSheet;
+$('#handBar button').onclick = e => cancelHandoff(state.current, e.currentTarget);
 // One line, two answers: the count takes you to whoever is still out, the measures open their sheet.
 // The count's own letters are 12 px tall, so it is told apart by where across the line the finger landed.
 $('#sMeta').onclick = e => {
@@ -569,6 +619,7 @@ function updateSessionHeader() {
   const plain = isPlain(s);
   put($('#composer'), 'hidden', plain); put($('#plainNote'), 'hidden', !plain);
   if (plain) $('#keybar').hidden = true;
+  renderMeters();
 }
 const isPlain = s => !!s && (s.agent || 'terminal') === 'terminal';
 function closedBanner() {
@@ -1542,9 +1593,9 @@ $('#sheetBack').onclick = hideSheet;
   s.addEventListener('touchend', end); s.addEventListener('touchcancel', end);
 })();
 
-let quickLabel = '', approvalTimeout = 0;
+let quickLabel = '', approvalTimeout = 0, handoffGrace = 600;
 function setQuickLabel() { $('#toQuick').textContent = quickLabel ? t('quickTo', {x: quickLabel}) : t('quickSend'); }
-api('/api/config').then(c => { quickLabel = c.quick_label || ''; approvalTimeout = +c.approval_timeout_minutes || 0; $('#toQuick').hidden = !quickLabel; setQuickLabel(); }).catch(() => {});
+api('/api/config').then(c => { quickLabel = c.quick_label || ''; approvalTimeout = +c.approval_timeout_minutes || 0; handoffGrace = +c.auto_handoff?.grace_seconds || 600; $('#toQuick').hidden = !quickLabel; setQuickLabel(); }).catch(() => {});
 $('#toQuick').hidden = true;
 $('#toQuick').onclick = () => {
   showSheet(`<h3>${esc(t('quickTo', {x: quickLabel}))}</h3><textarea id="quickText" aria-label="${esc(t('quickPh'))}" placeholder="${esc(t('quickPh'))}" autofocus></textarea><div class="acts"><button class="ghost" data-x>${esc(t('cancel'))}</button><button class="primary" data-y>${esc(t('send'))}</button></div>`);
@@ -1704,7 +1755,7 @@ if ('serviceWorker' in navigator) {
 $('#history').onclick = e => act(e.currentTarget, async () => {
   const [{items}, audit] = await Promise.all([api('/api/notifications'), api('/api/audit')]);
   const rows = items.length ? items.map(n => `<button class="card b-${n.status === 'blocked' ? 'blocked' : 'done'}" data-pane="${esc(n.pane || '')}"><b>${esc(histTitle(n))}</b><div>${esc(histBody(n))}</div><small>${ago(n.ts)}</small></button>`).join('') : `<div class="empty">${t('noNotifs')}</div>`;
-  const outcome = a => a.outcome === 'refused' ? `${t('outRefused')}: ${errText(a.reason)}` : a.outcome === 'confirm_requested' ? t('outConfirm') : a.outcome === 'timeout' ? `${t('outTimeout', {n: (/[\d.]+/.exec(a.reason || '') || [''])[0]})} · ${arrival(a)}` : `${t(DECIDED[a.decision] || 'sent')} · ${arrival(a)}`;
+  const outcome = a => a.decision === 'auto-handoff' ? `Ulak · ${I18N.en['hoA' + a.outcome] ? t('hoA' + a.outcome) : a.outcome}${a.reason ? `: ${a.reason}` : ''}` : a.outcome === 'refused' ? `${t('outRefused')}: ${errText(a.reason)}` : a.outcome === 'confirm_requested' ? t('outConfirm') : a.outcome === 'timeout' ? `${t('outTimeout', {n: (/[\d.]+/.exec(a.reason || '') || [''])[0]})} · ${arrival(a)}` : `${t(DECIDED[a.decision] || 'sent')} · ${arrival(a)}`;
   const decisions = audit.items.length ? audit.items.map(a => `<div class="audit ${a.outcome === 'refused' ? 'no' : ''}"><b>${esc(a.project || a.pane)}</b><span>${esc(outcome(a))}</span>${a.command ? `<pre>${esc(a.command)}</pre>` : ''}<small>${esc(a.login || (a.outcome === 'timeout' ? 'Ulak' : ''))} · ${esc(new Date(a.ts * 1000).toLocaleString(LANG === 'tr' ? 'tr-TR' : 'en-GB', {dateStyle: 'medium', timeStyle: 'short'}))}</small></div>`).join('') : `<div class="empty">${t('noDecisions')}</div>`;
   showSheet(`<h3 class="sr-only">${esc(t('history'))}</h3><div class="tabs" role="tablist"><button role="tab" data-tab="notifications" aria-selected="true">${esc(t('notifications'))}</button><button role="tab" data-tab="decisions" aria-selected="false">${esc(t('decisions'))}</button></div>
     <div class="scroll" style="max-height:65vh" data-panel="notifications">${rows}</div><div class="scroll" style="max-height:65vh" data-panel="decisions" hidden>${decisions}</div>`);
@@ -1715,8 +1766,9 @@ $('#history').onclick = e => act(e.currentTarget, async () => {
   $('#sheet').querySelectorAll('[data-pane]').forEach(b => b.onclick = () => { const p = b.dataset.pane; hideSheet(); if (p && state.sessions.has(p)) go(p); });
 });
 
-function histTitle(n) { return n.project ? t(n.status === 'blocked' ? 'needsYouTitle' : 'doneTitle', {p: n.project}) : (n.title || ''); }
-function histBody(n) { const b = n.body || ''; return n.project ? (b || t(n.status === 'blocked' ? 'askBody' : 'finishedBody')) : b; }
+const handoffKind = n => { const kind = String(n.status || '').startsWith('handoff-') ? n.status.slice(8) : ''; return I18N.en['hoN' + kind] ? kind : ''; };
+function histTitle(n) { return handoffKind(n) ? t('hoTitle', {p: n.project || n.pane || ''}) : n.project ? t(n.status === 'blocked' ? 'needsYouTitle' : 'doneTitle', {p: n.project}) : (n.title || ''); }
+function histBody(n) { const b = n.body || ''; if (handoffKind(n)) return t('hoN' + handoffKind(n), {n: (/\d+(\.\d+)?/.exec(b) || [+(handoffGrace / 60).toFixed(1)])[0], reason: n.raw || ''}); return n.project ? (b || t(n.status === 'blocked' ? 'askBody' : 'finishedBody')) : b; }
 
 // ---------- language ----------
 function refreshLang() {
