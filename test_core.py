@@ -3036,3 +3036,34 @@ def test_long_command_reply_is_followed_by_what_the_screen_shows(monkeypatch, tm
     assert c.post(APPROVE, headers=h, json={"decision": "approve", "fingerprint": fp}).status_code == 200
     assert c.post("/api/sessions/w9:p1/keys", headers=h, json={"keys": ["esc"]}).status_code == 200
     assert followed == [parse_approval(_cut_screen(BUILD), "claude")["fingerprint"]] * 2
+
+
+# --- the home card: context and cache without reading the record on every look ---
+def test_cached_meters_reads_the_file_once_until_it_changes(tmp_path, monkeypatch):
+    path, reads = _log(tmp_path / "a.jsonl", _reply(usage=_usage(read=100_000, hour=2_000))), []
+    monkeypatch.setattr(api, "claude_meters", lambda p: reads.append(p) or claude_meters(p))
+    first = api.cached_meters(path)
+    assert first["context"]["tokens"] == 102_010 and api.cached_meters(path) == first and len(reads) == 1
+    with path.open("a") as f:
+        f.write(json.dumps(_reply(ts="2026-11-27T10:05:00.000Z", usage=_usage(read=150_000, five=500))) + "\n")
+    assert api.cached_meters(path) == {"context": {"tokens": 150_510, "ts": T0 + 300}, "cache": {"ttl": 300, "since": T0 + 300}} and len(reads) == 2
+
+
+def test_cached_meters_of_a_missing_record_are_empty_and_the_cache_stays_small(tmp_path, monkeypatch):
+    assert api.cached_meters(tmp_path / "gone.jsonl") == {}
+    monkeypatch.setattr(api, "meters_cache", {})
+    for i in range(70):
+        api.cached_meters(_log(tmp_path / f"{i}.jsonl", _reply(usage=_usage(read=i + 1, hour=1))))
+    assert len(api.meters_cache) == 64 and (str(tmp_path / "69.jsonl") in {key[0] for key in api.meters_cache})
+
+
+def test_card_carries_meters_only_for_a_claude_transcript(monkeypatch, tmp_path):
+    _long(monkeypatch, tmp_path, "idle", _reply(usage=_usage(read=100_000, hour=2_000)))
+
+    async def screen(*args, **kwargs):
+        return ""
+    monkeypatch.setattr(api, "read_screen", screen)
+    agent = {"pane_id": "w9:p1", "agent": "claude", "agent_status": "idle", "cwd": str(tmp_path), "agent_session": {"value": "sid"}}
+    assert asyncio.run(api.make_card(agent))["meters"] == {"context": {"tokens": 102_010, "ts": T0}, "cache": {"ttl": 3600, "since": T0}}
+    assert asyncio.run(api.make_card({**agent, "agent": "codex"}))["meters"] == {}
+    assert asyncio.run(api.make_card({**agent, "agent_session": {}}))["meters"] == {}

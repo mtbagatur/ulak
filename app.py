@@ -348,6 +348,24 @@ def subtitle(agent, project):
     return title.strip()
 
 
+meters_cache = {}    # (path, size, mtime_ns) -> meters; the home list asks on every look, the record is read once per change
+
+
+def cached_meters(path):
+    """What `claude_meters` says about a record, read again only when the file has changed."""
+    try:
+        st = os.stat(path)
+        key = (str(path), st.st_size, st.st_mtime_ns)
+        if key not in meters_cache:
+            found = claude_meters(path)
+            while len(meters_cache) >= 64:
+                meters_cache.pop(next(iter(meters_cache)))
+            meters_cache[key] = found
+        return meters_cache[key]
+    except OSError:
+        return {}
+
+
 async def make_card(agent, force=False):
     pane = agent["pane_id"]
     status = agent.get("agent_status") or agent.get("status") or "unknown"
@@ -361,7 +379,7 @@ async def make_card(agent, force=False):
         "title": subtitle(agent, project), "workspace_label": sessions.get(pane, {}).get("workspace_label", ""),
         "workspace_id": agent.get("workspace_id"), "cwd": display_cwd(agent.get("cwd")), "name": agent.get("name", ""),
         "model": sessions.get(pane, {}).get("model", ""), "preview": sessions.get(pane, {}).get("preview", ""), "pending": None,
-        "quick": False,
+        "quick": False, "meters": {},
     }
     try:
         screen = await read_screen(pane, status, force=force)
@@ -385,6 +403,7 @@ async def make_card(agent, force=False):
                     preview = f"{tools[-1]['tool']}: {tools[-1]['text']}"[:140]
                 card["transcript"] = True
                 card["model"] = card["model"] or model
+                card["meters"] = await asyncio.to_thread(cached_meters, path)
             except OSError:
                 pass
     card["preview"] = preview or ("" if card.get("transcript") else preview_from_screen(screen)) or card["preview"]

@@ -3097,3 +3097,74 @@ def test_full_command_ui_only_denies_and_says_why_when_the_record_does_not_pin_i
     for q in ["#promptZone .cut-note", "#promptZone [data-d=deny]", "#promptZone pre"]:  # the reason and the one answer are in view, the command gives way
         r = chrome.js(f"(() => {{ const r = document.querySelector({json.dumps(q)}).getBoundingClientRect(); return [r.width > 0, r.right <= innerWidth, r.top >= 0, r.bottom]; }})()")
         assert r[:3] == [True, True, True] and r[3] <= floor, (q, r, floor)
+
+
+# --- the home card: context and cache under the state line ---
+CARD_METERS = "document.querySelector('.card .c-meters')?.textContent"
+
+
+def home(chrome, api, url, lang="", **fields):
+    api.cards = [card("idle", **fields)]
+    chrome.cdp("Page.navigate", url=url)
+    if lang:
+        chrome.js(f"localStorage.setItem('lang', {json.dumps(lang)})")
+        chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelector('.card .state') !== null")
+
+
+def test_card_meters_say_context_and_cache_under_the_state_line(api_fixture):
+    chrome, api, url = api_fixture
+    home(chrome, api, url, meters=meters())
+    assert chrome.js(CARD_METERS) == "Context 124k · Cache ~41m"
+    assert chrome.js("document.querySelector('.card .state').nextElementSibling.className") == "c-meters"
+    chrome.click(".card .c-meters")  # the line is part of the card, not a dead spot on it
+    chrome.wait("!document.querySelector('#session').hidden")
+    home(chrome, api, url, lang="tr", meters=meters())
+    assert chrome.js(CARD_METERS) == "Bağlam 124k · Cache ~41 dk"
+
+
+def test_card_meters_call_an_expired_cache_cold_without_alarm(api_fixture):
+    chrome, api, url = api_fixture
+    home(chrome, api, url, meters=meters(age=7200))
+    assert chrome.js(CARD_METERS) == "Context 124k · Cache cold"
+    colours = chrome.js("""(() => { const of = v => { const p = document.createElement('i'); p.style.color = `var(${v})`; document.body.append(p); const c = getComputedStyle(p).color; p.remove(); return c; };
+        return [getComputedStyle(document.querySelector('.card .c-meters')).color, of('--muted'), of('--lal'), of('--lal-t')]; })()""")
+    assert colours[0] == colours[1] and colours[0] not in colours[2:]
+
+
+def test_card_meters_leave_out_what_is_not_known(api_fixture):
+    chrome, api, url = api_fixture
+    home(chrome, api, url, meters={"context": meters()["context"]})
+    assert chrome.js(CARD_METERS) == "Context 124k"
+    for nothing in ({}, None, {"agents": {"running": 0}}, {"context": {"tokens": "<b>9</b>"}, "cache": {"ttl": "1", "since": None}}):  # e.g. right after a compaction
+        home(chrome, api, url, meters=nothing)
+        assert chrome.js("document.querySelector('.card .c-meters')") is None
+    api.cards = [card("idle")]  # an older server sends no key at all
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelector('.card .state') !== null")
+    assert chrome.js("document.querySelector('.card .c-meters')") is None
+
+
+def test_card_meters_count_the_agents_still_out_and_stay_on_one_line_at_320_px(api_fixture):
+    chrome, api, url = api_fixture
+    chrome.resize(320, 640)
+    home(chrome, api, url, meters={**meters(), "agents": {"running": 12}}, title="a title")
+    assert chrome.js(CARD_METERS) == "12 subagents · Context 124k · Cache ~41m"
+    home(chrome, api, url, lang="tr", meters={**meters(tokens=1_240_000), "agents": {"running": 12}})
+    assert chrome.js(CARD_METERS) == "12 alt ajan · Bağlam 1.2M · Cache ~41 dk"
+    box = chrome.js("(() => { const m = document.querySelector('.card .c-meters'), r = m.getBoundingClientRect(), c = document.querySelector('.card').getBoundingClientRect(); return [r.height, parseFloat(getComputedStyle(m).fontSize), r.left >= c.left, r.right <= c.right, m.scrollWidth <= m.clientWidth, document.documentElement.scrollWidth]; })()")
+    assert box[0] <= 20 and 12 <= box[1] <= 13 and box[2:] == [True, True, True, 320], box  # the cache is the last word and is not cut
+    home(chrome, api, url, meters={"agents": {"running": 1}})
+    assert chrome.js(CARD_METERS) == "1 alt ajan"
+
+
+def test_card_meters_minute_moves_without_asking_for_the_list_again(api_fixture):
+    chrome, api, url = api_fixture
+    home(chrome, api, url, meters=meters())
+    assert chrome.js(CARD_METERS) == "Context 124k · Cache ~41m"
+    api.list_started.clear()
+    chrome.js("state.skew = (state.skew || 0) + 600")  # ten minutes pass on the computer's clock
+    chrome.wait(f"{CARD_METERS} === 'Context 124k · Cache ~31m'")
+    chrome.js("state.skew += 3600")
+    chrome.wait(f"{CARD_METERS} === 'Context 124k · Cache cold'")
+    assert not api.list_started.is_set()

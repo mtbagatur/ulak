@@ -177,7 +177,7 @@ function cardHtml(s) {
   const body = p ? `<pre class="c-cmd${inline ? ' full-command' : choices.length ? ' full-command asked' : ''}">${esc(p.details || p.question)}</pre>${unseen ? `<div class="hidden-note">${esc(t('hiddenShort', {c: unseen}))}</div>` : ''}` : (s.preview ? `<div class="c-prev">${esc(s.preview)}</div>` : '');
   const pinned = isPinned(s);
   return `<button class="card-open" type="button" aria-label="${esc(t('openSession', {project: s.project}))}"></button><div class="c-top"><span class="proj">${esc(s.project)}</span>${dup && s.workspace_label ? `<span class="ws">${esc(s.workspace_label)}</span>` : ''}<span class="chip ${esc(s.agent)}">${esc(TOOLNAME[s.agent] || s.agent)}</span><span class="model">${esc(s.model)}</span><button class="pin ${pinned ? 'on' : ''}" data-pin aria-label="${esc(t(pinned ? 'unpin' : 'pin'))}" aria-pressed="${pinned}">${icon('pin', 16)}</button></div>
-    <div class="state"><span class="d"></span><span>${s.bucket === 'working' && stateText.startsWith(statusText('working')) ? `<span class="blink">${esc(statusText('working'))}</span>${esc(stateText.slice(statusText('working').length))}` : esc(stateText)}</span></div>
+    <div class="state"><span class="d"></span><span>${s.bucket === 'working' && stateText.startsWith(statusText('working')) ? `<span class="blink">${esc(statusText('working'))}</span>${esc(stateText.slice(statusText('working').length))}` : esc(stateText)}</span></div>${meterLine(s.meters, true) ? `<div class="c-meters">${meterLine(s.meters, true)}</div>` : ''}
     ${s.title ? `<div class="c-title">${esc(s.title)}</div>` : ''}${p && p.destructive ? `<div class="seals">${icon('seal', 14)}${icon('seal', 14)}<span>${esc(t('destructive'))}</span></div>` : ''}${body}
     ${inline ? `<div class="c-act"><button class="deny" data-act="deny">${esc(t('deny'))}</button><button class="seal" data-act="approve">${icon('seal', 17)}${esc(t('approve'))}</button></div>` : ''}${choices.length ? `<div class="c-act choices">${choices.map(o => `<button data-n="${+o.n}">${esc(o.label)}</button>`).join('')}</div>` : ''}${isSealed(s.pane_id, p) ? stampHtml(p) : ''}`;
 }
@@ -486,8 +486,8 @@ const fmtTokens = n => n < 1000 ? String(n) : n < 999500 ? Math.round(n / 1000) 
 const serverNow = () => Date.now() / 1000 + (state.skew || 0);
 const agoText = secs => secs < 60 ? t('justNow') : t('agoT', {t: fmtIn(secs)});
 const cacheMins = left => Math.max(1, Math.floor(left / 60));
-function cacheLeft() {
-  const c = state.meters?.cache;
+function cacheLeft(meters = state.meters) {
+  const c = meters?.cache;
   return c && typeof c.ttl === 'number' && typeof c.since === 'number' ? c.ttl - (serverNow() - c.since) : null;
 }
 // The limit is the account's, for the tool this session runs. A window whose reset time has passed says nothing any more,
@@ -498,13 +498,19 @@ function sessionLimits() {
   const items = (p?.items || []).filter(i => typeof i.used === 'number' && !(typeof i.resets_at === 'number' && i.resets_at <= now) && (!i.model || model.includes(String(i.model).toLowerCase())));
   return items.length ? {id: p.id, label: p.label, updated: p.updated, items} : null;
 }
-function renderMeters() {
-  const meta = $('#sMeta'), ring = $('#sRing'), m = state.meters || {}, left = cacheLeft(), bits = [], out = m.agents?.running;
+// The same words above a conversation and on its card. Nothing known, nothing said.
+// The card says the count short: at 320 px the long form pushes the cache off the line.
+function meterLine(meters, short) {
+  const m = meters || {}, left = cacheLeft(m), bits = [], out = m.agents?.running;
   // First in the line: at a narrow width the end is what gets cut, and this is the part that changes.
-  if (Number.isInteger(out) && out > 0) bits.push(`<span data-agents>${esc(many('agentsRunning', out)).replace(/\d+/, '<b>$&</b>')}</span>`);
+  if (Number.isInteger(out) && out > 0) bits.push(`<span data-agents>${esc(many(short ? 'agentsShort' : 'agentsRunning', out)).replace(/\d+/, '<b>$&</b>')}</span>`);
   if (typeof m.context?.tokens === 'number') bits.push(t('ctxShort', {n: `<b>${fmtTokens(m.context.tokens)}</b>`}));
   if (left !== null) bits.push(left > 0 ? t('cacheShort', {n: `<b>${t('cacheMins', {n: cacheMins(left)})}</b>`}) : esc(t('cacheCold')));
-  put(meta, 'hidden', !bits.length); putHtml(meta, `<span>${bits.join(' · ')}</span>`);
+  return bits.join(' · ');
+}
+function renderMeters() {
+  const meta = $('#sMeta'), ring = $('#sRing'), line = meterLine(state.meters);
+  put(meta, 'hidden', !line); putHtml(meta, `<span>${line}</span>`);
   const lim = sessionLimits();
   put(ring, 'hidden', !lim);
   if (!lim) return;
