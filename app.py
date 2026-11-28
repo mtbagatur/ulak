@@ -22,6 +22,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 
 import chat as transcripts
+import core
 import handoff
 from chat import claude_chat, claude_meters, claude_page, claude_path, earlier_conversations, detect_model, search_transcript, preview_from_screen, screen_chat, SPINNER, strip_ansi
 from core import CSP, FULL_MAX, NotificationGate, full_candidates, full_command, show_hidden, tidy_details, bucket, build_push, card_options, clean_subscription, hidden_chars, push_topic, strip_jpeg, is_destructive, parse_approval, parse_codex_limits, parse_limits, parse_prompt, project_name, status_rank, slash_commands, changes
@@ -80,6 +81,7 @@ PRESENCE_TTL = 10
 PRESENCE_STEP = 5    # a push held back for a watching phone looks again this often
 PRESENCE_HOLD = 60   # and gives up after this long: someone who watched for a minute has seen it
 SWEEP_EVERY = 60     # seconds between two looks at what Herdr really says, behind the event stream
+HANDOFF_STEP = 15    # and while a handoff note is being written or its wait is running
 MAX_SUBS = 20        # phones and browsers of one owner; the oldest goes first
 AUDIT_KEEP = 500
 DELIVERY_DELAYS = (0.4, 0.8, 1.5, 2.5, 3.0)  # when to look for the answered prompt leaving the screen
@@ -631,6 +633,8 @@ def status_seen(pane, status, now):
         began = work_started.pop(pane, None)
         if began is None:
             return  # the turn began before Ulak was watching, so nobody can say it was long enough to buzz for
+        if (handoffs.get(pane) or {}).get("phase") == "asked":
+            return  # the turn Ulak itself asked for: the phone hears what came of it, not that it ended
         worked = now - began
     elif status != "blocked":
         work_started.pop(pane, None)
@@ -662,11 +666,17 @@ async def sweep():
             continue
         await broadcast({"type": "session", "session": card})
         status_seen(pane, status, now)
+    await handoff_tick()
+
+
+def sweep_wait():
+    under_way = any(st["on"] and st["phase"] in ("asked", "written") for st in handoffs.values())
+    return HANDOFF_STEP if under_way else SWEEP_EVERY
 
 
 async def sweep_loop():
     while True:
-        await asyncio.sleep(SWEEP_EVERY)
+        await asyncio.sleep(sweep_wait())
         try:
             await sweep()
         except Exception as exc:
@@ -777,19 +787,93 @@ def mark_deliveries(results):
     write_subs(subs)
 
 
-async def send_push(item, prompt=None, destructive=False):
-    log_notification(build_push(item, prompt, destructive))
+async def push_each(build):
+    """Send every subscribed phone the message `build(lang)` makes in its language. True when there was anyone to send to."""
     try:
         subs = read_subs()
         if not (ROOT / ".secrets/vapid_private.pem").exists() or not subs:
-            return
+            return False
         results = {}
         for sub in subs:
-            results[sub.get("endpoint")] = await deliver(sub, build_push(item, prompt, destructive, lang=sub.get("lang", "en")))
+            results[sub.get("endpoint")] = await deliver(sub, build(sub.get("lang", "en")))
         mark_deliveries(results)
-        print(f"Push sent: {item.get('pane_id')} {item.get('status')}", flush=True)
+        return True
     except Exception as exc:
         print(f"Push delivery failed: {exc}", flush=True)
+        return False
+
+
+async def send_push(item, prompt=None, destructive=False):
+    log_notification(build_push(item, prompt, destructive))
+    if await push_each(lambda lang: build_push(item, prompt, destructive, lang=lang)):
+        print(f"Push sent: {item.get('pane_id')} {item.get('status')}", flush=True)
+
+
+async def handoff_notify(pane, kind, reason=""):
+    """Tell what became of an automatic handoff. It is always listed; in quiet hours the phone does not buzz for it."""
+    item = sessions.get(pane) or {"pane_id": pane}
+    session = {**item, "cwd": raw_agents.get(pane, {}).get("cwd") or item.get("cwd")}
+    minutes = round(HANDOFF["grace_seconds"] / 60, 1)
+    log_notification(core.build_handoff_push(session, kind, reason, minutes))
+    if not core.quiet_hours():
+        await push_each(lambda lang: core.build_handoff_push(session, kind, reason, minutes, lang))
+
+
+async def handoff_view(pane):
+    """What a session shows right now, as `handoff.step` wants it, or None when its record cannot be read."""
+    card = sessions.get(pane)
+    if not card or pane not in raw_agents:
+        return None
+    try:
+        path = transcript_of(pane)[0]
+        if not path:
+            return None
+        meters, calls, turn = await asyncio.gather(asyncio.to_thread(cached_meters, path), asyncio.to_thread(transcripts.open_calls, path),
+                                                   asyncio.to_thread(transcripts.last_turn, path))
+    except (OSError, HTTPException):
+        return None
+    screen = (await client.call("agent.read", {"target": pane, "source": "visible"})).get("read", {}).get("text", "")
+    return {"agent": card.get("agent"), "status": card.get("status"), "prompt": bool(parse_prompt(screen, "claude")), "calls": len(calls),
+            "agents": (meters.get("agents") or {}).get("running", 0), "tokens": (meters.get("context") or {}).get("tokens"), "cache": meters.get("cache"),
+            "box_empty": handoff.box_empty(screen), "conversation": conversation_of(pane), **turn}
+
+
+async def handoff_clean(pane):
+    return False
+
+
+async def handoff_look(pane, st, now):
+    view = await handoff_view(pane)
+    if view is None:
+        return
+    new, act, detail = handoff.step(st, view, now, HANDOFF)
+    if handoffs.get(pane) is not st:
+        return  # switched off or cancelled while the session was being read: that word stands
+    if new != st:
+        await handoff_changed(pane, new)
+    if act == "ask":
+        await must_be_agent(pane)
+        await client.call("agent.prompt", {"target": pane, "text": HANDOFF["write_prompt"]})
+        audit(pane, "auto-handoff", "ask", login="ulak", command=HANDOFF["write_prompt"], plain=True)
+    elif act == "clean":
+        await handoff_clean(pane)
+    elif act:
+        if act != "written":
+            audit(pane, "auto-handoff", act, login="ulak", reason=detail)
+        await handoff_notify(pane, act, detail)
+
+
+async def handoff_tick(now=None):
+    """One look at every session whose automatic handoff is on. A session that cannot be read is skipped for this turn."""
+    now = time.time() if now is None else now
+    for pane in list(sessions):
+        st = handoff_state(pane, sessions[pane]) if pane in sessions else None
+        if not st or not st["on"] or pane in replying_panes:
+            continue
+        try:
+            await handoff_look(pane, st, now)
+        except Exception as exc:
+            print(f"auto handoff failed for {pane}: {exc}", flush=True)
 
 
 def read_audit():

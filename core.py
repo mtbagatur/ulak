@@ -490,6 +490,28 @@ def build_push(session, prompt=None, destructive=False, lang="en", short=False):
             "project": project, "raw": raw, "destructive": bool(destructive)}
 
 
+HANDOFF_TEXT = {
+    "en": {"title": "auto handoff", "written": "Handoff written. Unless you come back within {n} min, the conversation is cleared and carries on.",
+           "cleaned": "Cleared; carrying on from the handoff note.", "refused": "Not cleared. {reason}",
+           "failed": "The handoff could not be written; the session is as it was.",
+           "stopped": "Clearing stopped half way ({reason}). Have a look at the session."},
+    "tr": {"title": "otomatik devir", "written": "Devir yazıldı. {n} dk içinde dönmezsen temizlenip devam edecek.",
+           "cleaned": "Temizlendi, devir notundan devam ediyor.", "refused": "Kesilmedi. {reason}",
+           "failed": "Devir yazılamadı, oturum olduğu gibi duruyor.", "stopped": "Temizleme yarıda kaldı ({reason}). Oturuma bak."},
+}
+
+
+def build_handoff_push(session, kind, reason="", minutes=10, lang="en"):
+    """What the phone is told about an automatic handoff. `kind`: written, cleaned, refused, failed or stopped.
+    `reason` is what the agent gave for refusing, or the step that clearing stopped at; it is shown as one plain line."""
+    text = HANDOFF_TEXT.get(lang, HANDOFF_TEXT["en"])
+    pane = session.get("pane_id", "")
+    project = project_name(session)
+    raw = _oneline(reason, 200)
+    return {"pane": pane, "status": "handoff-" + kind, "title": f"{project} · {text['title']}", "body": text[kind].replace("{n}", f"{minutes:g}").replace("{reason}", raw),
+            "tag": f"ulak-handoff-{pane}", "url": f"/?pane={pane}", "project": project, "raw": raw, "destructive": False}
+
+
 def push_topic(tag):
     """A push service replaces an undelivered message with a newer one of the same topic. Apple refuses some lengths, so every topic is a 24 character digest."""
     return hashlib.sha256(str(tag).encode()).hexdigest()[:24]

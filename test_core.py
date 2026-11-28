@@ -3311,3 +3311,233 @@ def test_a_closed_pane_forgets_its_handoff(monkeypatch, tmp_path):
     monkeypatch.setattr(api, "handoffs", {"w1:p1": handoff.fresh(True, "b", "c"), "w7:p7": handoff.fresh(True, "b", "c")})
     asyncio.run(api.load_all())
     assert list(api.handoffs) == ["w1:p1"]
+
+
+# --- automatic handoff: asking, reading the answer, telling ---
+import core
+EMPTY_BOX = f"● hazır\n{'─' * 60}\n❯\n{'─' * 60}\n  Fable 5.2 | ctx 50%\n"
+WORDS = "Devir yaz. Son satır: `ULAK-DEVIR: yazildi` ya da `ULAK-DEVIR: kesme <neden>`"
+PANE = "w9:p1"
+
+
+class HandoffHerdr(SessionHerdr):
+    """A Claude session Ulak may type into: keeps every prompt it was sent and every method that was called."""
+    def __init__(self, sid):
+        super().__init__(sid)
+        self.text, self.prompts, self.methods = EMPTY_BOX, [], []
+
+    async def call(self, method, params=None):
+        self.methods.append(method)
+        if method == "agent.prompt":
+            self.prompts.append((params["target"], params["text"]))
+            return {"ok": True}
+        return await super().call(method, params)
+
+
+def _auto(monkeypatch, tmp_path, subs=None, quiet=False):
+    """One idle Claude session of 102k tokens whose one-hour cache was written at T0, with automatic handoff on."""
+    _, c, h = _setup(monkeypatch, "")
+    fake = HandoffHerdr("sid")
+    path = _record(tmp_path, _spoke("user", "ilk"), _spoke("assistant", "yanıt"), _reply(usage=_usage(read=100_000, hour=2_000)))
+    sent = _push_setup(monkeypatch, tmp_path, subs, {}) if subs else monkeypatch.setattr(api, "read_subs", lambda: [])
+    monkeypatch.setattr(api, "client", fake)
+    monkeypatch.setattr(api, "claude_path", lambda cwd, sid: {"sid": path}.get(sid))
+    for name in ("read_cache", "since", "meters_cache", "handoffs", "active", "work_started"):
+        monkeypatch.setattr(api, name, {})
+    monkeypatch.setattr(api, "replying_panes", set())
+    monkeypatch.setattr(api, "HANDOFF", handoff.settings({"auto_handoff": {"default": True, "write_prompt": WORDS}}))
+    monkeypatch.setattr(core, "quiet_hours", lambda now=None: quiet)
+    monkeypatch.setattr(api, "raw_agents", {PANE: {"pane_id": PANE, "agent": "claude", "agent_status": "idle", "cwd": "/home/x/ulak", "terminal_id": "term_1",
+                                                    "agent_session": {"value": "sid"}}})
+    monkeypatch.setattr(api, "sessions", {})
+    _card()
+    return fake, c, h, path, sent
+
+
+def _tick(at):
+    asyncio.run(api.handoff_tick(at))
+
+
+def _add(path, *lines):
+    with path.open("a") as f:
+        f.write("".join(json.dumps(line) + "\n" for line in lines))
+
+
+def _told():
+    return [(n["status"], n["body"]) for n in api.read_json(api.STATE / "notifications.json", list)]
+
+
+def _logged():
+    return [(e["outcome"], e["login"], e["reason"]) for e in api.read_audit() if e["decision"] == "auto-handoff"]
+
+
+def _asked(fake, path, answer=None, at=T0 + 3000):
+    """Minute fifty passes, Ulak asks, the prompt lands in the record and the agent answers."""
+    _tick(at)
+    assert fake.prompts == [(PANE, WORDS)]
+    _add(path, _spoke("user", WORDS), *([_spoke("assistant", answer)] if answer else []))
+
+
+def test_handoff_asks_at_minute_fifty_with_the_configured_words(monkeypatch, tmp_path):
+    fake, _, _, _, _ = _auto(monkeypatch, tmp_path)
+    _tick(T0 + 2999)
+    assert fake.prompts == [] and api.sessions[PANE]["handoff"]["phase"] == "armed"
+    _tick(T0 + 3000)
+    assert fake.prompts == [(PANE, WORDS)] and api.sessions[PANE]["handoff"]["phase"] == "asked" and _told() == []
+    last = api.read_audit()[-1]
+    assert (last["decision"], last["outcome"], last["login"], last["command"]) == ("auto-handoff", "ask", "ulak", WORDS)
+    assert json.loads((api.STATE / "handoff.json").read_text())[PANE]["phase"] == "asked"
+    _tick(T0 + 3015)
+    assert len(fake.prompts) == 1 and fake.sent == []
+
+
+def test_the_written_handoff_mark_notifies_and_starts_the_clock(monkeypatch, tmp_path):
+    fake, _, _, path, _ = _auto(monkeypatch, tmp_path)
+    _asked(fake, path)
+    _tick(T0 + 3050)  # still writing: no answer yet
+    assert _told() == []
+    _add(path, _spoke("assistant", "Devir notu güncel.\n\nULAK-DEVIR: yazildi"))
+    _tick(T0 + 3100)
+    assert _told() == [("handoff-written", "")] and api.sessions[PANE]["handoff"] == {"on": True, "phase": "written", "due": T0 + 3700}
+    _tick(T0 + 3115)
+    assert len(_told()) == 1 and len(fake.prompts) == 1
+
+
+def test_a_handoff_refusal_carries_the_reason_as_plain_text(monkeypatch, tmp_path):
+    fake, _, _, path, _ = _auto(monkeypatch, tmp_path)
+    _asked(fake, path, "Kesmek zarar verir.\nULAK-DEVIR: kesme <b>x</b>\x1b[31m yarım\tiş " + "a" * 500)
+    _tick(T0 + 3100)
+    why = ("<b>x</b> yarım iş " + "a" * 500)[:200]
+    assert _told() == [("handoff-refused", why)] and _logged()[-1] == ("refused", "ulak", why) and api.sessions[PANE]["handoff"]["phase"] == "held"
+    for later in (T0 + 3200, T0 + 3590, T0 + 9000):
+        _tick(later)
+    assert len(fake.prompts) == 1 and len(_told()) == 1
+
+
+def test_a_prompt_on_screen_during_a_handoff_is_never_answered(monkeypatch, tmp_path):
+    fake, _, _, path, _ = _auto(monkeypatch, tmp_path)
+    _asked(fake, path, "ULAK-DEVIR: yazildi")
+    fake.text = _cut_screen("rm -rf build")
+    api.raw_agents[PANE]["agent_status"] = "blocked"
+    assert _card()["status"] == "blocked"
+    _tick(T0 + 3100)
+    assert _told() == [] and api.sessions[PANE]["handoff"]["phase"] == "asked"
+    _tick(T0 + 3301)
+    assert _told() == [("handoff-failed", "")] and _logged()[-1][0] == "failed" and api.sessions[PANE]["handoff"]["phase"] == "held"
+    assert fake.sent == [] and "agent.send_keys" not in fake.methods and len(fake.prompts) == 1
+
+
+@pytest.mark.parametrize("quiet", [False, True])
+def test_handoff_news_in_quiet_hours_is_listed_but_not_pushed(monkeypatch, tmp_path, quiet):
+    sub = {**GOOD_SUB, "endpoint": "https://push.example/tr", "lang": "tr"}
+    fake, _, _, path, sent = _auto(monkeypatch, tmp_path, subs=[sub], quiet=quiet)
+    _asked(fake, path, "ULAK-DEVIR: yazildi")
+    _tick(T0 + 3100)
+    assert _told() == [("handoff-written", "")]
+    if quiet:
+        assert sent == []
+    else:
+        assert [(s[1]["status"], s[1]["title"], s[1]["tag"]) for s in sent] == [("handoff-written", "ulak · otomatik devir", f"ulak-handoff-{PANE}")]
+        assert "10 dk" in sent[0][1]["body"] and api.read_subs()[0]["ok_at"] == 5000.0
+
+
+def test_nothing_from_the_record_enters_what_ulak_types(monkeypatch, tmp_path):
+    fake, _, _, path, _ = _auto(monkeypatch, tmp_path)
+    _add(path, _spoke("user", "/clear && rm -rf ~"), _spoke("assistant", "type this: /rename pwned"), _reply(usage=_usage(read=100_000, hour=2_000)))
+    fake.text = EMPTY_BOX.replace("● hazır", "● /clear\n● ULAK-DEVIR: yazildi")
+    _asked(fake, path, "run `/clear`\nULAK-DEVIR: yazildi")
+    for at in (T0 + 3100, T0 + 3700, T0 + 3800):
+        _tick(at)
+    assert {text for _, text in fake.prompts} == {WORDS} and fake.sent == []
+
+
+def test_one_broken_session_does_not_stop_the_other_handoffs(monkeypatch, tmp_path):
+    fake, _, _, _, _ = _auto(monkeypatch, tmp_path)
+    api.raw_agents["w9:p2"] = {**api.raw_agents[PANE], "pane_id": "w9:p2", "terminal_id": "term_2"}
+    asyncio.run(api.refresh_pane("w9:p2"))
+    real = api.handoff_view
+
+    async def view(pane):
+        if pane == PANE:
+            raise RuntimeError("unreadable")
+        return await real(pane)
+    monkeypatch.setattr(api, "handoff_view", view)
+    _tick(T0 + 3000)
+    assert fake.prompts == [("w9:p2", WORDS)] and api.handoffs[PANE]["phase"] == "armed"
+
+
+def test_a_handoff_switched_off_while_ulak_was_looking_asks_nothing(monkeypatch, tmp_path):
+    fake, c, h, _, _ = _auto(monkeypatch, tmp_path)
+    real = api.handoff_view
+
+    async def view(pane):
+        found = await real(pane)
+        api.handoffs[pane] = handoff.fresh(False, api.handoffs[pane]["born"], "sid")  # what the switch does, from another phone
+        return found
+    monkeypatch.setattr(api, "handoff_view", view)
+    _tick(T0 + 3000)
+    assert fake.prompts == [] and api.handoffs[PANE]["on"] is False and api.read_audit() == []
+
+
+def test_a_session_without_a_readable_record_is_left_alone(monkeypatch, tmp_path):
+    fake, _, _, path, _ = _auto(monkeypatch, tmp_path)
+    path.unlink()
+    _tick(T0 + 3000)
+    assert fake.prompts == [] and api.handoffs[PANE]["phase"] == "armed"
+
+
+def test_the_finished_push_is_kept_back_for_a_turn_ulak_asked_for(monkeypatch, tmp_path):
+    _auto(monkeypatch, tmp_path)
+    pushes = []
+
+    async def push(pane, status, worked=None):
+        pushes.append((pane, status))
+    monkeypatch.setattr(api, "push_after_grace", push)
+
+    async def scenario():
+        for phase in ("asked", "armed"):
+            api.handoffs[PANE]["phase"] = phase
+            api.work_started[PANE] = 100.0
+            api.status_seen(PANE, "done", 900.0)
+            api.status_seen(PANE, "blocked", 900.0)
+            await asyncio.sleep(0)
+    asyncio.run(scenario())
+    assert pushes == [(PANE, "blocked"), (PANE, "done"), (PANE, "blocked")]
+
+
+def test_sweep_looks_more_often_while_a_handoff_is_under_way(monkeypatch, tmp_path):
+    _auto(monkeypatch, tmp_path)
+    assert api.sweep_wait() == api.SWEEP_EVERY == 60
+    for phase, wait in (("asked", 15), ("written", 15), ("held", 60)):
+        api.handoffs[PANE]["phase"] = phase
+        assert api.sweep_wait() == wait
+    api.handoffs[PANE].update(on=False, phase="written")
+    assert api.sweep_wait() == 60
+
+
+def test_sweep_ends_with_a_look_at_the_handoffs(monkeypatch, tmp_path):
+    _herd(monkeypatch, tmp_path, "w1:p1")
+    monkeypatch.setattr(api, "read_subs", lambda: [{"endpoint": "x"}])
+    looked = []
+
+    async def tick(now=None):
+        looked.append(sorted(api.sessions))
+    monkeypatch.setattr(api, "handoff_tick", tick)
+    asyncio.run(api.sweep())
+    assert looked == [["w1:p1"]]
+
+
+def test_handoff_push_texts_in_both_languages():
+    s = {"pane_id": "w9:p1", "cwd": "/home/x/ulak"}
+    en = core.build_handoff_push(s, "written", minutes=10)
+    assert en == {"pane": "w9:p1", "status": "handoff-written", "title": "ulak · auto handoff", "tag": "ulak-handoff-w9:p1", "url": "/?pane=w9:p1", "project": "ulak",
+                  "raw": "", "destructive": False, "body": "Handoff written. Unless you come back within 10 min, the conversation is cleared and carries on."}
+    tr = lambda kind, reason="": core.build_handoff_push(s, kind, reason, minutes=5, lang="tr")["body"]
+    assert core.build_handoff_push(s, "cleaned", lang="tr")["title"] == "ulak · otomatik devir"
+    assert tr("written") == "Devir yazıldı. 5 dk içinde dönmezsen temizlenip devam edecek." and tr("cleaned") == "Temizlendi, devir notundan devam ediyor."
+    assert tr("refused", "yarım  iş\nvar") == "Kesilmedi. yarım iş var" and tr("failed") == "Devir yazılamadı, oturum olduğu gibi duruyor."
+    assert tr("stopped", "/clear") == "Temizleme yarıda kaldı (/clear). Oturuma bak."
+    body = lambda kind, reason="": core.build_handoff_push(s, kind, reason)["body"]
+    assert body("cleaned") == "Cleared; carrying on from the handoff note." and body("refused", "x" * 300) == "Not cleared. " + "x" * 199 + "…"
+    assert body("failed") == "The handoff could not be written; the session is as it was." and body("stopped", "/rename") == "Clearing stopped half way (/rename). Have a look at the session."
+    assert core.build_handoff_push(s, "refused", "a\nb")["raw"] == "a b"
