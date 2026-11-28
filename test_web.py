@@ -3438,8 +3438,9 @@ def test_handoff_countdown_moves_with_the_minute_and_ends_in_shortly(api_fixture
     assert chrome.js(HAND) == "handoff written · clears shortly" and chrome.js("window.pwned") is None
 
 
-def handoff_note(kind, body, raw=""):
-    return {"ts": time.time(), "pane": PANE, "status": "handoff-" + kind, "title": "fixture · auto handoff", "body": body, "project": "fixture", "raw": raw}
+def handoff_note(kind, _said, raw=""):
+    """As the server keeps it: no finished sentence, only the reason or the step, under `body`."""
+    return {"ts": time.time(), "pane": PANE, "status": "handoff-" + kind, "body": raw, "project": "fixture", "destructive": False}
 
 
 def open_history(chrome, url, tab="notifications"):

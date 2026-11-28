@@ -882,32 +882,38 @@ async def handoff_clean(pane):
             return False
         if view is None or not handoff.can_clean(st, view):
             return await stop("changed before clearing", "failed")
-        await must_be_agent(pane)
-        await client.call("agent.prompt", {"target": pane, "text": "/clear"})
-        audit(pane, "auto-handoff", "clear", login="ulak", command="/clear", plain=True)
+        at = "/clear"
+        try:
+            await must_be_agent(pane)
+            await client.call("agent.prompt", {"target": pane, "text": "/clear"})
+            audit(pane, "auto-handoff", "clear", login="ulak", command="/clear", plain=True)
 
-        async def cleared(named):
-            return ((named.get("agent_session") or {}).get("value") or st["conversation"]) != st["conversation"]
-        if not await handoff_until(pane, HANDOFF_CLEAR_WAIT, cleared) or not mine():
-            return await stop("clear", at="/clear")
-        await current_agent(pane)  # the card moves to the new conversation
-        if not await handoff_until(pane, HANDOFF_RENAME_WAIT, ready) or not mine():
-            return await stop("before rename", at="/rename")
-        name = handoff.session_name(raw_agents.get(pane, {}).get("cwd"), time.time())
-        await client.call("agent.prompt", {"target": pane, "text": f"/rename {name}"})
-        audit(pane, "auto-handoff", "rename", login="ulak", command=f"/rename {name}", plain=True)
+            async def cleared(named):
+                return ((named.get("agent_session") or {}).get("value") or st["conversation"]) != st["conversation"]
+            if not await handoff_until(pane, HANDOFF_CLEAR_WAIT, cleared) or not mine():
+                return await stop("clear", at="/clear")
+            await current_agent(pane)  # the card moves to the new conversation
+            if not await handoff_until(pane, HANDOFF_RENAME_WAIT, ready) or not mine():
+                return await stop("before rename", at="/rename")
+            at = "/rename"
+            name = handoff.session_name(raw_agents.get(pane, {}).get("cwd"), time.time())
+            await client.call("agent.prompt", {"target": pane, "text": f"/rename {name}"})
+            audit(pane, "auto-handoff", "rename", login="ulak", command=f"/rename {name}", plain=True)
 
-        async def renamed(named):
-            return named.get("terminal_title_stripped") == name
-        if not await handoff_until(pane, HANDOFF_RENAME_WAIT, renamed) or not mine():
-            return await stop("rename", at="/rename")
-        if not await handoff_until(pane, HANDOFF_RENAME_WAIT, ready) or not mine():
-            return await stop("before continue", at="continue")
-        await client.call("agent.prompt", {"target": pane, "text": HANDOFF["continue_prompt"]})
-        audit(pane, "auto-handoff", "continue", login="ulak", command=HANDOFF["continue_prompt"], plain=True)
-        touch_active(pane, time.time())
-        if mine():
-            await handoff_changed(pane, handoff.fresh(True, st["born"], conversation_of(pane)))
+            async def renamed(named):
+                return named.get("terminal_title_stripped") == name
+            if not await handoff_until(pane, HANDOFF_RENAME_WAIT, renamed) or not mine():
+                return await stop("rename", at="/rename")
+            if not await handoff_until(pane, HANDOFF_RENAME_WAIT, ready) or not mine():
+                return await stop("before continue", at="continue")
+            at = "continue"
+            await client.call("agent.prompt", {"target": pane, "text": HANDOFF["continue_prompt"]})
+            audit(pane, "auto-handoff", "continue", login="ulak", command=HANDOFF["continue_prompt"], plain=True)
+            touch_active(pane, time.time())
+            if mine():
+                await handoff_changed(pane, handoff.fresh(True, st["born"], conversation_of(pane)))
+        except Exception as exc:  # Herdr failed between two texts: say where it stopped instead of leaving a cleared session unexplained
+            return await stop(str(exc) or type(exc).__name__, at=at)
         await handoff_notify(pane, "cleaned")
         return True
 

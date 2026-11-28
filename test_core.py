@@ -3676,6 +3676,22 @@ def test_a_cancel_that_lands_while_clearing_stops_the_rest(monkeypatch, tmp_path
     assert _typed(fake) == [WORDS, "/clear"] and _told()[-1][0] == "handoff-stopped" and api.handoffs[PANE]["phase"] == "held"
 
 
+@pytest.mark.parametrize("breaks_at", ["/clear", "/rename"])
+def test_herdr_failing_half_way_through_clearing_is_told_and_logged(monkeypatch, tmp_path, breaks_at):
+    fake, _, _, path, _ = _auto(monkeypatch, tmp_path)
+    _written(fake, path)
+
+    def fail(text):
+        if text.startswith(breaks_at):
+            raise api.HerdrError("timed out")
+    fake.on_prompt = fail
+    _tick(T0 + 3700)
+    assert _told()[-1] == ("handoff-stopped", breaks_at) and api.handoffs[PANE]["phase"] == "held"
+    assert _logged()[-1] == ("failed", "ulak", "timed out")
+    _tick(T0 + 3760)
+    assert [t.split()[0] for t in _typed(fake)[1:]] == ["/clear", "/rename"][:1 + (breaks_at == "/rename")]
+
+
 @pytest.mark.parametrize("came_back", [False, True])
 def test_restart_after_the_deadline_cleans_only_if_the_note_is_still_the_last_word(monkeypatch, tmp_path, came_back):
     fake, _, _, path, _ = _auto(monkeypatch, tmp_path)

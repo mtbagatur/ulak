@@ -1768,7 +1768,7 @@ $('#history').onclick = e => act(e.currentTarget, async () => {
 
 const handoffKind = n => { const kind = String(n.status || '').startsWith('handoff-') ? n.status.slice(8) : ''; return I18N.en['hoN' + kind] ? kind : ''; };
 function histTitle(n) { return handoffKind(n) ? t('hoTitle', {p: n.project || n.pane || ''}) : n.project ? t(n.status === 'blocked' ? 'needsYouTitle' : 'doneTitle', {p: n.project}) : (n.title || ''); }
-function histBody(n) { const b = n.body || ''; if (handoffKind(n)) return t('hoN' + handoffKind(n), {n: (/\d+(\.\d+)?/.exec(b) || [+(handoffGrace / 60).toFixed(1)])[0], reason: n.raw || ''}); return n.project ? (b || t(n.status === 'blocked' ? 'askBody' : 'finishedBody')) : b; }
+function histBody(n) { const b = n.body || ''; if (handoffKind(n)) return t('hoN' + handoffKind(n), {n: +(handoffGrace / 60).toFixed(1), reason: b}); return n.project ? (b || t(n.status === 'blocked' ? 'askBody' : 'finishedBody')) : b; }
 
 // ---------- language ----------
 function refreshLang() {
