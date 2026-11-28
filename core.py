@@ -613,10 +613,52 @@ def parse_codex_limits(lines, mtime=None):
 
 # --- slash commands -------------------------------------------------------
 # The phone gets names and a one-line description. File bodies stay on the machine.
+def _builtins(first, text, menu, ends):
+    kind = {name: k for k, names in (("text", text), ("menu", menu), ("ends", ends)) for name in names.split()}
+    head = first.split()  # the everyday ones lead the list, the rest follow by name
+    return [("/" + name, kind[name]) for name in [*head, *sorted(set(kind) - set(head))]]
+
+
+# Every built-in command of each tool with what sending it does: `text` answers in the chat, `menu` opens a menu
+# or a dialog in the terminal (answered there, or with the key bar), `ends` leaves the session closed.
+# Checked 2026-11-28:
+#   claude 2.1.332 - code.claude.com/docs/en/commands (removed ones left out). Each name is in the installed binary's
+#     command table except the documented aliases and bundled skills: artifact-capabilities, artifact-diagramming,
+#     claude-approvals, code-review, cost, dataviz, deep-research, design-sync, loop, plugin-authoring, review,
+#     security-review, ship, simplify, slides, stats, steward, verify, whiteboard, workflow-authoring.
+#   codex-cli 0.172.0 - developers.openai.com/codex/cli/slash-commands. Names were only found as plain text in the
+#     installed binary, which proves little for the short ones; none was run.
+#   agy 1.5.19 - its own "/" menu on this machine, aliases included; no public page was read.
+# The kinds are a reading of those descriptions, not a run of each command. A command that signs you out or hands
+# the session to another place is `ends`: after it the session cannot be driven from here.
 BUILTIN_SLASH = {
-    "claude": ["/clear", "/compact", "/help", "/model", "/config"],
-    "codex": ["/clear", "/compact", "/help", "/model", "/status"],
-    "agy": ["/clear", "/help"],
+    "claude": _builtins(
+        "clear compact help model config",
+        text="""add-dir advisor agents artifact-capabilities artifact-diagramming auto-mode-setup autocompact autofix-pr batch branch btw cd
+            claude-api claude-approvals claude-in-chrome clear code-review color compact context copy dataviz debug deep-research design
+            design-login design-sync desktop doctor fast fewer-permission-prompts focus fork goal heapdump init insights install-slack-app
+            keybindings list-agents loop motion plan plugin-authoring radio recap reload-plugins reload-skills remote-control rename restart
+            review run run-skill-generator schedule security-review ship simplify skill-doctor slides statusline steward stickers subtask
+            team-onboarding terminal-setup tui ultrareview update-config upgrade usage-credits verify voice web-setup whiteboard
+            workflow-authoring""",
+        menu="""artifacts bug chrome config cost diff effort export feedback help hooks ide import install-github-app login mcp memory mobile
+            model output-style passes permissions plugin powerup privacy-settings rate-limit-options release-notes remote-env resume rewind
+            sandbox scroll-speed setup-bedrock setup-vertex skills stats status tasks teleport theme usage workflows""",
+        ends="background exit logout stop"),
+    "codex": _builtins(
+        "clear compact model status",
+        text="""app btw cd clean clear compact copy cwd daybreak debug-config diff export fast fork goal ide init mcp mention new plan ps pwd
+            raw recap rename review side status stop vim voice warnings""",
+        menu="""agents approve apps config daemon experimental feedback hooks import keymap memories model permissions pet pets plugins
+            presets resume setup-default-sandbox skills statusline subagents theme title tui usage worktree""",
+        ends="archive delete exit logout quit"),
+    "agy": _builtins(
+        "clear help",
+        text="""add-dir agy-customizations antigravity-guide boost branch browser btw clear codesearch compact copy cs feedback fork goal
+            grill-me learn new plan record remote-control rename run-workflow schedule statusline swarm teamwork thinking title voice""",
+        menu="""agents artifact changelog config context credits diff effort help hooks keybindings mcp model open permissions plugin
+            projects quota resume rewind settings skills switch tasks undo usage""",
+        ends="exit logout quit"),
 }
 SLASH_PART = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 SLASH_LIMIT = 200
@@ -670,7 +712,7 @@ def slash_commands(agent, cwd, home):
     if builtin is None:
         return []
     home = Path(home)
-    found = {name: {"name": name, "description": "", "source": "builtin"} for name in builtin}
+    found = {name: {"name": name, "description": "", "source": "builtin", "kind": kind} for name, kind in builtin}
     extra = []
     if agent == "claude":
         roots = [(home / ".claude", "user")]
@@ -683,8 +725,8 @@ def slash_commands(agent, cwd, home):
     for item in extra:
         if found.get(item["name"], {}).get("source") != "builtin":
             found.pop(item["name"], None)
-            found[item["name"]] = item
-    return list(found.values())[:SLASH_LIMIT]
+            found[item["name"]] = {**item, "kind": "text"}
+    return list(found.values())[:len(builtin) + SLASH_LIMIT]  # the cap is on what the machine adds, never on the built-ins
 
 
 # Looking at a working tree must not change it or run anything the repository configures.

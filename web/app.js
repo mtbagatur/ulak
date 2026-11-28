@@ -1251,7 +1251,7 @@ function updateSlashOptions() {
   const commands = [...starts, ...(q ? all.filter(c => !starts.includes(c) && c.name.toLowerCase().includes(q)) : [])].slice(0, 40);
   if (!commands.length) { slashMenu.hidden = true; slashMenu.replaceChildren(); return; }
   slashIndex = Math.min(slashIndex, commands.length - 1);
-  slashMenu.innerHTML = commands.map((command, i) => `<button type="button" role="option" aria-selected="${i === slashIndex}" data-slash-cmd="${esc(command.name)}"><span>${esc(command.name)}</span>${command.description ? `<small>${esc(command.description)}</small>` : ''}</button>`).join('');
+  slashMenu.innerHTML = commands.map((command, i) => `<button type="button" role="option" aria-selected="${i === slashIndex}" data-slash-cmd="${esc(command.name)}"><span>${esc(command.name)}</span>${command.description ? `<small>${esc(command.description)}</small>` : ''}${command.kind === 'menu' ? `<small class="note">${esc(t('slashMenuNote'))}</small>` : ''}</button>`).join('');
   slashMenu.hidden = false;
 }
 function chooseSlash(command) {
@@ -1276,16 +1276,33 @@ ta.addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('#composer').requestSubmit(); }
 });
 ta.addEventListener('input', () => { slashIndex = 0; updateSlashOptions(); autosize(); store.set('draft:' + state.current, ta.value); });
-$('#composer').addEventListener('submit', async e => {
+// A command that leaves the session closed is asked about once; the short list covers a command list that did not load.
+const ENDS_FALLBACK = ['/exit', '/quit', '/logout'];
+function endsSession(text) {
+  const first = text.match(/^\/\S+/)?.[0], known = slashCache.get(state.current);
+  return first && (known ? known.some(c => c.name === first && c.kind === 'ends') : ENDS_FALLBACK.includes(first)) ? first : '';
+}
+function endsSheet(command, onYes) {
+  showSheet(`<h3>${esc(t('endsTitle'))}</h3><p>${esc(t('endsBody', {c: command}))}</p>
+    <div class="acts"><button class="ghost" data-x>${esc(t('cancel'))}</button><button class="danger" data-ends>${esc(t('endsYes', {c: command}))}</button></div>`);
+  $('#sheet [data-x]').onclick = hideSheet;
+  $('#sheet [data-ends]').onclick = e => { e.currentTarget.onclick = null; hideSheet(); onYes(); };  // a second tap sends nothing
+}
+$('#composer').addEventListener('submit', e => {
   e.preventDefault();
   const text = ta.value.trim(); if (!text) return;
+  const ends = endsSession(text), pane = state.current;
+  if (ends) endsSheet(ends, () => { if (state.current === pane && ta.value.trim() === text) sendDraft(text); });
+  else sendDraft(text);
+});
+async function sendDraft(text) {
   const pane = state.current, shown = state.shown?.pane === pane, before = shown ? copies(state.shown.messages, text) : null;
   const item = {id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8), text, status: 'sending', seen: before && before.map(copyKey), count: before ? before.length : 0, conversation: (shown && state.conversation) || null, ts: Date.now()};
   outbox.set(pane, [...(outbox.get(pane) || []), item]);
   ta.value = ''; store.set('draft:' + pane, ''); autosize(); slashMenu.hidden = true;
   $('#messages').scrollTop = $('#messages').scrollHeight;
   await sendItem(pane, item);
-});
+}
 // ---------- quick replies: short texts of your own, a tap puts one in the draft ----------
 const CHIP_MAX = 12, CHIP_LEN = 200;
 const clipChip = v => { const s = typeof v === 'string' ? v.trim().slice(0, CHIP_LEN) : ''; return (/[\uD800-\uDBFF]$/.test(s) ? s.slice(0, -1) : s).trim(); };

@@ -2956,6 +2956,94 @@ def test_a_long_chip_row_scrolls_without_widening_the_page(api_fixture, theme):
     })()""")
 
 
+# --- the whole built-in list, and a question before a command that ends the session ---
+
+BUILTINS = [
+    {"name": "/clear", "description": "", "source": "builtin", "kind": "text"},
+    {"name": "/model", "description": "", "source": "builtin", "kind": "menu"},
+    {"name": "/exit", "description": "", "source": "builtin", "kind": "ends"},
+    {"name": "/export", "description": "", "source": "builtin", "kind": "menu"},
+    {"name": "/deploy", "description": "Ship the panel", "source": "user", "kind": "text"},
+]
+
+
+def type_message(chrome, text):
+    chrome.js(f"(() => {{ const m = document.querySelector('#message'); m.focus(); m.value = {json.dumps(text)}; m.dispatchEvent(new Event('input', {{bubbles: true}})); }})()")
+
+
+def slash_rows(chrome):
+    return chrome.js("[...document.querySelectorAll('#slashOptions [data-slash-cmd]')].map(b => [b.dataset.slashCmd, b.querySelector('.note')?.textContent || ''])")
+
+
+def test_slash_menu_lists_exit_and_says_which_builtin_opens_a_menu(api_fixture):
+    chrome, api, url = api_fixture
+    api.commands = BUILTINS
+    chrome.resize(320, 568)
+    open_first(chrome, url)
+    chrome.wait("slashCommands().some(c => c.name === '/exit')")
+    type_message(chrome, "/ex")
+    chrome.wait("!document.querySelector('#slashOptions').hidden")
+    assert slash_rows(chrome) == [["/exit", ""], ["/export", "opens a menu in the terminal"]]
+    type_message(chrome, "/")
+    assert dict(slash_rows(chrome)) == {"/clear": "", "/model": "opens a menu in the terminal", "/exit": "", "/export": "opens a menu in the terminal", "/deploy": ""}
+    assert chrome.js("document.querySelector('#slashOptions [data-slash-cmd=\"/deploy\"] small').textContent") == "Ship the panel"
+    assert chrome.js("[...document.querySelectorAll('#slashOptions .note')].every(n => { const r = n.getBoundingClientRect(); return r.width > 0 && r.right <= innerWidth; })")
+
+
+def submit_message(chrome, text):
+    type_message(chrome, text)
+    chrome.js("document.querySelector('#composer').requestSubmit()")
+
+
+def test_exit_asks_once_before_it_is_sent_and_cancel_keeps_the_draft(api_fixture):
+    chrome, api, url = api_fixture
+    api.commands = BUILTINS
+    api.publish_session("idle")
+    open_first(chrome, url)
+    chrome.wait("slashCommands().some(c => c.kind === 'ends')")
+    submit_message(chrome, "/exit")
+    chrome.wait("!document.querySelector('#sheet').hidden && document.querySelector('#sheet [data-ends]') !== null")
+    assert chrome.js("document.querySelector('#sheet h3').textContent") == "Close this session?"
+    assert "/exit" in chrome.js("document.querySelector('#sheet p').textContent")
+    assert chrome.js("document.querySelector('#sheet [data-ends]').textContent") == "Send /exit"
+    assert api.prompts == []
+    chrome.click("#sheet [data-x]")
+    chrome.wait("document.querySelector('#sheet').hidden")
+    time.sleep(0.2)
+    assert api.prompts == [] and chrome.js("document.querySelector('#message').value") == "/exit"
+    chrome.js("document.querySelector('#composer').requestSubmit()")
+    chrome.wait("document.querySelector('#sheet [data-ends]') !== null")
+    chrome.js("(() => { const b = document.querySelector('#sheet [data-ends]'); b.click(); b.click(); })()")
+    wait_for(lambda: api.prompts == ["/exit"], "the command to be sent")
+    chrome.wait("document.querySelector('#sheet').hidden")
+    time.sleep(0.3)
+    assert api.prompts == ["/exit"] and chrome.js("document.querySelector('#message').value") == ""
+
+
+def test_exit_inside_a_sentence_and_plain_commands_are_sent_without_asking(api_fixture):
+    chrome, api, url = api_fixture
+    api.commands = BUILTINS
+    api.publish_session("idle")
+    open_first(chrome, url)
+    chrome.wait("slashCommands().some(c => c.kind === 'ends')")
+    for text in ["what does /exit do", "/clear", "/exits", "/model"]:
+        submit_message(chrome, text)
+        wait_for(lambda: api.prompts[-1:] == [text], f"{text!r} to be sent")
+        assert chrome.js("document.querySelector('#sheet [data-ends]') === null")
+
+
+def test_exit_asks_even_when_the_command_list_did_not_load(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    open_first(chrome, url)
+    for text in ["/exit", "/quit now"]:
+        submit_message(chrome, text)
+        chrome.wait("!document.querySelector('#sheet').hidden && document.querySelector('#sheet [data-ends]') !== null")
+        chrome.click("#sheet [data-x]")
+        chrome.wait("document.querySelector('#sheet').hidden")
+    assert api.prompts == []
+
+
 # --- an over-long command: all of it when the record pins it, the reason when it does not ---
 
 LONG = "\n".join(f"echo line-{i:04d} " + "x" * 60 for i in range(280))  # about 20 KB

@@ -58,7 +58,7 @@ Read from each project's README on 27 November 2026, not from their code: "not d
 - **Pick HerdrChat** when you want a native app, a real terminal, subagent and workflow transcripts, an iPad layout, or several computers in one list.
 - **Pick ColliePWA** when you use tmux or zellij instead of Herdr, or want built-in voice input, themes and its durable-agent tools.
 - **Pick Ovis** when your phone cannot join a tailnet, or you want one app across desktop, phone and browser.
-- **Pick Ulak** when you want the phone to be able to answer and little else, every yes tied to the question you read, and code short enough to read before you trust it: about 5,300 lines of Python, JavaScript and CSS and four runtime dependencies.
+- **Pick Ulak** when you want the phone to be able to answer and little else, every yes tied to the question you read, and code short enough to read before you trust it: about 5,600 lines of Python, JavaScript and CSS and four runtime dependencies.
 
 What Ulak does not do: no terminal, one computer, one person, Herdr only. Conversations are fullest for Claude Code, where the transcript is read directly; other agents are read from the screen.
 

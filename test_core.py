@@ -979,46 +979,89 @@ def _write(path, text):
 def test_slash_commands_list_builtins_then_user_and_project_files(tmp_path):
     from core import slash_commands
     home, cwd = tmp_path / "home", tmp_path / "home/work/app"
-    _write(home / ".claude/commands/review.md", "---\ndescription: Review the current diff\n---\nSECRET BODY")
+    _write(home / ".claude/commands/audit.md", "---\ndescription: Review the current diff\n---\nSECRET BODY")
     _write(home / ".claude/commands/git/sync.md", "Rebase on main and push.\n")
     _write(home / ".claude/skills/deploy/SKILL.md", "---\nname: deploy\ndescription: \"Ship the panel\"\n---\nsteps")
-    _write(cwd / ".claude/commands/review.md", "---\ndescription: Project review rules\n---\n")
+    _write(cwd / ".claude/commands/audit.md", "---\ndescription: Project review rules\n---\n")
     _write(cwd / ".claude/commands/bad name;rm.md", "x")
     _write(home / ".codex/prompts/plan.md", "# Plan\nWrite a plan first.\n")
     got = slash_commands("claude", str(cwd), home)
     names = [c["name"] for c in got]
     assert names[:2] == ["/clear", "/compact"] and got[0]["source"] == "builtin"
-    assert names.count("/review") == 1
+    assert names.count("/audit") == 1
     by = {c["name"]: c for c in got}
-    assert by["/review"] == {"name": "/review", "description": "Project review rules", "source": "project"}
+    assert by["/audit"] == {"name": "/audit", "description": "Project review rules", "source": "project", "kind": "text"}
+    assert by["/clear"] == {"name": "/clear", "description": "", "source": "builtin", "kind": "text"}
+    assert by["/model"]["kind"] == "menu" and by["/exit"]["kind"] == "ends"
     assert by["/git:sync"]["description"] == "Rebase on main and push."
-    assert by["/deploy"] == {"name": "/deploy", "description": "Ship the panel", "source": "user"}
+    assert by["/deploy"] == {"name": "/deploy", "description": "Ship the panel", "source": "user", "kind": "text"}
     assert not any(";" in n or " " in n for n in names)
     assert "SECRET BODY" not in json.dumps(got)
     assert "/prompts:plan" not in names
     codex = {c["name"]: c for c in slash_commands("codex", str(cwd), home)}
-    assert codex["/prompts:plan"]["description"] == "Write a plan first." and "/review" not in codex
+    assert codex["/prompts:plan"]["description"] == "Write a plan first." and "/audit" not in codex
 
 
 def test_slash_commands_survive_missing_folders_and_cap_long_text(tmp_path):
     from core import slash_commands
-    assert [c["name"] for c in slash_commands("agy", str(tmp_path / "nope"), tmp_path)] == ["/clear", "/help"]
+    agy = slash_commands("agy", str(tmp_path / "nope"), tmp_path)
+    assert [c["name"] for c in agy[:2]] == ["/clear", "/help"] and all(c["source"] == "builtin" for c in agy)
     assert slash_commands("unknown", "", tmp_path) == []
     _write(tmp_path / ".claude/commands/a-long.md", "---\ndescription: " + "x" * 400 + "\n---\n")
     for i in range(300):
         _write(tmp_path / f".claude/commands/c{i}.md", "")
     got = slash_commands("claude", "", tmp_path)
-    assert len(got) <= 200
+    from core import BUILTIN_SLASH
+    assert len([c for c in got if c["source"] != "builtin"]) == 200 and len(got) == len(BUILTIN_SLASH["claude"]) + 200
     assert len(next(c for c in got if c["name"] == "/a-long")["description"]) <= 120
+
+
+def test_every_builtin_has_a_known_kind_and_a_valid_name():
+    from core import BUILTIN_SLASH
+    assert set(BUILTIN_SLASH) == {"claude", "codex", "agy"}
+    for tool, commands in BUILTIN_SLASH.items():
+        names = [name for name, _ in commands]
+        assert len(names) == len(set(names)), [n for n in names if names.count(n) > 1]
+        for name, kind in commands:
+            assert re.fullmatch(r"/[a-z][a-z0-9-]*", name), (tool, name)
+            assert kind in {"text", "menu", "ends"}, (tool, name, kind)
+
+
+def test_exit_ends_the_session_in_every_tool_that_has_it():
+    from core import BUILTIN_SLASH
+    kinds = {tool: dict(commands) for tool, commands in BUILTIN_SLASH.items()}
+    assert kinds["claude"]["/exit"] == "ends"
+    assert kinds["codex"]["/exit"] == kinds["codex"]["/quit"] == "ends"
+    assert kinds["agy"]["/exit"] == kinds["agy"]["/quit"] == "ends"
+    for tool in kinds:  # the everyday ones answer in the chat and must never ask first
+        assert kinds[tool]["/clear"] == kinds[tool]["/compact"] == "text", tool
+
+
+def test_claude_list_is_the_full_one():
+    from core import BUILTIN_SLASH
+    names = {name for name, _ in BUILTIN_SLASH["claude"]}
+    assert len(names) >= 25
+    assert {"/exit", "/resume", "/context", "/cost", "/agents", "/mcp", "/permissions", "/rename", "/review", "/init", "/memory", "/status"} <= names
+    assert {"/exit", "/quit", "/resume", "/status", "/diff", "/mcp", "/new", "/review"} <= {name for name, _ in BUILTIN_SLASH["codex"]}
+    assert {"/exit", "/resume", "/context", "/rewind", "/mcp", "/model"} <= {name for name, _ in BUILTIN_SLASH["agy"]}
+
+
+def test_user_commands_are_not_cut_off_by_the_long_builtin_list(tmp_path):
+    from core import slash_commands
+    for i in range(150):
+        _write(tmp_path / f".claude/commands/mine{i}.md", "")
+    names = {c["name"] for c in slash_commands("claude", "", tmp_path)}
+    assert all(f"/mine{i}" in names for i in range(150))
 
 
 def test_commands_endpoint_reads_the_session_folder_and_needs_identity(monkeypatch, tmp_path):
     fake, c, h = _setup2(monkeypatch, ASK)
-    _write(tmp_path / ".claude/commands/ship.md", "---\ndescription: Ship it\n---\n")
+    _write(tmp_path / ".claude/commands/send-it.md", "---\ndescription: Ship it\n---\n")
     monkeypatch.setattr(api, "raw_agents", {"w9:p1": {"cwd": str(tmp_path)}})
     monkeypatch.setattr(api.Path, "home", lambda: tmp_path / "empty-home")
     items = c.get("/api/sessions/w9:p1/commands", headers=h).json()["commands"]
-    assert {"name": "/ship", "description": "Ship it", "source": "project"} in items
+    assert {"name": "/send-it", "description": "Ship it", "source": "project", "kind": "text"} in items
+    assert {"name": "/exit", "description": "", "source": "builtin", "kind": "ends"} in items
     assert c.get("/api/sessions/w9:p1/commands").status_code == 403
     assert c.get("/api/sessions/nope/commands", headers=h).status_code == 404
 
