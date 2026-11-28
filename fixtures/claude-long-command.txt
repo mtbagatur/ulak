@@ -1,0 +1,49 @@
+ │ touch yoklama-41-679.txt && \
+ │ touch yoklama-42-598.txt && \
+ │ touch yoklama-43-517.txt && \
+ │ touch yoklama-44-436.txt && \
+ │ touch yoklama-45-355.txt && \
+ │ touch yoklama-46-274.txt && \
+ │ touch yoklama-47-193.txt && \
+ │ touch yoklama-48-112.txt && \
+ │ touch yoklama-49-031.txt && \
+ │ touch yoklama-50-950.txt && \
+ │ touch yoklama-51-869.txt && \
+ │ touch yoklama-52-788.txt && \
+ │ touch yoklama-53-707.txt && \
+ │ touch yoklama-54-626.txt && \
+ │ touch yoklama-55-545.txt && \
+ │ touch yoklama-56-464.txt && \
+ │ touch yoklama-57-383.txt && \
+ │ touch yoklama-58-302.txt && \
+ │ touch yoklama-59-221.txt && \
+ │ touch yoklama-60-140.txt && \
+ │ touch yoklama-61-059.txt && \
+ │ touch yoklama-62-978.txt && \
+ │ touch yoklama-63-897.txt && \
+ │ touch yoklama-64-816.txt && \
+ │ touch yoklama-65-735.txt && \
+ │ touch yoklama-66-654.txt && \
+ │ touch yoklama-67-573.txt && \
+ │ touch yoklama-68-492.txt && \
+ │ touch yoklama-69-411.txt && \
+ │ touch yoklama-70-330.txt && \
+ │ touch yoklama-71-249.txt && \
+ │ touch yoklama-72-168.txt && \
+ │ touch yoklama-73-087.txt && \
+ │ touch yoklama-74-006.txt && \
+ │ touch yoklama-75-925.txt && \
+ │ touch yoklama-76-844.txt && \
+ │ touch yoklama-77-763.txt && \
+ │ touch yoklama-78-682.txt && \
+ │ touch yoklama-79-601.txt && \
+ │ touch yoklama-80-520.txt
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and don't ask again for touch yoklama-01-919.txt, touch yoklama-02-838.txt, touch yoklama-03-757.txt, touch yoklama-04-676.txt, and touch
+      yoklama-05-595.txt commands in /tmp/probe
+   3. Yes, and switch to auto mode · auto mode handles these prompts for you
+   4. No
+ ↑ 45 more lines
+ Esc to cancel · Tab to amend
