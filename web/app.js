@@ -139,6 +139,9 @@ const ICONS = {
   seal: '<circle cx="12" cy="12" r="8.7"/><path d="M9.2 8.6v3.6a2.8 2.8 0 0 0 5.6 0V8.6"/>',
   pin: '<path d="M9 4h6l-1 6 3 3.5H7l3-3.5z"/><path d="M12 13.5V20"/>',
   close: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
+  up: '<path d="M12 18.5V5.5M6.5 11 12 5.5l5.5 5.5"/>',
+  down: '<path d="M12 5.5v13M6.5 13l5.5 5.5 5.5-5.5"/>',
+  chips: '<rect x="3.5" y="7.5" width="17" height="9" rx="4.5"/><path d="M8.5 12h7"/>',
   bell: '<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
   refresh: '<path d="M19 12a7 7 0 1 1-2.05-4.95"/><path d="M19 4.5V8h-3.5"/>',
   timer: '<circle cx="12" cy="13" r="7.5"/><path d="M12 9v4l2.5 2M9.5 2.5h5"/>',
@@ -1273,6 +1276,56 @@ $('#composer').addEventListener('submit', async e => {
   $('#messages').scrollTop = $('#messages').scrollHeight;
   await sendItem(pane, item);
 });
+// ---------- quick replies: short texts of your own, a tap puts one in the draft ----------
+const CHIP_MAX = 12, CHIP_LEN = 200;
+const clipChip = v => { const s = typeof v === 'string' ? v.trim().slice(0, CHIP_LEN) : ''; return (/[\uD800-\uDBFF]$/.test(s) ? s.slice(0, -1) : s).trim(); };
+let chips = []; try { const kept = JSON.parse(store.get('chips') || '[]'); if (Array.isArray(kept)) chips = kept.map(clipChip).filter(Boolean).slice(0, CHIP_MAX); } catch {}
+let chipsUnkept = false;  // the browser refused to keep them: they live until the page closes
+function saveChips() { try { localStorage.setItem('chips', JSON.stringify(chips)); chipsUnkept = false; } catch { chipsUnkept = true; } }
+function renderChips() {
+  const row = $('#chips');
+  row.replaceChildren(...chips.map(text => { const b = document.createElement('button'); b.type = 'button'; b.textContent = text; b.setAttribute('aria-label', text); return b; }));  // text, never markup
+  row.hidden = !chips.length; row.scrollLeft = 0;
+  $('#composer').classList.toggle('chipped', chips.length > 0);
+}
+$('#chips').addEventListener('pointerdown', e => { if (e.target.closest('button')) e.preventDefault(); });  // the keyboard stays up
+$('#chips').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  ta.setRangeText(b.textContent, ta.selectionStart, ta.selectionEnd, 'end');
+  slashIndex = 0; updateSlashOptions(); autosize(); store.set('draft:' + state.current, ta.value);
+  ta.focus();
+});
+function chipsSheet() {
+  saveChips();  // also finds out whether the browser keeps anything
+  showSheet(`<h3>${esc(t('chips'))}</h3><ul class="chip-list scroll"></ul><p class="chip-empty">${esc(t('chipsEmpty'))}</p>
+    <form class="chip-new"><input type="text" maxlength="${CHIP_LEN}" enterkeyhint="done" autocomplete="off" placeholder="${esc(t('chipPh'))}" aria-label="${esc(t('chipPh'))}"><button class="primary">${esc(t('chipAdd'))}</button></form>
+    <p class="chip-off" hidden>${esc(t('storageOff'))}</p>`);
+  const list = $('#sheet .chip-list'), form = $('#sheet .chip-new'), input = form.querySelector('input');
+  const act = (name, i, off) => `<button type="button" class="icon" data-chip="${name}" data-i="${i}" aria-label="${esc(t('chip' + name[0].toUpperCase() + name.slice(1)))}"${off ? ' disabled' : ''}>${icon(name === 'drop' ? 'close' : name, 20)}</button>`;
+  const draw = () => {
+    list.innerHTML = chips.map((text, i) => `<li><span>${esc(text)}</span>${act('up', i, i === 0)}${act('down', i, i === chips.length - 1)}${act('drop', i)}</li>`).join('');
+    list.hidden = !chips.length; $('#sheet .chip-empty').hidden = chips.length > 0; $('#sheet .chip-off').hidden = !chipsUnkept;
+    input.disabled = form.querySelector('button').disabled = chips.length >= CHIP_MAX;
+  };
+  const changed = () => { saveChips(); renderChips(); draw(); };
+  list.onclick = e => {
+    const b = e.target.closest('[data-chip]'); if (!b || b.disabled) return;
+    const i = +b.dataset.i, kind = b.dataset.chip, to = kind === 'up' ? i - 1 : i + 1;
+    if (kind === 'drop') chips.splice(i, 1); else [chips[i], chips[to]] = [chips[to], chips[i]];
+    changed();
+    // focus follows the text that moved; after a delete it goes to the neighbour, or to the box when none is left
+    const row = list.children[kind === 'drop' ? Math.min(i, chips.length - 1) : to];
+    (row ? [...row.querySelectorAll(`[data-chip=${kind}],[data-chip]`)].find(x => !x.disabled) : input).focus({preventScroll: true});
+  };
+  form.onsubmit = e => {
+    e.preventDefault();
+    const text = clipChip(input.value); if (!text || chips.length >= CHIP_MAX) return;
+    chips.push(text); input.value = ''; changed(); list.scrollTop = list.scrollHeight;
+    if (!input.disabled) input.focus({preventScroll: true});
+  };
+  draw();
+}
+renderChips();
 // attach: upload the file to the server, then put its path in the draft (agents read files by path)
 $('#attachBtn').onclick = () => $('#fileIn').click();
 // iPhone photos (HEIC) carry where and with what they were taken, and the server cannot rewrite that format.
@@ -1616,9 +1669,11 @@ function settingsSheet() {
   showSheet(`<h3 data-settings>${esc(t('settings'))}</h3><div class="rows">${bell}
     <button id="lang" class="row"><b class="lang">${LANG.toUpperCase()}</b><span>${esc(t('language'))}</span><small>${LANG === 'tr' ? 'English' : 'Türkçe'}</small></button>
     <button class="row" data-theme-toggle><svg class="moon" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><defs><mask id="hilal2"><rect x="-4" y="-4" width="32" height="32" fill="#fff"/><circle class="bite" cx="16.4" cy="8.6" r="7.2" fill="#000"/></mask></defs><circle class="halo" cx="12" cy="12" r="9.5"/><circle class="disc" cx="12" cy="12" r="8.2" fill="currentColor" mask="url(#hilal2)"/></svg><span>${esc(t('appearance'))}</span><small><i class="when-dark">${esc(t('themeDark'))}</i><i class="when-light">${esc(t('themeLight'))}</i></small></button>
+    <button id="chipsRow" class="row">${icon('chips', 20)}<span>${esc(t('chips'))}</span>${chips.length ? `<small>${chips.length}</small>` : ''}</button>
     <button id="refresh" class="row">${icon('refresh', 20)}<span>${esc(t('refresh'))}</span></button>
     ${approvalTimeout ? `<div class="row quiet timeout">${icon('timer', 20)}<span>${esc(t('timeoutOn', {n: approvalTimeout}))}</span></div>` : ''}</div>`);
   $('#sheet #lang').onclick = toggleLang;
+  $('#sheet #chipsRow').onclick = chipsSheet;
   $('#sheet #refresh').onclick = e => act(e.currentTarget, loadList, t('refreshed'));
   const b = $('#sheet #bell'); if (b) b.onclick = e => enableBell(e.currentTarget);
   const bt = $('#sheet #bellTest'); if (bt) bt.onclick = e => testBell(e.currentTarget);

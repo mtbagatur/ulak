@@ -54,7 +54,7 @@ Everything stays on the computer that runs Ulak, in two untracked folders next t
 - `.secrets/`: the Web Push private key, push subscriptions (each with the time a notification last reached it or last failed), `config.json`.
 - `.state/`: pins, notification history, the decision log, uploads (removed once older than a week, at the next upload or restart).
 
-The browser keeps unsent drafts, the messages you sent until the conversation shows them, your pins, the chosen language and theme, and whether the idle group is open, nothing else.
+The browser keeps unsent drafts, the messages you sent until the conversation shows them, your pins, your quick replies, the chosen language and theme, and whether the idle group is open, nothing else.
 
 ## Reporting a problem
 

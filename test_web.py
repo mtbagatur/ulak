@@ -2735,3 +2735,159 @@ def test_card_choice_with_four_long_labels_fits_320_px(api_fixture, theme):
         return document.documentElement.scrollWidth <= 320 && command.scrollHeight <= command.clientHeight
             && buttons.every(b => { const r = b.getBoundingClientRect(); return r.left >= card.left && r.right <= card.right && r.height >= 44 && b.scrollWidth <= b.clientWidth && b.scrollHeight <= b.clientHeight; });
     })()""")
+
+
+CHIPS = "[...document.querySelectorAll('#chips button')].map(b => b.textContent)"
+LISTED = "[...document.querySelectorAll('#sheet .chip-list li span')].map(e => e.textContent)"
+CHIP_ROW = "(() => { const c = document.querySelector('#chips'); return !!c && c.getClientRects().length > 0; })()"
+
+
+def with_chips(chrome, url, chips):
+    chrome.cdp("Page.navigate", url=url)
+    chrome.js(f"localStorage.setItem('chips', {json.dumps(json.dumps(chips))})")
+    open_first(chrome, url)
+
+
+def open_chips(chrome):
+    open_settings(chrome)
+    chrome.click("#sheet #chipsRow")
+    chrome.wait("document.querySelector('#sheet .chip-new input') !== null")
+
+
+def add_chip(chrome, text):
+    chrome.js(f"(() => {{ const f = document.querySelector('#sheet .chip-new'); f.querySelector('input').value = {json.dumps(text)}; f.requestSubmit(); }})()")
+
+
+def test_no_chip_row_until_one_is_defined(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    open_first(chrome, url)
+    assert chrome.js(CHIP_ROW) is False and chrome.js(CHIPS) == []
+    open_chips(chrome)
+    add_chip(chrome, "go on")
+    chrome.wait(CHIP_ROW)
+    assert chrome.js(CHIPS) == ["go on"]
+
+
+def test_a_chip_goes_into_the_draft_at_the_cursor_and_is_not_sent(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    with_chips(chrome, url, ["X"])
+    chrome.wait(CHIP_ROW)
+    chrome.js("(() => { const t = document.querySelector('#message'); t.value = 'ab'; t.dispatchEvent(new Event('input')); t.setSelectionRange(1, 1); t.blur(); })()")
+    down = chrome.js("(() => { const e = new PointerEvent('pointerdown', {bubbles: true, cancelable: true}); document.querySelector('#chips button').dispatchEvent(e); return e.defaultPrevented; })()")
+    chrome.click("#chips button")
+    assert down is True  # the keyboard stays up
+    assert chrome.js("document.querySelector('#message').value") == "aXb"
+    assert chrome.js("document.activeElement.id") == "message" and chrome.js("document.querySelector('#message').selectionStart") == 2
+    assert chrome.js("localStorage.getItem('draft:fake:p1')") == "aXb" and chrome.js("document.querySelector('#send').disabled") is False
+    time.sleep(0.3)
+    assert api.prompts == []
+
+
+def test_chips_are_added_removed_and_reordered_in_settings(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    open_first(chrome, url)
+    open_chips(chrome)
+    assert chrome.js("document.querySelector('#sheet .chip-list li')") is None and chrome.js("!!document.querySelector('#sheet .chip-empty')")
+    for text in ["  one  ", "two", "three", "   ", "L" * 201]:
+        add_chip(chrome, text)
+    assert chrome.js(LISTED) == ["one", "two", "three", "L" * 200]
+    assert chrome.js("document.querySelector('#sheet .chip-new input').value") == ""
+    chrome.click("#sheet .chip-list li:nth-child(3) [data-chip=up]")
+    assert chrome.js(LISTED) == ["one", "three", "two", "L" * 200]
+    chrome.click("#sheet .chip-list li:nth-child(1) [data-chip=down]")
+    assert chrome.js(LISTED) == ["three", "one", "two", "L" * 200]
+    assert chrome.js("document.querySelector('#sheet .chip-list li:first-child [data-chip=up]').disabled && document.querySelector('#sheet .chip-list li:last-child [data-chip=down]').disabled")
+    chrome.click("#sheet .chip-list li:nth-child(4) [data-chip=drop]")
+    assert chrome.js(LISTED) == ["three", "one", "two"] and chrome.js(CHIPS) == ["three", "one", "two"]
+    for n in range(9):
+        add_chip(chrome, f"more {n}")
+    assert chrome.js("document.querySelectorAll('#sheet .chip-list li').length") == 12
+    assert chrome.js("document.querySelector('#sheet .chip-new button').disabled && document.querySelector('#sheet .chip-new input').disabled")
+    add_chip(chrome, "a thirteenth")
+    assert chrome.js("document.querySelectorAll('#sheet .chip-list li').length") == 12
+    assert chrome.js("[...document.querySelectorAll('#sheet .chip-list button')].filter(b => !(b.getBoundingClientRect().height >= 44 && b.getAttribute('aria-label'))).map(b => [b.dataset.chip, b.dataset.i, b.getBoundingClientRect().height])") == []
+    assert chrome.js("document.querySelector('#sheet .chip-off').hidden") is True
+    open_first(chrome, url)
+    chrome.wait(CHIP_ROW)
+    assert chrome.js(CHIPS)[:3] == ["three", "one", "two"] and len(chrome.js(CHIPS)) == 12
+
+
+def test_chips_live_in_memory_and_say_so_when_the_browser_keeps_nothing(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    open_first(chrome, url)
+    chrome.js("Storage.prototype.setItem = () => { throw new Error('full'); }")
+    open_chips(chrome)
+    add_chip(chrome, "kept for now")
+    assert chrome.js(CHIPS) == ["kept for now"]
+    assert chrome.js("document.querySelectorAll('#sheet .chip-off:not([hidden])').length") == 1 and chrome.js("document.querySelector('#toasts .err')") is None
+
+
+def test_stored_chips_that_are_not_short_texts_are_left_out(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    with_chips(chrome, url, ["ok", 7, "", "  ", None, {"a": 1}, "W" * 300] + [f"c{n}" for n in range(20)])
+    chrome.wait(CHIP_ROW)
+    chips = chrome.js(CHIPS)
+    assert chips[:3] == ["ok", "W" * 200, "c0"] and len(chips) == 12
+    chrome.js("localStorage.setItem('chips', '{not json')")
+    open_first(chrome, url)
+    assert chrome.js(CHIP_ROW) is False and chrome.js("document.querySelector('#toasts .err')") is None
+
+
+def test_chip_row_hides_under_a_prompt_and_the_slash_menu(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    with_chips(chrome, url, ["yes, go on"])
+    chrome.wait(CHIP_ROW)
+    chrome.js("(() => { const m = document.querySelector('#message'); m.value = '/'; m.dispatchEvent(new Event('input', {bubbles: true})); })()")
+    chrome.wait("!document.querySelector('#slashOptions').hidden")
+    assert chrome.js(CHIP_ROW) is False
+    chrome.js("(() => { const m = document.querySelector('#message'); m.value = ''; m.dispatchEvent(new Event('input', {bubbles: true})); })()")
+    chrome.wait(CHIP_ROW)
+    api.publish_prompt(APPROVAL)
+    chrome.wait(f"document.querySelector({json.dumps(APPROVE)}) !== null")
+    assert chrome.js(CHIP_ROW) is False
+    api.publish_session("idle")
+    chrome.wait(CHIP_ROW)
+
+
+def test_a_chip_is_text_not_markup(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    bad = "<img src=x onerror=window.pwned=1>"
+    with_chips(chrome, url, [bad])
+    chrome.wait(CHIP_ROW)
+    open_chips(chrome)
+    add_chip(chrome, '"><img src=x onerror=window.pwned=2>')
+    assert chrome.js(LISTED) == [bad, '"><img src=x onerror=window.pwned=2>'] and chrome.js(CHIPS)[0] == bad
+    chrome.click("#chips button")
+    time.sleep(0.2)
+    assert chrome.js("document.querySelector('#message').value") == bad
+    assert chrome.js("window.pwned") is None and chrome.js("document.querySelector('#chips img, #sheet img')") is None
+
+
+@pytest.mark.parametrize("theme", ["dark", "light"])
+def test_a_long_chip_row_scrolls_without_widening_the_page(api_fixture, theme):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    chrome.resize(320, 640)
+    chrome.cdp("Page.navigate", url=url)
+    chrome.js(f"localStorage.theme = {json.dumps(theme)}")
+    with_chips(chrome, url, [chr(65 + n) * 200 for n in range(12)])
+    chrome.wait("document.querySelector('#chips').getBoundingClientRect().left === 8")  # the session has slid in
+    assert chrome.js("document.documentElement.scrollWidth === document.documentElement.clientWidth") and chrome.js("document.documentElement.clientWidth") == 320
+    assert chrome.js("""(() => {
+        const row = document.querySelector('#chips'), buttons = [...row.querySelectorAll('button')], box = row.getBoundingClientRect();
+        const send = document.querySelector('#send').getBoundingClientRect(), ta = document.querySelector('#message').getBoundingClientRect();
+        return row.scrollWidth > row.clientWidth && box.left >= 0 && box.right <= 320 && box.bottom <= ta.top && send.right <= 320 && Math.abs(send.bottom - ta.bottom) < 2
+            && buttons.every(b => { const r = b.getBoundingClientRect(); return Math.round(r.height) === 44 && r.width <= 300 && b.getAttribute('aria-label').length === 200; });
+    })()""")
+    open_chips(chrome)
+    assert chrome.js("""(() => {
+        const sheet = document.querySelector('#sheet').getBoundingClientRect();
+        return document.documentElement.scrollWidth === 320 && [...document.querySelectorAll('#sheet .chip-list li, #sheet .chip-list button, #sheet .chip-new *')].every(e => { const r = e.getBoundingClientRect(); return r.left >= sheet.left && r.right <= sheet.right; });
+    })()""")

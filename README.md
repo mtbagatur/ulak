@@ -158,7 +158,7 @@ Optional, in `.secrets/config.json` (untracked):
 - `min_work_seconds`: a "finished" push is skipped when the turn took less than this (default 120).
 - `approval_timeout_minutes`: off by default (`0`), so an approval waits for you however long that takes. Set it and Ulak denies an approval nobody answered in that many minutes. It can only deny, only the exact prompt it has been timing, and each one is written to the decision log as a timeout. The clock restarts when Ulak restarts.
 
-State (`.state/`: pins, notification history, the decision log) lives on the server, so every device sees the same view. The browser keeps only unsent drafts, the messages you sent until the conversation shows them, a copy of your pins, the chosen language and theme, and whether the idle group is open.
+State (`.state/`: pins, notification history, the decision log) lives on the server, so every device sees the same view. The browser keeps only unsent drafts, the messages you sent until the conversation shows them, a copy of your pins, your quick replies, the chosen language and theme, and whether the idle group is open.
 
 ## Architecture
 
