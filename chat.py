@@ -424,8 +424,11 @@ def search_transcript(path, query, limit=50, deadline=None, stop=None):
 
     The file is read from its end a piece at a time. Tool calls, their output, harness notes and subagent lines are not searched."""
     needle, hits = fold(query), []
-    if not needle:
+    words = needle.split()
+    if not words:
         return hits, False
+    # A space in what was asked stands for any run of spaces and line breaks in what was said.
+    phrase = re.compile(r"\s+".join(re.escape(w) for w in words))
     # JSON writes these differently than they are typed; a raw line cannot be asked about them.
     quick = not any(c in '"\\' or ord(c) < 32 for c in query)
     plain = query.isascii()
@@ -454,15 +457,17 @@ def search_transcript(path, query, limit=50, deadline=None, stop=None):
                 if stop is not None and stop.is_set():
                     return hits, True
                 line = piece.decode("utf8", "replace")
-                if quick and needle not in fold(line) and (plain or "\\u" not in line):
-                    continue
+                if quick and (plain or "\\u" not in line):
+                    folded = fold(line)
+                    if any(w not in folded for w in words):
+                        continue
                 for m in reversed(_parse([(offset, line)])[0]):
                     if m["role"] not in ("user", "assistant"):
                         continue
-                    at = fold(m["text"]).find(needle)
-                    if at < 0:
+                    found = phrase.search(fold(m["text"]))
+                    if not found:
                         continue
-                    snippet, where = _snippet(m["text"], at, at + len(needle))
+                    snippet, where = _snippet(m["text"], found.start(), found.end())
                     hits.append({"offset": offset, "end": min(offset + len(piece) + 1, end), "role": m["role"], "ts": m["ts"], "snippet": snippet, "at": where})
                     if len(hits) >= limit:
                         return hits, False

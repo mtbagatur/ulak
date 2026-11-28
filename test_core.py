@@ -3151,3 +3151,10 @@ def test_chat_reads_the_meters_once_until_the_record_changes(monkeypatch, tmp_pa
     monkeypatch.setattr(api, "claude_meters", lambda p: reads.append(p) or claude_meters(p))
     first = c.get("/api/sessions/w9:p1/chat", headers=h).json()["meters"]
     assert first["context"]["tokens"] == 511 and c.get("/api/sessions/w9:p1/chat", headers=h).json()["meters"] == first and len(reads) == 1
+
+
+def test_search_finds_a_phrase_the_text_breaks_across_lines(tmp_path):
+    path = _said(tmp_path / "a.jsonl", "assistant", "the build is\n  green now\tand stays so")
+    hits = search_transcript(path, "is green now and")[0]
+    assert len(hits) == 1 and hits[0]["snippet"][hits[0]["at"][0]:hits[0]["at"][1]] == "is green now and"
+    assert search_transcript(path, "isgreen")[0] == [] and search_transcript(path, "green is")[0] == []
