@@ -78,6 +78,7 @@ class FakeAPI:
         self.moved = None
         self.start, self.conversation, self.conversations, self.pages, self.anchors = None, "one", [], {}, []
         self.meters, self.clock_shift = {}, 0
+        self.search, self.search_status, self.searches, self.history = {"hits": [], "partial": False}, 200, [], []
         self.files, self.missing, self.file_gate = [], set(), threading.Event()
         self.file_gate.set()
         self.respond = threading.Event()
@@ -152,7 +153,11 @@ class Handler(SimpleHTTPRequestHandler):
                 "start": self.api.moved or (int(anchor) if anchor else self.api.start), "conversation": self.api.conversation,
                 "meters": self.api.meters, "now": time.time() + self.api.clock_shift,
             })
+        elif self.path.startswith("/api/sessions/fake%3Ap1/search?q="):
+            self.api.searches.append(unquote(self.path.partition("?q=")[2]))
+            self.json(self.api.search if self.api.search_status == 200 else {"detail": "No conversation to search"}, self.api.search_status)
         elif self.path.startswith("/api/sessions/fake%3Ap1/history?"):
+            self.api.history.append(self.path.partition("?")[2])
             page = self.api.pages.get(self.path.partition("?")[2])
             self.json(page) if page else self.json({"detail": "No such conversation"}, 404)
         elif self.path.startswith("/api/sessions/fake%3Ap1/file?path="):
@@ -2429,3 +2434,125 @@ def test_no_call_on_the_list_or_for_the_session_already_open(api_fixture):
     other_session(api, "blocked", {**APPROVAL, "fingerprint": "other-approval"})
     chrome.wait("document.title === '(2) Ulak'")
     assert chrome.js(f"{CALL} === null")
+
+
+# --- search ---
+
+def hit(snippet, at, **fields):
+    return {"offset": 700, "end": 780, "role": "assistant", "ts": "2026-11-28T08:00:00Z", "snippet": snippet, "at": at, "conversation": "", "title": "", "near": True, **fields}
+
+
+def look_for(chrome, text):
+    chrome.click("#sSearch")
+    chrome.wait("document.querySelector('#sheet input[type=search]') !== null")
+    chrome.js(f"(() => {{ const i = document.querySelector('#sheet input[type=search]'); i.value = {json.dumps(text)}; i.dispatchEvent(new Event('input', {{bubbles: true}})); }})()")
+
+
+def test_search_button_shows_only_with_a_transcript(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    api.source = "screen"
+    open_first(chrome, url)
+    assert chrome.js("document.querySelector('#sSearch').hidden") is True
+    api.source, api.messages = "transcript", said("now", 2)
+    chrome.wait("!document.querySelector('#sSearch').hidden")
+    box = chrome.js("(() => { const r = document.querySelector('#sSearch').getBoundingClientRect(); return [r.width, r.height]; })()")
+    assert min(box) >= 44 and chrome.js("document.querySelector('#sSearch').getAttribute('aria-label')") == "Search"
+    chrome.click("#sSearch")
+    chrome.wait("document.activeElement?.type === 'search'")
+    assert chrome.js("parseFloat(getComputedStyle(document.activeElement).fontSize)") >= 16
+    assert chrome.js("[document.activeElement.maxLength, document.activeElement.enterKeyHint]") == [80, "search"]
+
+
+def test_search_lists_hits_and_marks_the_match_as_text(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    api.search = {"hits": [hit("x <img src=x onerror=window.pwned=1> y", [2, 6]), hit("you said kiraz", [9, 14], role="user")], "partial": False}
+    open_first(chrome, url)
+    look_for(chrome, "a")
+    time.sleep(0.6)
+    assert api.searches == []   # one letter is not asked for
+    look_for(chrome, " <img ")
+    chrome.wait("document.querySelectorAll('#sheet .hit').length === 2")
+    assert api.searches == ["<img"]
+    assert chrome.js("[...document.querySelectorAll('#sheet .hit mark')].map(m => m.textContent)") == ["<img", "kiraz"]
+    assert chrome.js("document.querySelector('#sheet .hit .snip').textContent") == "x <img src=x onerror=window.pwned=1> y"
+    assert chrome.js("[window.pwned === undefined, document.querySelectorAll('#sheet img').length]") == [True, 0]
+    assert chrome.js("[...document.querySelectorAll('#sheet .hit small')].map(e => e.textContent.split(' · ')[0])") == ["Agent", "You"]
+    assert chrome.js("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
+
+
+def test_typing_on_asks_once_for_the_last_word(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    open_first(chrome, url)
+    look_for(chrome, "ki")
+    look_for(chrome, "kir")
+    look_for(chrome, "kiraz")
+    chrome.wait("document.querySelector('#sheet .empty')?.textContent === 'Nothing found.'")
+    assert api.searches == ["kiraz"]
+
+
+def test_near_hit_loads_the_chat_from_there(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    api.messages, api.start = said("new", 30), 5000
+    api.search = {"hits": [hit("new 0", [0, 3])], "partial": False}
+    open_first(chrome, url)
+    look_for(chrome, "new")
+    chrome.click("#sheet .hit")
+    chrome.wait("document.querySelector('#messages .msg.found') !== null")
+    assert api.anchors[-1] == "700"
+    assert chrome.js("document.querySelector('#messages .msg.found').textContent") == "new 0"
+    assert chrome.js("document.querySelectorAll('#messages .msg.found').length") == 1
+    chrome.wait("document.querySelector('#sheet').hidden")
+    top = chrome.js("document.querySelector('#messages .msg.found').getBoundingClientRect().top - document.querySelector('#messages').getBoundingClientRect().top")
+    assert 0 <= top < 200
+    chrome.wait(f"document.querySelector('{EARLIER}')?.textContent === 'Load earlier'")
+    chrome.wait("document.querySelector('#messages .msg.found') === null")
+
+
+def test_far_or_past_hit_opens_the_read_only_sheet(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    api.search = {"hits": [hit("long ago", [0, 4], near=False), hit("then 1", [0, 4], conversation="past", title="Fix the build", near=False, end=90)], "partial": False}
+    api.pages = {"conversation=&before=780": {"messages": said("far", 3), "start": 0}, "conversation=past&before=90": {"messages": said("then", 2), "start": 40},
+                 "conversation=past&before=40": {"messages": said("first", 1), "start": 0}}
+    open_first(chrome, url)
+    look_for(chrome, "then")
+    chrome.wait("document.querySelectorAll('#sheet .hit').length === 2")
+    assert chrome.js("document.querySelectorAll('#sheet .hit')[1].textContent.includes('Fix the build')")
+    chrome.click("#sheet .hit:nth-of-type(2)")
+    chrome.wait("document.querySelectorAll('#sheet .past-chat .msg').length === 2")
+    assert api.history == ["conversation=past&before=90"] and len(api.anchors) and "90" not in api.anchors
+    assert chrome.js("[...document.querySelectorAll('#sheet .past-chat .msg.found')].map(e => e.textContent)") == ["then 1"]
+    assert chrome.js("document.querySelector('#sheet h3').textContent") == "Fix the build"
+    chrome.click("#sheet .past-more")
+    chrome.wait("document.querySelectorAll('#sheet .past-chat .msg').length === 3")
+    assert chrome.js("[...document.querySelectorAll('#sheet .past-chat .msg.found')].map(e => e.textContent)") == ["then 1"]
+    chrome.js("document.querySelector('#sheet [data-close]').click()")
+    chrome.wait("document.querySelector('#sheet').hidden")
+    look_for(chrome, "long")
+    chrome.click("#sheet .hit")
+    chrome.wait("document.querySelectorAll('#sheet .past-chat .msg').length === 3")
+    assert api.history[-1] == "conversation=&before=780"
+
+
+def test_search_says_when_older_was_not_read_and_when_nothing_matched(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    api.search = {"hits": [hit("kiraz", [0, 5])], "partial": True}
+    open_first(chrome, url)
+    look_for(chrome, "kiraz")
+    chrome.wait("document.querySelector('#sheet .partial')?.textContent === 'Older messages were not searched: it took too long.'")
+    api.search = {"hits": [], "partial": True}
+    look_for(chrome, "kira")
+    chrome.wait("document.querySelector('#sheet .hit') === null && document.querySelector('#sheet .partial') !== null")
+    assert chrome.js("document.querySelector('#sheet .empty') === null")
+    api.search = {"hits": [], "partial": False}
+    look_for(chrome, "elma")
+    chrome.wait("document.querySelector('#sheet .empty')?.textContent === 'Nothing found.'")
+    assert chrome.js("document.querySelector('#sheet .partial') === null")
+    api.search_status = 404
+    look_for(chrome, "armut")
+    chrome.wait("document.querySelector('#sheet .empty')?.textContent === 'This session has closed.'")

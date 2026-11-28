@@ -342,6 +342,15 @@ input::placeholder,textarea::placeholder{color:var(--muted);opacity:1}
 .sheet .note{font-size:13px;color:var(--muted)}
 .term{margin:0;padding:10px 12px;background:var(--bg2);border:1px solid var(--line);border-radius:10px;font:11.5px/1.4 ui-monospace,"SF Mono",Menlo,monospace;color:var(--strong);white-space:pre;overflow:auto;max-height:62dvh;min-height:30dvh;user-select:text;-webkit-user-select:text;overscroll-behavior:contain}
 .sheet .empty{padding:18px 8px}
+.hits{display:flex;flex-direction:column;gap:8px}
+.hit{flex:none;display:flex;flex-direction:column;gap:3px;width:100%;min-width:0;text-align:left;background:var(--card);padding:10px 14px}
+.hit small{max-width:100%;font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hit .snip{font-size:15px;line-height:1.4;color:var(--strong);overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.hit mark{background:var(--card2);color:inherit;font-weight:650;border-radius:5px;padding:0 3px}
+.sheet .partial{margin:4px 0 0;font-size:13px;color:var(--muted);text-align:center}
+/* What a search led to: a ring around it, in ink. In the chat it fades; in the read-only sheet it stays. */
+.msg{transition:box-shadow .5s ease}
+.msg.found{box-shadow:0 0 0 3px var(--bg),0 0 0 5px var(--muted)}.msg.found:not(.user){border-radius:10px}
 .files{list-style:none;margin:0 0 10px;padding:0;font:12.5px/1.4 ui-monospace,"SF Mono",Menlo,monospace;max-height:26dvh;overflow:auto;overscroll-behavior:contain}
 .files li{display:flex;gap:10px;padding:5px 0;border-bottom:1px solid var(--line)}.files li:last-child{border-bottom:0}
 .files b{flex:none;width:1.2em;text-align:center;color:var(--muted);font-weight:600}

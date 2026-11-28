@@ -516,7 +516,7 @@ function openSession(pane) {
   const carry = focusIsIn('#home');
   state.view++;
   state.current = pane; state.chatHash = ''; state.prompt = null; openRuns.clear(); state.meters = {}; renderMeters();
-  state.anchor = state.cursor = state.start = null; state.conversation = undefined;
+  state.anchor = state.cursor = state.start = null; state.conversation = undefined; state.found = null; $('#sSearch').hidden = true;
   loadSlash(pane);
   $('#home').hidden = true; $('#session').hidden = false;
   if (carry) $('#back').focus({preventScroll: true});
@@ -793,6 +793,7 @@ async function loadChat(first = false) {
     const anchor = state.anchor;
     const r = await readSnapshot(`/api/sessions/${encodeURIComponent(pane)}/chat${anchor === null ? '' : `?from=${anchor}`}`);
     if (chatRequest !== request || view !== state.view || generation !== snapshotGeneration) return;
+    if (anchor !== state.anchor) { request.again = true; return; }  // asked from another place than the one now shown: a jump or "load earlier" came in between
     if (state.conversation !== undefined && r.conversation !== state.conversation) {  // /clear: another conversation
       forgetPast();
       if (anchor !== null) { state.conversation = r.conversation; request.again = true; return; }
@@ -806,6 +807,8 @@ async function loadChat(first = false) {
     if (key !== state.chatHash) { state.chatHash = key; renderMessages(r, first, items); }
     renderEarlier(r.source);
     renderOutbox();
+    put($('#sSearch'), 'hidden', r.source !== 'transcript');
+    if (state.found !== null && anchor === state.found) showFound();
     renderPrompt(r.prompt, r.status);
     renderReceipt(r.receipt);
     if (state.busy.has(pane)) setPaneActionsBusy(pane, true);
@@ -837,7 +840,7 @@ function parts() {
   if (!box.querySelector(':scope > .live')) { box.innerHTML = '<div class="earlier"></div><div class="past"></div><div class="live"></div>'; }
   return {box, earlier: box.querySelector('.earlier'), past: box.querySelector('.past'), live: box.querySelector('.live')};
 }
-function forgetPast() { state.anchor = null; state.cursor = null; state.start = null; $('#messages .past')?.replaceChildren(); state.chatHash = ''; }
+function forgetPast() { state.anchor = null; state.cursor = null; state.start = null; state.found = null; $('#messages .past')?.replaceChildren(); state.chatHash = ''; }
 function renderEarlier(source) {
   const {earlier} = parts();
   const at = state.anchor === null ? state.start : state.cursor;
@@ -871,23 +874,78 @@ async function conversationsSheet() {
   box.innerHTML = items.map(c => `<button type="button" class="row" data-c="${esc(c.id)}"><span>${esc(c.title)}</span><small>${esc(ago(c.ts))}</small></button>`).join('') || `<p class="empty">${esc(t('noConversations'))}</p>`;
   box.onclick = e => { const b = e.target.closest('[data-c]'); if (b) pastSheet(pane, b.dataset.c, b.querySelector('span').textContent); };
 }
-async function pastSheet(pane, id, title) {
+// ---------- search: a word, anywhere this folder's conversations said it ----------
+let searchTimer = 0, searchAbort = null;
+function searchSheet() {
+  const pane = state.current;
+  clearTimeout(searchTimer); searchAbort?.abort();
+  showSheet(`<h3>${esc(t('search'))}</h3><input type="search" maxlength="80" enterkeyhint="search" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="${esc(t('searchPh'))}" aria-label="${esc(t('search'))}"><div class="hits scroll" style="max-height:56dvh" aria-live="polite"></div>`);
+  const input = $('#sheet input'), box = $('#sheet .hits');
+  const note = (cls, text) => { const p = document.createElement('p'); p.className = cls; p.textContent = text; return p; };
+  const row = h => {
+    const b = document.createElement('button'), head = document.createElement('small'), snip = document.createElement('span'), mark = document.createElement('mark');
+    b.type = 'button'; b.className = 'hit'; snip.className = 'snip';
+    head.textContent = [t(h.role === 'user' ? 'roleYou' : 'roleAgent'), ago(Date.parse(h.ts) / 1000), h.title].filter(Boolean).join(' · ');
+    mark.textContent = h.snippet.slice(h.at[0], h.at[1]);
+    snip.append(h.snippet.slice(0, h.at[0]), mark, h.snippet.slice(h.at[1]));  // what was said is text, never markup
+    b.append(head, snip);
+    b.onclick = () => {
+      if (!h.near) return pastSheet(pane, h.conversation, h.title || state.sessions.get(pane)?.project || t('pane'), {before: h.end, mark: true});
+      hideSheet(); forgetPast();
+      state.anchor = state.cursor = state.found = h.offset;
+      loadChat(true);
+    };
+    return b;
+  };
+  const run = async () => {
+    const q = input.value.trim();
+    searchAbort?.abort();
+    if (q.length < 2) { box.replaceChildren(); return; }
+    const mine = searchAbort = new AbortController();
+    let r;
+    try { r = await api(`/api/sessions/${encodeURIComponent(pane)}/search?q=${encodeURIComponent(q)}`, undefined, undefined, mine.signal); }
+    catch (e) {
+      if (!mine.signal.aborted && box.isConnected) box.replaceChildren(note('empty', e.status === 404 ? t('searchClosed') : e.message));
+      return;
+    }
+    if (mine.signal.aborted || !box.isConnected) return;
+    const hits = r.hits || [];
+    box.replaceChildren(...hits.map(row), ...(r.partial ? [note('partial', t('searchPartial'))] : hits.length ? [] : [note('empty', t('searchNone'))]));
+    box.scrollTop = 0;
+  };
+  input.oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(run, 250); };
+  input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); clearTimeout(searchTimer); run(); input.blur(); } };  // the keyboard steps aside for what was found
+}
+$('#sSearch').onclick = searchSheet;
+// The chat now starts at what was looked for: bring it to the top and point at it for a moment.
+function showFound() {
+  const box = $('#messages'), el = box.querySelector('.live .msg');
+  state.found = null;
+  if (!el) return;
+  el.classList.add('found');
+  box.scrollTop += el.getBoundingClientRect().top - box.getBoundingClientRect().top - 8;
+  $('#jump').hidden = true;
+  setTimeout(() => el.classList.remove('found'), 2000);
+}
+async function pastSheet(pane, id, title, at) {
   showSheet(`<h3>${esc(title)}</h3><p class="note">${esc(t('conversationsNote'))}</p><div class="past-chat scroll" style="max-height:62vh"><p class="empty">${esc(t('loading'))}</p></div>`);
   const box = $('#sheet .past-chat');
   const page = async before => {
     const r = await act(box.querySelector('.past-more'), () => api(`/api/sessions/${encodeURIComponent(pane)}/history?conversation=${encodeURIComponent(id)}${before ? `&before=${before}` : ''}`));
     if (!r || !box.isConnected) return;
     const fromBottom = box.scrollHeight - box.scrollTop;
+    const first = !box.querySelector('.past-more') && !!box.querySelector('.empty'), nodes = nodesFor(r.messages, 'transcript');
     box.querySelector('.past-more')?.remove(); box.querySelector('.empty')?.remove();
-    box.prepend(...nodesFor(r.messages, 'transcript'));
+    if (first && at?.mark) nodes.findLast(n => n.classList.contains('msg'))?.classList.add('found');
+    box.prepend(...nodes);
     if (r.start) {
       const more = document.createElement('button'); more.type = 'button'; more.className = 'past-more'; more.textContent = t('loadEarlier');
       more.onclick = () => { if (!more.classList.contains('loading')) page(r.start); };
       box.prepend(more);
     }
-    box.scrollTop = before ? box.scrollHeight - fromBottom : box.scrollHeight;
+    box.scrollTop = first ? box.scrollHeight : box.scrollHeight - fromBottom;
   };
-  page(0);
+  page(at?.before || 0);
 }
 function renderMessages(r, first, items = itemsOf(r.messages, r.source)) {
   const {box, live} = parts();
