@@ -1571,6 +1571,23 @@ def test_outbox_of_this_pane_is_kept_and_a_new_message_carries_its_mark(api_fixt
     api.respond.set()
 
 
+def test_outbox_is_not_drawn_before_the_conversation_has_been_checked(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelector('.card') !== null")
+    _stored_mail(chrome, conversation="another")
+    api.fail_chat = True  # the list is here, the conversation is not: nothing says yet whose words these are
+    chrome.cdp("Page.navigate", url=url)
+    chrome.click(".card-open")
+    chrome.wait("!document.querySelector('#session').hidden")
+    time.sleep(2)  # list polls come and go
+    assert chrome.js(f"!!{PENDING}") is False and chrome.js(f"{STORED} !== null") is True
+    api.fail_chat = False
+    chrome.wait(f"{STORED} === null")
+    assert chrome.js(f"!!{PENDING}") is False
+
+
 def test_outbox_works_without_storage(api_fixture):
     chrome, api, url = api_fixture
     api.publish_session("idle")

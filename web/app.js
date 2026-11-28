@@ -775,7 +775,7 @@ function keepPlace(box, draw, toEnd = false) {
 }
 // ---------- outbox: what you sent shows at once and stays until the conversation carries it ----------
 const outbox = new Map();  // pane -> [{id, text, status: 'sending' | 'sent' | 'unseen' | 'unsent', seen: string[] | null, count, conversation, born, ts}]; seen === null: no baseline taken yet
-const OUTBOX = 'outbox:', kept = new Map();
+const OUTBOX = 'outbox:', kept = new Map(), written = new WeakMap();  // written: record -> the view it was sent from
 // A pane id is given out again; the mark on its card is not. A record with another mark was written to a pane that has closed; one without a mark takes this pane's.
 function ownMail(pane, item) {
   const born = state.sessions.get(pane)?.born || '';
@@ -813,7 +813,8 @@ function pruneOutbox() {
 }
 function renderOutbox() {
   const box = $('#messages');
-  const mail = outbox.get(state.current) || [];
+  // Stored text waits for this view's conversation check; a message just sent here belongs to this view.
+  const mail = (outbox.get(state.current) || []).filter(item => state.settled === state.view || written.get(item) === state.view);
   box.querySelectorAll('.msg.pending').forEach(el => { if (!mail.includes(el._item)) el.remove(); });
   for (const item of mail) {
     let el = [...box.querySelectorAll('.msg.pending')].find(e => e._item === item);
@@ -830,6 +831,7 @@ function renderOutbox() {
 // A message has arrived once the conversation shows a copy that was not there when it was sent.
 function settleOutbox(pane, messages, conversation) {
   state.shown = {pane, messages};
+  if (pane === state.current) state.settled = state.view;
   const mail = outbox.get(pane); if (!mail) return;
   const taken = new Set();
   outbox.set(pane, mail.filter(item => {
@@ -1313,6 +1315,7 @@ $('#composer').addEventListener('submit', e => {
 async function sendDraft(text) {
   const pane = state.current, shown = state.shown?.pane === pane, before = shown ? copies(state.shown.messages, text) : null;
   const item = {id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8), text, status: 'sending', seen: before && before.map(copyKey), count: before ? before.length : 0, conversation: (shown && state.conversation) || null, born: state.sessions.get(pane)?.born || null, ts: Date.now()};
+  written.set(item, state.view);
   outbox.set(pane, [...(outbox.get(pane) || []), item]);
   ta.value = ''; store.set('draft:' + pane, ''); autosize(); slashMenu.hidden = true;
   $('#messages').scrollTop = $('#messages').scrollHeight;
