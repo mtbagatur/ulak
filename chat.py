@@ -471,12 +471,16 @@ def search_transcript(path, query, limit=50, deadline=None, stop=None):
 
 
 def claude_meters(path, tail_bytes=700_000):
-    """What the end of a transcript says about the conversation's size and its prompt cache. An unknown measure has no key."""
+    """What the end of a transcript says about the conversation's size, its prompt cache and the subagents still out. An unknown measure has no key."""
     with Path(path).open("rb") as f:
         size = f.seek(0, 2)
-        lines = [line for _, line in _whole_lines(f, max(0, size - tail_bytes), size)]
+        lines = list(_whole_lines(f, max(0, size - tail_bytes), size))
     meters, since, seen = {}, None, False
-    for line in reversed(lines):
+    # Only the ones the record still shows as out. One whose answer is missing from a page of history is not counted.
+    running = sum(m.get("agent", {}).get("state") == "running" for m in _parse(lines)[0])
+    if running:
+        meters["agents"] = {"running": running}
+    for _, line in reversed(lines):
         if '"usage"' not in line and "compact_boundary" not in line:
             continue
         try:

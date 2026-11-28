@@ -2035,6 +2035,69 @@ def test_unknown_measures_are_absent_not_zero(api_fixture):
     assert chrome.js("getComputedStyle(document.querySelector('#sMeta')).display") == "none"
 
 
+AGENTS = "document.querySelector('#sMeta [data-agents]')?.textContent"
+
+
+def test_the_header_counts_the_agents_still_out(api_fixture):
+    chrome, api, url = api_fixture
+    api.meters = {**meters(), "agents": {"running": 2}}
+    chrome.resize(320, 700)
+    open_first(chrome, url)
+    chrome.wait(SHOWN)
+    assert chrome.js(META) == "2 subagents running · Context 124k · Cache ~41m"
+    # at 320 px the line is cut at its end; the count is what must stay whole
+    assert chrome.js("(() => { const a = document.querySelector('#sMeta [data-agents]').getBoundingClientRect(), m = document.querySelector('#sMeta').getBoundingClientRect(); return a.width > 0 && a.right <= m.right + 0.5; })()")
+    assert chrome.js("document.documentElement.scrollWidth") <= 320
+    api.meters = {"agents": {"running": 1}}
+    chrome.wait(f"{META} === '1 subagent running'")
+    api.meters = meters()
+    chrome.wait(f"{META} === 'Context 124k · Cache ~41m'")
+    assert chrome.js(AGENTS) is None
+    for unknown in ({"running": 0}, {"running": "2"}, {"running": 1.5}, {}, None):  # a number nobody counted is not shown
+        api.meters = {"agents": unknown}
+        chrome.wait("document.querySelector('#sMeta').hidden")
+        assert chrome.js(AGENTS) is None
+    chrome.js("localStorage.setItem('lang', 'tr')")
+    api.meters = {**meters(), "agents": {"running": 2}}
+    open_first(chrome, url)
+    chrome.wait(SHOWN)
+    assert chrome.js(META) == "2 alt ajan çalışıyor · Bağlam 124k · Cache ~41 dk"
+    api.meters = {"agents": {"running": 1}}
+    chrome.wait(f"{META} === '1 alt ajan çalışıyor'")
+
+
+def test_tapping_the_agents_count_brings_the_last_one_still_out_into_view(api_fixture):
+    chrome, api, url = api_fixture
+    filler = [{"role": "assistant", "text": f"Paragraph {i}. " + "Words that take room. " * 12} for i in range(8)]
+    sub = lambda text, state: {"role": "tool", "tool": "Agent", "text": text, "agent": {"kind": "Explore", "state": state}}
+    api.messages = [sub("First one out", "running"), *filler[:3], sub("Last one out", "running"), sub("Back already", "done"), *filler[3:]]
+    api.meters = {**meters(), "agents": {"running": 2}}
+    chrome.resize(390, 700)
+    open_first(chrome, url)
+    chrome.wait(SHOWN)
+    seen = "(() => { const d = [...document.querySelectorAll('#messages details.sub[data-state=running]')].at(-1), r = d.getBoundingClientRect(), b = document.querySelector('#messages').getBoundingClientRect(); return d.textContent.includes('Last one out') && r.top >= b.top && r.bottom <= b.bottom; })()"
+    time.sleep(0.6)  # the screen slides in
+    assert not chrome.js(seen)
+
+    def tap(x, y):
+        for kind in ("mousePressed", "mouseReleased"):
+            chrome.cdp("Input.dispatchMouseEvent", type=kind, x=x, y=y, button="left", clickCount=1)
+
+    ax, ay, mx = chrome.js("(() => { const a = document.querySelector('#sMeta [data-agents]').getBoundingClientRect(), m = document.querySelector('#sMeta').getBoundingClientRect(); return [a.left + a.width / 2, a.top - 10, m.right - 4]; })()")
+    tap(ax, ay)  # above the words: the whole height of the line answers, not only its 12 px letters
+    chrome.wait(seen)
+    assert chrome.js("document.querySelector('#sheet .meter') === null")
+    tap(mx, ay)  # the measures beside it still open their sheet
+    chrome.wait("document.querySelectorAll('#sheet .meter').length === 2")
+    chrome.js("hideSheet()")
+    # the card is gone from what is loaded: the tap does nothing rather than open the wrong thing
+    api.messages = filler
+    chrome.wait("document.querySelector('#messages details.sub') === null")
+    tap(ax, ay)
+    time.sleep(0.3)
+    assert chrome.js("document.querySelector('#sheet .meter') === null")
+
+
 def test_a_window_kept_for_one_model_shows_apart_and_counts_only_for_that_model(api_fixture):
     chrome, api, url = api_fixture
     fable = {"label": "Fable · 7d", "used": 88, "resets_at": time.time() + 3 * 86400, "model": "fable"}

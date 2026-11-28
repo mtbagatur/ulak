@@ -2177,6 +2177,33 @@ def test_cache_lifetime_comes_from_the_last_write_and_counts_from_the_last_reply
     assert "cache" not in _meters(tmp_path / "a.jsonl", _reply(usage=_usage(read=40)))
 
 
+def test_meters_count_only_agents_known_to_be_running(tmp_path):
+    launched = lambda i: {"type": "user", "toolUseResult": {"status": "async_launched"}, "message": {"content": [{"type": "tool_result", "tool_use_id": i, "content": "Async agent launched successfully."}]}}
+    m = _meters(
+        tmp_path / "a.jsonl",
+        _agent_use("a1", "Came back"),
+        {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "a1", "content": "Three entry points."}]}},
+        _agent_use("a2", "Broke"),
+        {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "a2", "is_error": True, "content": "boom"}]}},
+        _agent_use("a3", "Sent off, then reported back"), launched("a3"),
+        {"type": "queue-operation", "operation": "enqueue", "content": "<task-notification>\n<tool-use-id>a3</tool-use-id>\n<status>completed</status>\n</task-notification>"},
+        _agent_use("a4", "Sent off, still out"), launched("a4"),
+        _agent_use("a5", "No word yet"),
+    )
+    assert m == {"agents": {"running": 2}}
+
+
+def test_meters_say_nothing_about_agents_when_none_runs(tmp_path):
+    done = _meters(
+        tmp_path / "a.jsonl", _reply(usage=_usage(read=5)), _agent_use("a1", "Came back"),
+        {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "a1", "content": "Three entry points."}]}})
+    assert "agents" not in done and done["context"]["tokens"] == 15
+    assert "agents" not in _meters(tmp_path / "b.jsonl", _reply(usage=_usage(read=5)))
+    # an ordinary tool that has not answered is not somebody sent off
+    bash = {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "b1", "name": "Bash", "input": {"command": "sleep 60"}}]}}
+    assert "agents" not in _meters(tmp_path / "c.jsonl", bash)
+
+
 def test_unreadable_records_leave_the_measure_out(tmp_path):
     log = tmp_path / "a.jsonl"
     log.write_text('{"usage": broken\n' + json.dumps(_reply(usage="lots")) + "\n")

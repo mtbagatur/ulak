@@ -499,7 +499,9 @@ function sessionLimits() {
   return items.length ? {id: p.id, label: p.label, updated: p.updated, items} : null;
 }
 function renderMeters() {
-  const meta = $('#sMeta'), ring = $('#sRing'), m = state.meters || {}, left = cacheLeft(), bits = [];
+  const meta = $('#sMeta'), ring = $('#sRing'), m = state.meters || {}, left = cacheLeft(), bits = [], out = m.agents?.running;
+  // First in the line: at a narrow width the end is what gets cut, and this is the part that changes.
+  if (Number.isInteger(out) && out > 0) bits.push(`<span data-agents>${esc(many('agentsRunning', out)).replace(/\d+/, '<b>$&</b>')}</span>`);
   if (typeof m.context?.tokens === 'number') bits.push(t('ctxShort', {n: `<b>${fmtTokens(m.context.tokens)}</b>`}));
   if (left !== null) bits.push(left > 0 ? t('cacheShort', {n: `<b>${t('cacheMins', {n: cacheMins(left)})}</b>`}) : esc(t('cacheCold')));
   put(meta, 'hidden', !bits.length); putHtml(meta, `<span>${bits.join(' · ')}</span>`);
@@ -521,7 +523,14 @@ function metersSheet() {
   for (const i of lim?.items || []) rows.push(row(`${lim.label} · ${i.label}`, t('used', {n: i.used}), [resetText(i.resets_at, now), t(lim.id === 'codex' ? 'limCodex' : 'limFile'), lim.updated ? agoText(now - lim.updated) : ''].filter(Boolean).join(' · '), Math.max(0, Math.min(100, i.used))));
   if (rows.length) showSheet(`<h3>${esc(t('metersTitle'))}</h3><div class="scroll" style="max-height:65vh">${rows.join('')}</div>`);
 }
-$('#sMeta').onclick = $('#sRing').onclick = metersSheet;
+$('#sRing').onclick = metersSheet;
+// One line, two answers: the count takes you to whoever is still out, the measures open their sheet.
+// The count's own letters are 12 px tall, so it is told apart by where across the line the finger landed.
+$('#sMeta').onclick = e => {
+  const a = $('#sMeta [data-agents]');
+  if (!a || !(e.target.closest('[data-agents]') || e.detail && e.clientX <= a.getBoundingClientRect().right + 6)) return metersSheet();
+  [...$('#messages').querySelectorAll('details.sub[data-state=running]')].at(-1)?.scrollIntoView({block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'});
+};
 setInterval(() => { if (!document.hidden && state.current) renderMeters(); }, 60000);
 $('#limits').onclick = limitsSheet;
 setInterval(() => { if (!document.hidden) loadLimits(); }, 60000);
