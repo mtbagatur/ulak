@@ -3119,6 +3119,7 @@ def test_full_command_ui_shows_the_whole_command_in_a_box_that_scrolls(api_fixtu
     assert box["h"] <= box["max"] and box["scrolls"] and box["flow"] == "auto" and box["top"] >= 0
     assert chrome.js("document.querySelector('#promptZone [data-d=approve]') !== null && document.querySelector('#promptZone [data-d=deny]') !== null")
     assert chrome.js("document.querySelector('#promptZone [data-d=always]') === null")
+    chrome.wait("document.querySelector('#session').getBoundingClientRect().left === 0")  # the screen has finished sliding in
     seen = chrome.js("""(() => ['#message', '#send', '#promptZone [data-d=approve]', '#promptZone [data-d=deny]', '#promptZone .full-note'].map(q => {
         const r = document.querySelector(q).getBoundingClientRect(); return r.height > 0 && r.top >= 0 && r.bottom <= innerHeight && r.right <= innerWidth; }))()""")
     assert seen == [True] * 5
