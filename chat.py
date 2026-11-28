@@ -542,13 +542,18 @@ def open_calls(path, tail_bytes=2_000_000):
             if block.get("type") == "tool_use" and d["type"] == "assistant":
                 inp = block.get("input") if isinstance(block.get("input"), dict) else {}
                 text = lambda key: inp[key] if isinstance(inp.get(key), str) else ""
-                calls[block.get("id")] = {"tool": str(block.get("name") or ""), "command": text("command") if block.get("name") == "Bash" else "",
+                # An id that is not text can be answered by nothing: the call stays open, and nothing is pinned beside it.
+                use_id = block.get("id")
+                calls[use_id if isinstance(use_id, str) else ("odd", len(calls))] = {"tool": str(block.get("name") or ""), "command": text("command") if block.get("name") == "Bash" else "",
                                           "description": text("description"), "message": message}
             elif block.get("type") == "tool_result":
+                answered = block.get("tool_use_id")
+                if not isinstance(answered, str):
+                    continue
                 launch = d.get("toolUseResult")
                 out = isinstance(launch, dict) and launch.get("status") == "async_launched"
-                if not (out and calls.get(block.get("tool_use_id"), {}).get("tool") in SUBAGENT_TOOLS):
-                    calls.pop(block.get("tool_use_id"), None)
+                if not (out and calls.get(answered, {}).get("tool") in SUBAGENT_TOOLS):
+                    calls.pop(answered, None)
     return [{"tool": c["tool"], "command": c["command"], "description": c["description"], "last": c["message"] == newest} for c in calls.values()]
 
 

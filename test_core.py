@@ -3113,3 +3113,41 @@ def test_card_carries_a_mark_that_dies_with_the_pane():
     assert first and first != "term_1" and first == asyncio.run(api.make_card({**agent, "terminal_id": "term_1"}))["born"]
     assert asyncio.run(api.make_card({**agent, "terminal_id": "term_2"}))["born"] not in ("", first)
     assert asyncio.run(api.make_card(agent))["born"] == ""
+
+
+# --- minors left over from the 2a review ---
+def test_a_call_with_an_id_that_is_not_text_stays_open_and_pins_nothing(tmp_path):
+    odd = _call(1, command="ls")
+    odd["message"]["content"][0]["id"] = ["t1"]
+    answer = _answer(1)
+    answer["message"]["content"][0]["tool_use_id"] = {"id": "t1"}
+    calls = chat_module.open_calls(_record(tmp_path, odd, answer, _call(2, command=BUILD)))
+    assert [c["command"] for c in calls] == ["ls", BUILD]
+    assert _pin(tmp_path, odd, answer, _call(2, command=BUILD)) is None
+
+
+def test_cached_meters_survives_another_thread_emptying_the_cache_first(tmp_path, monkeypatch):
+    class Raced(dict):
+        stale = True
+
+        def __iter__(self):  # the first look names a key another thread has already taken out
+            if self.stale:
+                self.stale = False
+                return iter([("gone.jsonl", 0, 0)])
+            return super().__iter__()
+
+    cache = Raced({(f"{i}.jsonl", 0, 0): {} for i in range(64)})
+    monkeypatch.setattr(api, "meters_cache", cache)
+    path = _log(tmp_path / "a.jsonl", _reply(usage=_usage(read=100_000, hour=2_000)))
+    assert api.cached_meters(path)["context"]["tokens"] == 102_010 and len(cache) == 64
+
+
+def test_chat_reads_the_meters_once_until_the_record_changes(monkeypatch, tmp_path):
+    c, h, now = _history(monkeypatch, tmp_path)
+    with now.open("a") as f:
+        f.write(json.dumps(_reply(usage=_usage(read=500, hour=1))) + "\n")
+    reads = []
+    monkeypatch.setattr(api, "meters_cache", {})
+    monkeypatch.setattr(api, "claude_meters", lambda p: reads.append(p) or claude_meters(p))
+    first = c.get("/api/sessions/w9:p1/chat", headers=h).json()["meters"]
+    assert first["context"]["tokens"] == 511 and c.get("/api/sessions/w9:p1/chat", headers=h).json()["meters"] == first and len(reads) == 1

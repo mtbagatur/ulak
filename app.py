@@ -356,12 +356,14 @@ def cached_meters(path):
     try:
         st = os.stat(path)
         key = (str(path), st.st_size, st.st_mtime_ns)
-        if key not in meters_cache:
+        found = meters_cache.get(key)
+        if found is None:
             found = claude_meters(path)
+            # Cards are made on several threads at once: another one may have taken the oldest key out already.
             while len(meters_cache) >= 64:
-                meters_cache.pop(next(iter(meters_cache)))
+                meters_cache.pop(next(iter(meters_cache), None), None)
             meters_cache[key] = found
-        return meters_cache[key]
+        return found
     except OSError:
         return {}
 
@@ -1019,10 +1021,7 @@ async def chat(pane: str, limit: int = 60, anchor: int | None = Query(None, alia
             except OSError:
                 messages = None
         if path and messages is not None:
-            try:
-                meters = await asyncio.to_thread(claude_meters, path)
-            except OSError:
-                meters = {}
+            meters = await asyncio.to_thread(cached_meters, path)
     # Long terminal history is slow to fetch from Herdr; it is only needed when there is no transcript to show.
     screen = await read_screen(pane, status, max_age=1.0, history=messages is None)
     prompt = None
