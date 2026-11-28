@@ -2596,3 +2596,152 @@ def test_a_sweep_that_cannot_reach_herdr_changes_nothing(monkeypatch):
         assert sent == [] and graces == []
 
     asyncio.run(scenario())
+
+
+# --- search ---
+
+import threading, tracemalloc
+from chat import fold, search_transcript
+
+
+def _said(path, role, text, **extra):
+    content = text if role == "user" else [{"type": "text", "text": text}]
+    with path.open("a") as f:
+        f.write(json.dumps({"type": role, "cwd": "/p", "timestamp": f"t-{role}", "message": {"content": content}, **extra}, ensure_ascii=False) + "\n")
+    return path
+
+
+def test_fold_knows_turkish_i_and_keeps_length():
+    assert fold("IŞIK İstanbul ısı") == fold("işik istanbul isi") and len(fold("İẞ")) == 2
+
+
+def test_search_finds_user_and_assistant_text_newest_first(tmp_path):
+    path = _said(tmp_path / "a.jsonl", "user", "ilk Kiraz")
+    _said(path, "assistant", "ikinci   kiraz\nburada")
+    with path.open("a") as f:
+        f.write(json.dumps({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "echo kiraz"}}]}}) + "\n")
+        f.write(json.dumps({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "content": "kiraz"}]}}) + "\n")
+    _said(path, "assistant", "kiraz", isSidechain=True)
+    _said(path, "user", "<system-reminder>kiraz</system-reminder>")
+    hits, partial = search_transcript(path, "KİRAZ")
+    assert [h["role"] for h in hits] == ["assistant", "user"] and partial is False
+    assert all(h["snippet"][h["at"][0]:h["at"][1]].lower() == "kiraz" for h in hits)
+    assert hits[0]["offset"] > hits[1]["offset"] and hits[0]["end"] > hits[0]["offset"]
+    assert hits[0]["snippet"] == "ikinci kiraz burada" and hits[0]["ts"] == "t-assistant"
+    assert hits[1]["end"] == hits[0]["offset"] and hits[1]["offset"] == 0
+
+
+def test_search_finds_non_ascii_text_however_the_line_was_escaped(tmp_path):
+    path = tmp_path / "a.jsonl"
+    path.write_text(json.dumps({"type": "user", "message": {"content": "ÇİĞ köfte"}}) + "\n" + json.dumps({"type": "user", "message": {"content": "çiğ börek"}}, ensure_ascii=False) + "\n")
+    assert len(search_transcript(path, "çiğ")[0]) == 2
+
+
+def test_search_survives_quotes_backslashes_and_broken_lines(tmp_path):
+    path = _said(tmp_path / "a.jsonl", "user", 'say "hi" \\ <script>alert(1)</script>')
+    with path.open("a") as f:
+        f.write('{"type": "user", "message": {"content": "\\"hi\\" \\\\ broken\n[1, 2]\n"text"\n')
+    _said(path, "user", "line one\nline two")
+    assert len(search_transcript(path, '"hi" \\')[0]) == 1
+    assert search_transcript(path, "<script>")[0][0]["snippet"].count("<script>") == 1
+    assert len(search_transcript(path, "one\nline")[0]) == 1
+
+
+def test_search_stops_at_limit_deadline_and_stop(tmp_path):
+    path = _lines(tmp_path / "a.jsonl", "/p", 200)
+    hits, partial = search_transcript(path, "m", limit=50)
+    assert len(hits) == 50 and hits[0]["ts"] == "t199" and partial is False
+    assert search_transcript(path, "m", deadline=time.monotonic() - 1) == ([], True)
+    stop = threading.Event(); stop.set()
+    assert search_transcript(path, "m", stop=stop) == ([], True)
+
+
+def test_search_gives_up_between_pieces_and_keeps_what_it_found(tmp_path, monkeypatch):
+    monkeypatch.setattr(chat_module, "SEARCH_CHUNK", 2000)
+    path = _lines(tmp_path / "a.jsonl", "/p", 200)
+    stop = threading.Event()
+    real = chat_module._parse
+    monkeypatch.setattr(chat_module, "_parse", lambda lines, upto=None: (stop.set(), real(lines, upto))[1])
+    hits, partial = search_transcript(path, "m", limit=500, stop=stop)
+    assert partial is True and 0 < len(hits) < 200
+
+
+def test_search_reads_every_line_once_whatever_the_piece_size(tmp_path, monkeypatch):
+    path = _lines(tmp_path / "a.jsonl", "/p", 30, size=40)
+    _lines(path, "/p", 1, size=3000, start=30)
+    _lines(path, "/p", 9, start=31)
+    with path.open("a") as f:
+        f.write(json.dumps({"type": "user", "timestamp": "t40", "message": {"content": "m40"}}))   # no newline at the end
+    for chunk in (64, 300, 5000, 10**6):
+        monkeypatch.setattr(chat_module, "SEARCH_CHUNK", chunk)
+        hits = search_transcript(path, "m", limit=500)[0]
+        assert [h["ts"] for h in hits] == [f"t{i}" for i in range(40, -1, -1)], chunk
+        raw = path.read_bytes()
+        assert all(json.loads(raw[h["offset"]:h["end"]])["timestamp"] == h["ts"] for h in hits)
+
+
+def test_search_reads_a_big_record_in_pieces(tmp_path):
+    path = _said(tmp_path / "a.jsonl", "user", "the needle is here")
+    filler = json.dumps({"type": "user", "message": {"content": "hay " * 250_000}}) + "\n"
+    with path.open("a") as f:
+        for _ in range(52):
+            f.write(filler)
+    assert path.stat().st_size >= 50_000_000
+    tracemalloc.start()
+    try:
+        hits, partial = search_transcript(path, "needle")
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert len(hits) == 1 and hits[0]["offset"] == 0 and partial is False and peak < 40_000_000
+
+
+def test_search_endpoint_covers_the_open_and_the_earlier_conversations(monkeypatch, tmp_path):
+    c, h, now = _history(monkeypatch, tmp_path)
+    r = c.get("/api/sessions/w9:p1/search?q=%20M2%20", headers=h).json()
+    assert r["partial"] is False and len(r["hits"]) == 12
+    here, old = [x for x in r["hits"] if x["conversation"] == ""], [x for x in r["hits"] if x["conversation"]]
+    assert len(here) == 11 and all(x["near"] for x in here) and r["hits"][:11] == here
+    assert [(x["conversation"], x["title"], x["near"], x["snippet"]) for x in old] == [("11111111-old", "m0", False, "m2")]
+    monkeypatch.setattr(chat_module, "ANCHOR_BYTES", 5000)
+    near = [x["near"] for x in c.get("/api/sessions/w9:p1/search?q=m2", headers=h).json()["hits"] if not x["conversation"]]
+    assert near[0] is True and near[-1] is False
+    assert not any("path" in str(k).lower() or str(tmp_path) in str(v) for x in r["hits"] for k, v in x.items())
+
+
+def test_search_endpoint_refuses_what_it_cannot_search(monkeypatch, tmp_path):
+    c, h, now = _history(monkeypatch, tmp_path)
+    for q in ("", "a", "%20a%20", "x" * 81):
+        assert c.get(f"/api/sessions/w9:p1/search?q={q}", headers=h).status_code == 400, q
+    assert c.get("/api/sessions/w9:p1/search", headers=h).status_code == 400
+    assert c.get("/api/sessions/nope/search?q=m2", headers=h).status_code == 404
+    api.sessions["w9:p1"]["agent"] = "codex"
+    assert c.get("/api/sessions/w9:p1/search?q=m2", headers=h).status_code == 404
+    api.sessions["w9:p1"]["agent"] = "claude"
+    monkeypatch.setattr(api, "claude_path", lambda cwd, sid: None)
+    assert c.get("/api/sessions/w9:p1/search?q=m2", headers=h).status_code == 404
+
+
+def test_search_endpoint_shares_one_budget_and_one_limit(monkeypatch, tmp_path):
+    c, h, now = _history(monkeypatch, tmp_path)
+    calls = []
+    def fake(path, query, limit=50, deadline=None, stop=None):
+        calls.append((Path(path).stem, limit, deadline))
+        return [{"offset": 0, "end": 1, "role": "user", "ts": "", "snippet": "m2", "at": [0, 2]}] * 20, len(calls) == 2
+    monkeypatch.setattr(api, "search_transcript", fake)
+    before = time.monotonic()
+    r = c.get("/api/sessions/w9:p1/search?q=m2", headers=h).json()
+    assert [(name, limit) for name, limit, _ in calls] == [("new-session", 50), ("11111111-old", 30)]
+    assert calls[0][2] == calls[1][2] and before < calls[0][2] <= time.monotonic() + api.SEARCH_BUDGET
+    assert len(r["hits"]) == 40 and r["partial"] is True
+
+
+def test_a_new_search_stops_the_one_before(monkeypatch, tmp_path):
+    c, h, now = _history(monkeypatch, tmp_path)
+    stops = []
+    monkeypatch.setattr(api, "search_transcript", lambda path, query, limit=50, deadline=None, stop=None: (stops.append(stop), ([], False))[1])
+    c.get("/api/sessions/w9:p1/search?q=m2", headers=h)
+    first = stops[0]
+    assert not first.is_set()
+    c.get("/api/sessions/w9:p1/search?q=m3", headers=h)
+    assert first.is_set() and not stops[-1].is_set()

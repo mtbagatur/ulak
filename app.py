@@ -7,6 +7,7 @@ import os
 import re
 import secrets
 import sys
+import threading
 import time
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime
@@ -19,7 +20,8 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 
-from chat import claude_chat, claude_meters, claude_page, claude_path, earlier_conversations, detect_model, preview_from_screen, screen_chat, SPINNER, strip_ansi
+import chat as transcripts
+from chat import claude_chat, claude_meters, claude_page, claude_path, earlier_conversations, detect_model, search_transcript, preview_from_screen, screen_chat, SPINNER, strip_ansi
 from core import CSP, NotificationGate, tidy_details, bucket, build_push, clean_subscription, hidden_chars, push_topic, strip_jpeg, is_destructive, parse_approval, parse_codex_limits, parse_limits, parse_prompt, project_name, status_rank, slash_commands, changes
 from herdr_client import HerdrClient, HerdrError, HerdrUnavailable
 
@@ -1015,6 +1017,43 @@ async def history(pane: str, before: int | None = None, conversation: str = ""):
     except OSError:
         raise HTTPException(404, "No such conversation")
     return {"messages": messages, "start": start}
+
+
+SEARCH_BUDGET = 2.0  # seconds for every conversation of the folder together
+SEARCH_MIN, SEARCH_MAX, SEARCH_HITS = 2, 80, 50
+search_stop = threading.Event()
+
+
+def search_folder(path, cwd, query, stop):
+    """Search the open conversation, then the folder's earlier ones, until the hits or the time run out."""
+    deadline = time.monotonic() + SEARCH_BUDGET
+    hits, partial = [], False
+    for conversation, title, file in [("", "", path)] + [(c["id"], c["title"], path.parent / f"{c['id']}.jsonl") for c in earlier_conversations(path, cwd)]:
+        if len(hits) >= SEARCH_HITS:
+            break
+        try:
+            size = file.stat().st_size
+            found, cut = search_transcript(file, query, limit=SEARCH_HITS - len(hits), deadline=deadline, stop=stop)
+        except OSError:
+            continue
+        partial = partial or cut
+        hits += [{**hit, "conversation": conversation, "title": title, "near": not conversation and size - hit["offset"] <= transcripts.ANCHOR_BYTES} for hit in found]
+    return {"hits": hits, "partial": partial}
+
+
+@app.get("/api/sessions/{pane}/search")
+async def search(pane: str, q: str = ""):
+    """Where a word was said in this session's folder. The phone sends words, never a path; one search runs at a time."""
+    global search_stop
+    path, cwd = transcript_of(pane)
+    q = q.strip()
+    if not SEARCH_MIN <= len(q) <= SEARCH_MAX:
+        raise HTTPException(400, "Search for 2 to 80 characters")
+    if not path:
+        raise HTTPException(404, "No conversation to search")
+    search_stop.set()
+    search_stop = stop = threading.Event()
+    return await asyncio.to_thread(search_folder, path, cwd, q, stop)
 
 
 @app.post("/api/sessions/{pane}/prompt")

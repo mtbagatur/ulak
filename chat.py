@@ -8,6 +8,7 @@ Two sources:
 import difflib
 import json
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -401,6 +402,72 @@ def _parse(lines, upto=None):
                 if m.get("agent", {}).get("state") == "running":
                     m["agent"]["state"] = "unknown"  # a page of history cannot tell whether it ever came back
     return msgs, offsets, model
+
+
+SEARCH_CHUNK = 4_000_000  # a record is searched this much at a time, never whole
+_FOLD = str.maketrans("İIı", "iii")
+
+
+def fold(text):
+    """Lower case that keeps every character where it was, with the Turkish i's as one letter."""
+    return text.translate(_FOLD).lower()  # with İ gone, no character lowers to more than one
+
+
+def _snippet(text, at, end, around=60):
+    one = lambda s: re.sub(r"\s+", " ", s)
+    before, found, after = one(text[max(0, at - around):at]).lstrip(), one(text[at:end]), one(text[end:end + around]).rstrip()
+    return before + found + after, [len(before), len(before) + len(found)]
+
+
+def search_transcript(path, query, limit=50, deadline=None, stop=None):
+    """What the user and the assistant said that holds `query`, newest first -> (hits, whether it gave up before the start).
+
+    The file is read from its end a piece at a time. Tool calls, their output, harness notes and subagent lines are not searched."""
+    needle, hits = fold(query), []
+    if not needle:
+        return hits, False
+    # JSON writes these differently than they are typed; a raw line cannot be asked about them.
+    quick = not any(c in '"\\' or ord(c) < 32 for c in query)
+    plain = query.isascii()
+    with Path(path).open("rb") as f:
+        end = f.seek(0, 2)
+        window = SEARCH_CHUNK
+        while end > 0:
+            if deadline is not None and time.monotonic() > deadline or stop is not None and stop.is_set():
+                return hits, True
+            begin = max(0, end - window)
+            f.seek(begin)
+            data = f.read(end - begin)
+            first = 0
+            if begin:  # the first piece may be the end of a line that starts earlier; the next read takes it whole
+                first = data.find(b"\n") + 1
+                if not first or first == len(data):
+                    window *= 2  # one line wider than the window
+                    continue
+            lines, offset = [], begin + first
+            for piece in data[first:].split(b"\n"):
+                if piece:
+                    lines.append((offset, piece))
+                offset += len(piece) + 1
+            del data
+            for offset, piece in reversed(lines):
+                if stop is not None and stop.is_set():
+                    return hits, True
+                line = piece.decode("utf8", "replace")
+                if quick and needle not in fold(line) and (plain or "\\u" not in line):
+                    continue
+                for m in reversed(_parse([(offset, line)])[0]):
+                    if m["role"] not in ("user", "assistant"):
+                        continue
+                    at = fold(m["text"]).find(needle)
+                    if at < 0:
+                        continue
+                    snippet, where = _snippet(m["text"], at, at + len(needle))
+                    hits.append({"offset": offset, "end": min(offset + len(piece) + 1, end), "role": m["role"], "ts": m["ts"], "snippet": snippet, "at": where})
+                    if len(hits) >= limit:
+                        return hits, False
+            end, window = begin + first, SEARCH_CHUNK
+    return hits, False
 
 
 def claude_meters(path, tail_bytes=700_000):
