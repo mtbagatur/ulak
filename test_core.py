@@ -3160,13 +3160,13 @@ def test_search_finds_a_phrase_the_text_breaks_across_lines(tmp_path):
     assert search_transcript(path, "isgreen")[0] == [] and search_transcript(path, "green is")[0] == []
 
 
-def _said(role, text, sidechain=False):
+def _spoke(role, text, sidechain=False):
     content = text if role == "user" else [{"type": "text", "text": text}]
     return {"type": role, "isSidechain": sidechain, "message": {"role": role, "content": content}}
 
 
 def test_last_turn_names_the_last_thing_said_and_the_answer_after_it(tmp_path):
-    lines = [_said("user", "ilk"), _said("assistant", "eski yanıt"), _said("user", "  ikinci  "), _said("assistant", "bakıyorum"), _call(1, command="ls"), _answer(1), _said("assistant", "bitti\nULAK-DEVIR: yazildi")]
+    lines = [_spoke("user", "ilk"), _spoke("assistant", "eski yanıt"), _spoke("user", "  ikinci  "), _spoke("assistant", "bakıyorum"), _call(1, command="ls"), _answer(1), _spoke("assistant", "bitti\nULAK-DEVIR: yazildi")]
     path = _record(tmp_path, *lines)
     starts = [0]
     for line in lines:
@@ -3175,24 +3175,24 @@ def test_last_turn_names_the_last_thing_said_and_the_answer_after_it(tmp_path):
 
 
 def test_last_turn_has_no_answer_before_one_is_written(tmp_path):
-    turn = chat_module.last_turn(_record(tmp_path, _said("user", "ilk"), _said("assistant", "yanıt"), _said("user", "yeni")))
+    turn = chat_module.last_turn(_record(tmp_path, _spoke("user", "ilk"), _spoke("assistant", "yanıt"), _spoke("user", "yeni")))
     assert (turn["user_text"], turn["assistant_at"], turn["assistant_text"]) == ("yeni", -1, "")
-    assert chat_module.last_turn(_record(tmp_path, _said("assistant", "kimse sormadı"))) == {"user_at": -1, "user_text": "", "assistant_at": -1, "assistant_text": ""}
+    assert chat_module.last_turn(_record(tmp_path, _spoke("assistant", "kimse sormadı"))) == {"user_at": -1, "user_text": "", "assistant_at": -1, "assistant_text": ""}
 
 
 def test_last_turn_skips_sidechains_and_tool_results(tmp_path):
-    turn = chat_module.last_turn(_record(tmp_path, _said("user", "sor"), _said("assistant", "asıl yanıt"), _said("user", "yan iş", sidechain=True),
-                                         _said("assistant", "ULAK-DEVIR: yazildi", sidechain=True), _call(1, command="ls"), _answer(1)))
+    turn = chat_module.last_turn(_record(tmp_path, _spoke("user", "sor"), _spoke("assistant", "asıl yanıt"), _spoke("user", "yan iş", sidechain=True),
+                                         _spoke("assistant", "ULAK-DEVIR: yazildi", sidechain=True), _call(1, command="ls"), _answer(1)))
     assert (turn["user_text"], turn["assistant_text"]) == ("sor", "asıl yanıt")
 
 
 def test_last_turn_of_a_prompt_that_quotes_the_mark(tmp_path):
     import handoff
-    turn = chat_module.last_turn(_record(tmp_path, _said("user", "eski"), _said("assistant", "ULAK-DEVIR: yazildi"), _said("user", handoff.DEFAULT_WRITE)))
+    turn = chat_module.last_turn(_record(tmp_path, _spoke("user", "eski"), _spoke("assistant", "ULAK-DEVIR: yazildi"), _spoke("user", handoff.DEFAULT_WRITE)))
     assert turn["user_text"] == handoff.DEFAULT_WRITE and handoff.read_mark(turn["assistant_text"]) is None
 
 
 def test_a_typed_command_is_the_person_speaking(tmp_path):
     typed = {"type": "user", "message": {"role": "user", "content": "<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args></command-args>"}}
-    turn = chat_module.last_turn(_record(tmp_path, _said("user", "sor"), _said("assistant", "ULAK-DEVIR: yazildi"), typed))
+    turn = chat_module.last_turn(_record(tmp_path, _spoke("user", "sor"), _spoke("assistant", "ULAK-DEVIR: yazildi"), typed))
     assert turn["user_text"].startswith("/compact") and turn["assistant_at"] == -1
