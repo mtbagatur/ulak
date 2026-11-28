@@ -58,7 +58,7 @@ Read from each project's README on 27 November 2026, not from their code: "not d
 - **Pick HerdrChat** when you want a native app, a real terminal, subagent and workflow transcripts, an iPad layout, or several computers in one list.
 - **Pick ColliePWA** when you use tmux or zellij instead of Herdr, or want built-in voice input, themes and its durable-agent tools.
 - **Pick Ovis** when your phone cannot join a tailnet, or you want one app across desktop, phone and browser.
-- **Pick Ulak** when you want the phone to be able to answer and little else, every yes tied to the question you read, and code short enough to read before you trust it: about 5,600 lines of Python, JavaScript and CSS and four runtime dependencies.
+- **Pick Ulak** when you want the phone to be able to answer and little else, every yes tied to the question you read, and code short enough to read before you trust it: about 6,200 lines of Python, JavaScript and CSS and four runtime dependencies.
 
 What Ulak does not do: no terminal, one computer, one person, Herdr only. Conversations are fullest for Claude Code, where the transcript is read directly; other agents are read from the screen.
 
@@ -68,6 +68,7 @@ What Ulak does not do: no terminal, one computer, one person, Herdr only. Conver
   <img src="docs/screenshots/en/home.png" alt="Home: sessions grouped by what needs you, with usage limits on top" width="195">
   <img src="docs/screenshots/en/approval.png" alt="A session with an approval waiting under the conversation" width="195">
   <img src="docs/screenshots/en/reading.png" alt="A conversation: finished work folded into one line, a failed command left open, context and cache in the header" width="195">
+  <img src="docs/screenshots/en/handoff.png" alt="A session's meters with the automatic handoff switch: the note is written at minute 50 and the conversation cleared a few minutes later" width="195">
   <img src="docs/screenshots/en/changes.png" alt="Read-only view of the uncommitted changes in a session's folder" width="195">
   <img src="docs/screenshots/en/light.png" alt="The light theme" width="195">
   <br>
@@ -78,6 +79,7 @@ What Ulak does not do: no terminal, one computer, one person, Herdr only. Conver
 - **Read it like a chat.** Claude Code transcripts become messages with their headings, lists and tables, and code blocks you can copy with one tap. Subagents show as cards that say what they were asked and whether they are done.
 - **Work that went well folds away.** In a Claude Code conversation a turn's reads, edits and commands collapse into one line you can open, edits with their diff. Other agents keep no record Ulak can read this way, so theirs is shown as the text on their screen. A command that failed and a request you refused never fold; they stay in sight.
 - **Know how much room is left.** The header of a Claude conversation shows the context in use and how long the prompt cache still lives, both read from the transcript, how many subagents are still out, and a ring for the tightest usage limit. The same line is on the session's card on the home screen; a cache past its lifetime is called cold. Context and cache are Claude only; the Claude limit needs `limit_files`, Codex limits need no setup.
+- **Hand a conversation off before its cache runs cold.** Off by default; a switch on a Claude session's meter sheet turns it on for that session. Ten minutes before a one-hour prompt cache runs out, if the session is idle with an empty input box, nothing running and at least 80,000 tokens of context, Ulak asks the agent to write its handoff note. The agent may say no and give its reason; then nothing is cleared and the reason is in the notification list. Once the note is written, the card and the open session count down with Cancel beside the count. Unless you write to the session or tap Cancel within ten minutes, Ulak types `/clear`, names the conversation and asks the agent to carry on from the note. Every step is in the decision log under `ulak`. Ulak never answers an approval on its own, and a session that is working, asking or being typed into is left alone.
 - **See the pictures.** An image the conversation points at shows as a thumbnail and opens full screen. It is served under the same rules as any file in the session's folder; a picture from the web is never loaded.
 - **Answer questions and menus.** Single and multi-select questions, trust dialogs, and a small key bar (arrows, Esc, Enter, digits) when a prompt needs it. A short question with two to four plain options is answered from the card, without opening the session.
 - **Find what was said.** Search the open conversation and the folder's earlier ones for a word or phrase; a tap on a result opens the conversation at that message. Tool output is not searched.
@@ -149,7 +151,8 @@ Optional, in `.secrets/config.json` (untracked):
   "project_roots": ["~", "~/code"],
   "allowed_hosts": [],
   "min_work_seconds": 120,
-  "approval_timeout_minutes": 0
+  "approval_timeout_minutes": 0,
+  "auto_handoff": {"default": false, "min_tokens": 80000, "grace_seconds": 600}
 }
 ```
 
@@ -160,8 +163,12 @@ Optional, in `.secrets/config.json` (untracked):
 - `allowed_hosts`: extra host names Ulak answers to. `localhost`, `127.0.0.1`, names without a dot and `*.ts.net` already work; any other name gets 403.
 - `min_work_seconds`: a "finished" push is skipped when the turn took less than this (default 120).
 - `approval_timeout_minutes`: off by default (`0`), so an approval waits for you however long that takes. Set it and Ulak denies an approval nobody answered in that many minutes. It can only deny, only the exact prompt it has been timing, and each one is written to the decision log as a timeout. The clock restarts when Ulak restarts.
+- `auto_handoff.default`: `true` starts every Claude session with automatic handoff on; each can still be switched off on its meter sheet (default `false`).
+- `auto_handoff.min_tokens`: a conversation smaller than this is never asked for a note, because reading it cold costs less than cutting it (default 80000).
+- `auto_handoff.grace_seconds`: how long Ulak waits after the note is written before it clears the conversation (default 600, between 60 and 3600).
+- `auto_handoff.write_prompt`, `auto_handoff.continue_prompt`: your own wording for the two requests Ulak types, in any language: one line each, at most 2,000 characters, not starting with `/`. The first must tell the agent to end its answer with `ULAK-DEVIR: yazildi` when the note is written, or with `ULAK-DEVIR: kesme <reason>` when the conversation should not be cut. These two marks are how Ulak reads the answer and they do not change with the language. A text Ulak cannot use is replaced by the built-in one, and a line at startup says which.
 
-State (`.state/`: pins, notification history, the decision log) lives on the server, so every device sees the same view. The browser keeps only unsent drafts, the messages you sent until the conversation shows them, a copy of your pins, your quick replies, the chosen language and theme, and whether the idle group is open.
+State (`.state/`: pins, notification history, the decision log, where each session's automatic handoff stands) lives on the server, so every device sees the same view. The browser keeps only unsent drafts, the messages you sent until the conversation shows them, a copy of your pins, your quick replies, the chosen language and theme, and whether the idle group is open.
 
 ## Architecture
 
@@ -181,8 +188,9 @@ State (`.state/`: pins, notification history, the decision log) lives on the ser
 - `POST /api/sessions/{pane}/prompt`: send text (409 for a pane with no agent in it, as for `.../keys` and `/api/quick`). `POST /api/sessions/{pane}/upload`: raw file body (image, PDF or text), returns its server path. `GET /api/sessions/{pane}/file`: open a supported document inside that workspace. `POST /api/quick`: quick send to a configured pane (see Configuration). `GET/PUT /api/pins`: server-side pins, shared across devices.
 - `POST /api/sessions/{pane}/approve`: approve/always/deny, bound to the screen fingerprint (409 if it changed; destructive = two steps).
 - `POST /api/sessions/{pane}/choose`: pick a menu option (single/multi, trust dialog). `POST .../keys`: raw keys (Enter/approve keys refused on destructive prompts).
+- `PUT /api/sessions/{pane}/handoff`: turn automatic handoff on or off for one Claude session (`{on}`; 409 for any other tool). `POST .../handoff/cancel`: stop the handoff under way and leave the session as it is (409 when none is under way). A Claude session's card carries `handoff: {on, phase, due}`.
 - `POST /api/sessions/{pane}/close`: two-step close. `GET /api/projects`, `POST /api/sessions`: start a new session.
-- `GET /api/audit`: the decision log. `GET /api/events`: SSE (`ready`, `session`, `removed`, `receipt`). `POST /api/presence`: report whether a browser tab is visible. `GET /api/limits`: `{providers: [{id, label, updated, items: [{label, used, resets_at}]}]}`. `/api/push/*`: public key, subscribe, known (with the last delivery and the last refusal), lang, test (one notification to the asking device). `GET /api/config`: the quick-send label and the approval timeout. `GET /api/notifications`: the history of push notifications.
+- `GET /api/audit`: the decision log. `GET /api/events`: SSE (`ready`, `session`, `removed`, `receipt`). `POST /api/presence`: report whether a browser tab is visible. `GET /api/limits`: `{providers: [{id, label, updated, items: [{label, used, resets_at}]}]}`. `/api/push/*`: public key, subscribe, known (with the last delivery and the last refusal), lang, test (one notification to the asking device). `GET /api/config`: the quick-send label, the approval timeout, and the token threshold and wait of automatic handoff. `GET /api/notifications`: the history of push notifications.
 
 ## Tests
 

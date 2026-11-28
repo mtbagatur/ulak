@@ -34,7 +34,7 @@ STATE = ROOT / ".state"
 
 
 def load_config():
-    """Optional local config (gitignored): .secrets/config.json. Keys: rules_file, quick_targets, quick_label, limit_files, allowed_hosts."""
+    """Optional local config (gitignored): .secrets/config.json. Keys: rules_file, quick_targets, quick_label, limit_files, allowed_hosts, auto_handoff."""
     try:
         return json.loads((ROOT / ".secrets/config.json").read_text())
     except (OSError, ValueError):

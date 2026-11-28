@@ -69,7 +69,7 @@ def test_the_site_and_the_readme_say_the_same_day_and_the_readme_counts_the_code
     day = re.search(r"README on (\d+) November 2026", README)[1]
     assert f"on {day} November 2026" in (ROOT / "site/index.html").read_text()
     assert f"{day} Kasım 2026" in (ROOT / "site/tr/index.html").read_text()
-    files = ["app.py", "core.py", "chat.py", "herdr_client.py", *(f"web/{p.name}" for p in (ROOT / "web").iterdir() if p.suffix in (".js", ".css", ".html"))]
+    files = ["app.py", "core.py", "chat.py", "handoff.py", "herdr_client.py", *(f"web/{p.name}" for p in (ROOT / "web").iterdir() if p.suffix in (".js", ".css", ".html"))]
     lines = sum(len((ROOT / f).read_text().splitlines()) for f in files)
     said = int(re.search(r"about ([\d,]+) lines", README)[1].replace(",", ""))
     assert abs(lines - said) <= 250, f"the README says about {said} lines, the code has {lines}"
@@ -116,3 +116,26 @@ def test_the_readme_names_what_this_release_added():
     assert "card" in room and "cold" in room and "subagents" in room
     assert "from the card" in feature("Answer questions and menus.")
     assert "session record" in next(line for line in README.splitlines() if line.startswith("- **Your yes is bound"))
+
+
+def test_the_readme_lists_every_automatic_handoff_setting_and_no_other():
+    import handoff
+    read = set(handoff.settings({})) - {"warnings"}
+    config = section("Configuration")
+    assert set(re.findall(r"`auto_handoff\.([a-z_]+)`", config)) == read
+    block = json.loads(config.split("```json\n", 1)[1].split("```", 1)[0])
+    assert set(block["auto_handoff"]) <= read and handoff.settings(block) == handoff.settings({})  # the example is the defaults
+    assert f"`{handoff.WRITTEN}`" in config and f"`{handoff.REFUSED} <reason>`" in config
+    feature = next(line for line in README.splitlines() if line.startswith("- **Hand a conversation off before its cache runs cold.**"))
+    for said in ("Off by default", "Claude", "Cancel", f"{handoff.MIN_TOKENS:,}", "never answers an approval"):
+        assert said in feature, said
+
+
+def test_the_security_page_says_what_ulak_types_on_its_own():
+    import handoff
+    page = (ROOT / "SECURITY.md").read_text()
+    rule = next(p for p in page.split("\n\n") if p.startswith("**What Ulak types on its own"))
+    for said in ("off by default", "four fixed texts", "`/clear`", "`/rename", "never answers an approval", "sends no keys", "nothing an agent wrote", "empty", "idle",
+                 f"{handoff.MIN_TOKENS:,} tokens", f"{handoff.REASON_MAX} characters", "plain text", "as `ulak`", "Earlier conversations", "does not read the handoff note"):
+        assert said in rule, said
+    assert 'audit(pane, "auto-handoff"' in APP and "send_keys" not in APP.split("async def handoff_notify", 1)[1].split("\ndef read_audit", 1)[0]
