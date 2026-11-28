@@ -72,6 +72,9 @@ const I18N = {
 const ERR_TR = {
   'Unsupported file type': 'Desteklenmeyen dosya türü', 'File too large (15 MB max)': 'Dosya çok büyük (en çok 15 MB)',
   'No agent is running in this pane; Ulak does not type into a plain shell': 'Bu panelde ajan yok; Ulak düz kabuğa yazmaz',
+  'Automatic handoff is for Claude sessions only': 'Otomatik devir yalnız Claude oturumlarında',
+  'No handoff is under way': 'Süren bir devir yok',
+  'Say on or off': 'Açık mı kapalı mı, belirt',
   'Wrong position': 'Geçersiz konum', 'No such conversation': 'Böyle bir sohbet yok', 'No conversation to search': 'Aranacak sohbet yok', 'Search for 2 to 80 characters': 'Arama 2 ile 80 karakter arasında olmalı',
   'Session is closed or unknown': 'Oturum kapalı ya da bilinmiyor', 'Message is empty': 'Mesaj boş', 'Quick-send target not found': 'Hedef oturum bulunamadı',
   'Session is no longer waiting for approval': 'Oturum artık onay beklemiyor', 'No recognised approval on screen; use the terminal': 'Ekranda tanınan bir onay yok; terminali kullan',

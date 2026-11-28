@@ -22,6 +22,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 
 import chat as transcripts
+import handoff
 from chat import claude_chat, claude_meters, claude_page, claude_path, earlier_conversations, detect_model, search_transcript, preview_from_screen, screen_chat, SPINNER, strip_ansi
 from core import CSP, FULL_MAX, NotificationGate, full_candidates, full_command, show_hidden, tidy_details, bucket, build_push, card_options, clean_subscription, hidden_chars, push_topic, strip_jpeg, is_destructive, parse_approval, parse_codex_limits, parse_limits, parse_prompt, project_name, status_rank, slash_commands, changes
 from herdr_client import HerdrClient, HerdrError, HerdrUnavailable
@@ -56,6 +57,10 @@ def approval_timeout(config):
 
 
 APPROVAL_TIMEOUT = approval_timeout(CONFIG)
+HANDOFF = handoff.settings(CONFIG)
+for _warning in HANDOFF["warnings"]:
+    print(f"auto_handoff: {_warning}", flush=True)
+handoffs = {}       # pane -> where its automatic handoff stands (handoff.fresh says what is kept)
 waiting = {}        # pane -> (prompt fingerprint, when Ulak first saw it waiting)
 sessions = {}       # pane -> card (what the phone shows)
 raw_agents = {}     # pane -> last agent record from herdr
@@ -134,6 +139,7 @@ class Action(BaseModel):
     cwd: str | None = None
     tool: str | None = None
     model: str | None = None
+    on: bool | None = None
 
 
 class Presence(BaseModel):
@@ -201,6 +207,45 @@ def touch_since(pane, status):
         since[pane] = {"status": status, "ts": time.time(), "known": old is not None}
         save_since()
     return since[pane]["ts"] if since[pane].get("known", True) else None
+
+
+def load_handoffs():
+    """Bring back where each session's handoff stood. An entry that is not whole is left out: an off switch is the safe reading."""
+    shape = handoff.fresh(False, "", "")
+    for pane, st in read_json(STATE / "handoff.json", dict).items():
+        if (isinstance(st, dict) and set(st) == set(shape) and all(type(st[key]) in ((int, float) if type(want) is float else (type(want),)) for key, want in shape.items())
+                and st["phase"] in ("armed", "asked", "written", "held")):
+            handoffs[pane] = st
+
+
+def save_handoffs():
+    try:
+        save_file(STATE / "handoff.json", json.dumps(handoffs), mode=0o600)
+    except OSError:
+        pass
+
+
+def conversation_of(pane):
+    return str((raw_agents.get(pane, {}).get("agent_session") or {}).get("value") or "")
+
+
+def handoff_state(pane, card):
+    """Where a Claude session's automatic handoff stands, or None for any other tool. A pane id that now names another terminal starts over."""
+    if card.get("agent") != "claude":
+        return None
+    st = handoffs.get(pane)
+    if not st or st["born"] != card.get("born", ""):
+        st = handoffs[pane] = handoff.fresh(HANDOFF["default"], card.get("born", ""), conversation_of(pane))
+    return st
+
+
+def handoff_card(st):
+    return {"on": st["on"], "phase": st["phase"], "due": st["due"] if st["phase"] == "written" else None}
+
+
+def forget_handoff(pane):
+    if handoffs.pop(pane, None) is not None:
+        save_handoffs()
 
 
 async def broadcast(event):
@@ -421,6 +466,8 @@ async def make_card(agent, force=False):
                            "roles": [o["role"] for o in p["options"]], "options": card_options(p)}
     discard_changed_confirmation(pane, (card["pending"] or {}).get("fingerprint"))
     card["active"] = active.get(pane, 0)
+    if st := handoff_state(pane, card):
+        card["handoff"] = handoff_card(st)
     return card
 
 
@@ -471,6 +518,8 @@ async def load_all():
         pushed.pop(pane, None)
         work_started.pop(pane, None)
         active.pop(pane, None)
+    for pane in set(handoffs) - set(raw_agents):
+        forget_handoff(pane)
     sem = asyncio.Semaphore(6)
 
     async def one(pane):
@@ -487,6 +536,7 @@ async def load_all():
 
 async def initialize():
     load_since()
+    load_handoffs()
     prune_uploads()
     try:
         # Subscribe to lifecycle events immediately; the first HTTP snapshot loads
@@ -554,6 +604,7 @@ async def handle_event(msg):
         pushed.pop(pane, None)
         work_started.pop(pane, None)
         active.pop(pane, None)
+        forget_handoff(pane)
         pane_ids.discard(pane)
         await resubscribe()
         await broadcast({"type": "removed", "pane": pane})
@@ -590,9 +641,10 @@ def status_seen(pane, status, now):
 async def sweep():
     """One event lost on the way would leave a question unannounced, so now and then ask Herdr what is really there.
 
-    Only while someone could hear of it: an open phone or a push subscription.
+    Only while someone could hear of it, or something is left to do with nobody there: an open phone, a push subscription,
+    a session whose automatic handoff is on.
     """
-    if not subscribers and not read_subs():
+    if not subscribers and not read_subs() and not HANDOFF["default"] and not any(st["on"] for st in handoffs.values()):
         return
     before = {pane: item.get("status") for pane, item in sessions.items()}
     try:
@@ -1126,7 +1178,47 @@ async def prompt(pane: str, action: Action):
 
 @app.get("/api/config")
 async def config():
-    return {"quick_label": QUICK_LABEL if QUICK_TARGETS else "", "approval_timeout_minutes": APPROVAL_TIMEOUT / 60}
+    return {"quick_label": QUICK_LABEL if QUICK_TARGETS else "", "approval_timeout_minutes": APPROVAL_TIMEOUT / 60,
+            "auto_handoff": {"min_tokens": HANDOFF["min_tokens"], "grace_seconds": HANDOFF["grace_seconds"]}}
+
+
+async def handoff_changed(pane, st):
+    """Keep a session's new handoff state, put it on the card and tell open phones."""
+    handoffs[pane] = st
+    save_handoffs()
+    card = sessions[pane]
+    card["handoff"] = handoff_card(st)
+    await broadcast({"type": "session", "session": card})
+    return card
+
+
+def handoff_of(pane):
+    card = must_exist(pane)
+    st = handoff_state(pane, card) if pane in sessions else None
+    if st is None:
+        raise HTTPException(409, "Automatic handoff is for Claude sessions only")
+    return st
+
+
+@app.put("/api/sessions/{pane}/handoff")
+async def set_handoff(pane: str, action: Action):
+    """Turn automatic handoff on or off for one session. Turning it off drops whatever was under way."""
+    st = handoff_of(pane)
+    if action.on is None:
+        raise HTTPException(400, "Say on or off")
+    if action.on != st["on"]:
+        st = handoff.fresh(action.on, st["born"], conversation_of(pane))
+    return await handoff_changed(pane, st)
+
+
+@app.post("/api/sessions/{pane}/handoff/cancel")
+async def cancel_handoff(pane: str, request: Request):
+    """Stop the handoff that is under way. The session is left alone until a person writes to it again."""
+    st = handoff_of(pane)
+    if st["phase"] not in ("asked", "written"):
+        raise HTTPException(409, "No handoff is under way")
+    audit(pane, "auto-handoff", "cancelled", login=who(request))
+    return await handoff_changed(pane, {**st, "phase": "held"})
 
 
 @app.post("/api/quick")

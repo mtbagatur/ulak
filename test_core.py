@@ -3196,3 +3196,118 @@ def test_a_typed_command_is_the_person_speaking(tmp_path):
     typed = {"type": "user", "message": {"role": "user", "content": "<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args></command-args>"}}
     turn = chat_module.last_turn(_record(tmp_path, _spoke("user", "sor"), _spoke("assistant", "ULAK-DEVIR: yazildi"), typed))
     assert turn["user_text"].startswith("/compact") and turn["assistant_at"] == -1
+
+
+# --- automatic handoff: the switch, its state and the card ---
+import handoff
+
+
+def _switch(monkeypatch, tmp_path, default=False, agent="claude"):
+    fake, c, h = _active(monkeypatch, tmp_path, agent=agent)
+    monkeypatch.setattr(api, "handoffs", {})
+    monkeypatch.setattr(api, "HANDOFF", handoff.settings({"auto_handoff": {"default": default}}))
+    api.raw_agents["w9:p1"]["terminal_id"] = "term_1"
+    _card()
+    return fake, c, h
+
+
+OFF = {"on": False, "phase": "armed", "due": None}
+
+
+def test_handoff_is_off_until_turned_on_and_survives_a_restart(monkeypatch, tmp_path):
+    _, c, h = _switch(monkeypatch, tmp_path)
+    assert api.sessions["w9:p1"]["handoff"] == OFF
+    r = c.put("/api/sessions/w9:p1/handoff", headers=h, json={"on": True})
+    assert r.status_code == 200 and r.json()["handoff"] == {**OFF, "on": True} and api.sessions["w9:p1"]["handoff"]["on"] is True
+    assert (api.STATE / "handoff.json").stat().st_mode & 0o777 == 0o600
+    api.handoffs.clear()
+    api.load_handoffs()
+    assert (api.handoffs["w9:p1"]["on"], api.handoffs["w9:p1"]["conversation"]) == (True, "old-session") and _card()["handoff"]["on"] is True
+    assert c.put("/api/sessions/w9:p1/handoff", headers=h, json={"on": False}).json()["handoff"] == OFF
+    assert c.put("/api/sessions/w9:p1/handoff", headers=h, json={}).status_code == 400
+    assert c.put("/api/sessions/w0:p0/handoff", headers=h, json={"on": True}).status_code == 404
+
+
+def test_turning_handoff_on_twice_keeps_what_is_under_way(monkeypatch, tmp_path):
+    _, c, h = _switch(monkeypatch, tmp_path, default=True)
+    api.handoffs["w9:p1"].update(phase="written", due=5000.0)
+    assert c.put("/api/sessions/w9:p1/handoff", headers=h, json={"on": True}).json()["handoff"] == {"on": True, "phase": "written", "due": 5000.0}
+
+
+def test_a_damaged_handoff_file_turns_nothing_on(monkeypatch, tmp_path):
+    _switch(monkeypatch, tmp_path)
+    good = handoff.fresh(True, "b", "c")
+    (api.STATE / "handoff.json").write_text(json.dumps({"w1:p1": good, "w2:p1": {"on": True}, "w3:p1": {**good, "phase": "gone"}, "w4:p1": "on", "w5:p1": {**good, "due": "soon"}}))
+    api.handoffs.clear()
+    api.load_handoffs()
+    assert api.handoffs == {"w1:p1": good}
+    (api.STATE / "handoff.json").write_text("[1, 2")
+    api.handoffs.clear()
+    api.load_handoffs()
+    assert api.handoffs == {}
+
+
+def test_config_default_turns_handoff_on_for_claude_only(monkeypatch, tmp_path):
+    _, c, h = _switch(monkeypatch, tmp_path, default=True)
+    assert api.sessions["w9:p1"]["handoff"] == {**OFF, "on": True}
+    assert c.get("/api/config", headers=h).json()["auto_handoff"] == {"min_tokens": 80000, "grace_seconds": 600.0}
+    _, c, h = _switch(monkeypatch, tmp_path, default=True, agent="codex")
+    assert "handoff" not in api.sessions["w9:p1"] and "w9:p1" not in api.handoffs
+    assert c.put("/api/sessions/w9:p1/handoff", headers=h, json={"on": True}).status_code == 409
+    assert c.post("/api/sessions/w9:p1/handoff/cancel", headers=h).status_code == 409
+
+
+def test_a_reused_pane_id_does_not_inherit_the_handoff_switch(monkeypatch, tmp_path):
+    _, c, h = _switch(monkeypatch, tmp_path)
+    c.put("/api/sessions/w9:p1/handoff", headers=h, json={"on": True})
+    api.handoffs["w9:p1"].update(phase="written", due=5000.0)
+    api.raw_agents["w9:p1"]["terminal_id"] = "term_2"
+    assert _card()["handoff"] == OFF and api.handoffs["w9:p1"]["born"] == api.sessions["w9:p1"]["born"]
+
+
+def test_handoff_cancel_holds_and_is_logged(monkeypatch, tmp_path):
+    _, c, h = _switch(monkeypatch, tmp_path, default=True)
+    assert c.post("/api/sessions/w9:p1/handoff/cancel", headers=h).status_code == 409  # nothing is under way
+    for phase in ("asked", "written"):
+        api.handoffs["w9:p1"].update(phase=phase, due=5000.0)
+        r = c.post("/api/sessions/w9:p1/handoff/cancel", headers=h)
+        assert r.status_code == 200 and r.json()["handoff"] == {"on": True, "phase": "held", "due": None}
+        last = api.read_audit()[-1]
+        assert (last["decision"], last["outcome"], last["login"], last["pane"]) == ("auto-handoff", "cancelled", "user@example.test", "w9:p1")
+        assert json.loads((api.STATE / "handoff.json").read_text())["w9:p1"]["phase"] == "held"
+    assert c.post("/api/sessions/w9:p1/handoff/cancel", headers=h).status_code == 409 and len(api.read_audit()) == 2
+
+
+def test_sweep_runs_for_a_session_with_handoff_on_though_nobody_listens(monkeypatch, tmp_path):
+    _herd(monkeypatch, tmp_path, "w1:p1")
+    monkeypatch.setattr(api, "read_subs", lambda: [])
+    monkeypatch.setattr(api, "HANDOFF", handoff.settings({}))
+    monkeypatch.setattr(api, "handoffs", {})
+    asyncio.run(api.sweep())
+    assert api.sessions == {}
+    api.handoffs["w1:p1"] = handoff.fresh(False, "b", "c")
+    asyncio.run(api.sweep())
+    assert api.sessions == {}
+    api.handoffs["w1:p1"]["on"] = True
+    asyncio.run(api.sweep())
+    assert list(api.sessions) == ["w1:p1"]
+
+
+def test_sweep_runs_when_handoff_is_on_by_default(monkeypatch, tmp_path):
+    _herd(monkeypatch, tmp_path, "w1:p1")
+    monkeypatch.setattr(api, "read_subs", lambda: [])
+    monkeypatch.setattr(api, "HANDOFF", handoff.settings({"auto_handoff": {"default": True}}))
+    monkeypatch.setattr(api, "handoffs", {})
+    asyncio.run(api.sweep())
+    assert list(api.sessions) == ["w1:p1"]
+
+
+def test_a_closed_pane_forgets_its_handoff(monkeypatch, tmp_path):
+    _, c, h = _switch(monkeypatch, tmp_path)
+    c.put("/api/sessions/w9:p1/handoff", headers=h, json={"on": True})
+    asyncio.run(api.handle_event({"event": "pane.closed", "data": {"pane_id": "w9:p1"}}))
+    assert api.handoffs == {} and json.loads((api.STATE / "handoff.json").read_text()) == {}
+    _herd(monkeypatch, tmp_path, "w1:p1")
+    monkeypatch.setattr(api, "handoffs", {"w1:p1": handoff.fresh(True, "b", "c"), "w7:p7": handoff.fresh(True, "b", "c")})
+    asyncio.run(api.load_all())
+    assert list(api.handoffs) == ["w1:p1"]
