@@ -22,7 +22,7 @@ from pydantic import BaseModel
 
 import chat as transcripts
 from chat import claude_chat, claude_meters, claude_page, claude_path, earlier_conversations, detect_model, search_transcript, preview_from_screen, screen_chat, SPINNER, strip_ansi
-from core import CSP, NotificationGate, tidy_details, bucket, build_push, clean_subscription, hidden_chars, push_topic, strip_jpeg, is_destructive, parse_approval, parse_codex_limits, parse_limits, parse_prompt, project_name, status_rank, slash_commands, changes
+from core import CSP, NotificationGate, tidy_details, bucket, build_push, card_options, clean_subscription, hidden_chars, push_topic, strip_jpeg, is_destructive, parse_approval, parse_codex_limits, parse_limits, parse_prompt, project_name, status_rank, slash_commands, changes
 from herdr_client import HerdrClient, HerdrError, HerdrUnavailable
 
 ROOT = Path(__file__).parent
@@ -362,7 +362,7 @@ async def make_card(agent, force=False):
         card["pending"] = {"kind": p["kind"], "question": p["question"], "details": "\n".join(p["details"].splitlines()[-4:]),
                            "destructive": p["kind"] == "approval" and is_destructive(p["details"], RULES),
                            "fingerprint": p["fingerprint"], "cut": p.get("cut", False), "hidden": p.get("hidden", []),
-                           "roles": [o["role"] for o in p["options"]]}
+                           "roles": [o["role"] for o in p["options"]], "options": card_options(p)}
     discard_changed_confirmation(pane, (card["pending"] or {}).get("fingerprint"))
     card["active"] = active.get(pane, 0)
     return card

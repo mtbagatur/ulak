@@ -34,6 +34,9 @@ APPROVAL = {
 }
 DESTRUCTIVE = {**APPROVAL, "fingerprint": "destructive-approval", "details": "git push origin example", "destructive": True}
 OTHER_APPROVAL = {**APPROVAL, "fingerprint": "second-approval", "details": "pytest -q test_web.py"}
+CHOICE = {"kind": "choice", "question": "Which database?", "details": "", "fingerprint": "first-choice", "destructive": False,
+          "cut": False, "hidden": [], "roles": ["choice"] * 3, "multi": False, "header": "",
+          "options": [{"n": n, "label": label} for n, label in enumerate(["SQLite", "Postgres", "MySQL"], 1)]}
 
 
 def _png(width, height):
@@ -233,6 +236,15 @@ class Handler(SimpleHTTPRequestHandler):
         if self.path == "/api/sessions/fake%3Ap1/prompt":
             assert api.respond.wait(8), "test did not release the held message"
             self.json({"detail": "Herdr is down"}, 503) if api.fail_prompt else self.json({"ok": True})
+            return
+        if self.path == "/api/sessions/fake%3Ap1/choose":
+            api.requests.append(body)
+            assert api.respond.wait(8), "test did not release the held choice"
+            if body["fingerprint"] != api.approval["fingerprint"]:
+                self.json({"detail": "The screen changed; refresh"}, 409)
+            else:
+                api.replies.append(("choose", body["n"], body["fingerprint"]))
+                self.json({"ok": True, "next": None})
             return
         if self.path != "/api/sessions/fake%3Ap1/approve":
             self.send_error(404)
@@ -2556,3 +2568,70 @@ def test_search_says_when_older_was_not_read_and_when_nothing_matched(api_fixtur
     api.search_status = 404
     look_for(chrome, "armut")
     chrome.wait("document.querySelector('#sheet .empty')?.textContent === 'This session has closed.'")
+
+
+def card_labels(chrome):
+    return chrome.js("[...document.querySelectorAll('.card .c-act.choices [data-n]')].map(b => b.textContent)")
+
+
+def test_card_choice_is_sent_once_from_the_card(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_prompt(CHOICE)
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelectorAll('.card .c-act.choices [data-n]').length === 3")
+    assert card_labels(chrome) == ["SQLite", "Postgres", "MySQL"]
+    assert chrome.js("document.querySelector('.card .c-cmd').textContent") == CHOICE["question"]
+    api.respond.clear()
+    chrome.click(".card [data-n='2']")
+    chrome.wait("document.querySelector('.card [data-n=\"3\"]').getAttribute('aria-disabled') === 'true'")
+    chrome.click(".card [data-n='3']")  # ignored while the first answer is on its way
+    api.respond.set()
+    chrome.wait("document.querySelector('#toasts .ok')?.textContent === 'Reply sent'")
+    api.publish_session("working")
+    chrome.wait("document.querySelector('.card [data-n]') === null")
+    assert api.replies == [("choose", 2, CHOICE["fingerprint"])]
+    assert len(api.requests) == 1
+    assert chrome.js("document.querySelector('#session').hidden")  # answering does not open the session
+
+
+def test_card_choice_refused_for_a_changed_screen_shows_the_new_question(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_prompt(CHOICE)
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelectorAll('.card .c-act.choices [data-n]').length === 3")
+    changed = {**CHOICE, "fingerprint": "second-choice", "question": "Which cache?",
+               "options": [{"n": 1, "label": "Redis"}, {"n": 2, "label": "None"}]}
+    api.approval, api.cards = changed, [card("blocked", pending=changed)]  # the server sees the change before the browser does
+    chrome.click(".card [data-n='1']")
+    chrome.wait("document.querySelector('#toasts .err')?.textContent === 'The screen changed; refresh'")
+    chrome.wait("document.querySelector('.card .c-cmd')?.textContent === 'Which cache?'")
+    assert card_labels(chrome) == ["Redis", "None"]
+    assert not api.replies
+
+
+def test_card_choice_that_does_not_fit_has_no_buttons_on_the_card(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_prompt({**CHOICE, "options": []})
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelector('.card .c-cmd')?.textContent === 'Which database?'")
+    assert chrome.js("document.querySelector('.card .c-act') === null")
+
+
+@pytest.mark.parametrize("theme", ["dark", "light"])
+def test_card_choice_with_four_long_labels_fits_320_px(api_fixture, theme):
+    chrome, api, url = api_fixture
+    labels = ["W" * 40, "Supercalifragilisticexpialidocious-ğüşiöç", "İstanbul'da bir seçenek daha 🙂🙂🙂🙂🙂🙂"[:40], "m i " * 10]
+    api.publish_prompt({**CHOICE, "question": "Q" * 160, "roles": ["choice"] * 4,
+                        "options": [{"n": n, "label": label[:40]} for n, label in enumerate(labels, 1)]})
+    chrome.resize(320, 640)
+    chrome.cdp("Page.navigate", url=url)
+    chrome.js(f"localStorage.theme = {json.dumps(theme)}")
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelectorAll('.card .c-act.choices [data-n]').length === 4")
+    assert chrome.js("""(() => {
+        const card = document.querySelector('.card').getBoundingClientRect();
+        const buttons = [...document.querySelectorAll('.card [data-n]')];
+        const command = document.querySelector('.card .c-cmd');
+        return document.documentElement.scrollWidth <= 320 && command.scrollHeight <= command.clientHeight
+            && buttons.every(b => { const r = b.getBoundingClientRect(); return r.left >= card.left && r.right <= card.right && r.height >= 44 && b.scrollWidth <= b.clientWidth && b.scrollHeight <= b.clientHeight; });
+    })()""")

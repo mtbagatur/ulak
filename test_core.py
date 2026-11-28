@@ -2745,3 +2745,47 @@ def test_a_new_search_stops_the_one_before(monkeypatch, tmp_path):
     assert not first.is_set()
     c.get("/api/sessions/w9:p1/search?q=m3", headers=h)
     assert first.is_set() and not stops[-1].is_set()
+
+
+from core import card_options
+
+SHORT_CHOICE = {"kind": "choice", "multi": False, "question": "Devam edilsin mi?", "details": "", "hidden": [],
+                "options": [{"n": n, "label": label, "desc": "", "role": "choice", "keys": [str(n), "Enter"]}
+                            for n, label in enumerate(["Evet", "Hayır", "Sonra"], 1)]}
+
+
+def _choice(change):
+    p = {**SHORT_CHOICE, "options": [dict(o) for o in SHORT_CHOICE["options"]]}
+    extra = lambda n: {"n": n, "label": f"Seçenek {n}", "desc": "", "role": "choice", "keys": [str(n), "Enter"]}
+    if change in ("approval", "trust"):
+        p["kind"] = change
+    elif change == "multi":
+        p["multi"] = True
+    elif change == "five":
+        p["options"] += [extra(4), extra(5)]
+    elif change == "one":
+        p["options"] = p["options"][:1]
+    elif change == "long_label":
+        p["options"][1]["label"] = "x" * 41
+    elif change == "desc":
+        p["options"][2]["desc"] = "Yarın yeniden sorar"
+    elif change == "hidden":
+        p["hidden"] = ["U+200B"]
+    elif change == "long_question":
+        p["question"] = "s" * 161
+    elif change == "four_lines":
+        p["question"] = "a\nb\nc\nd"
+    return p
+
+
+@pytest.mark.parametrize("change", ["approval", "trust", "multi", "five", "one", "long_label", "desc", "hidden", "long_question", "four_lines"])
+def test_card_shows_no_choice_it_cannot_show_whole(change):
+    assert card_options(_choice(change)) == []
+
+
+def test_card_offers_a_short_single_choice():
+    assert card_options(SHORT_CHOICE) == [{"n": 1, "label": "Evet"}, {"n": 2, "label": "Hayır"}, {"n": 3, "label": "Sonra"}]
+    edge = _choice("none")
+    edge["question"], edge["options"][0]["label"] = "s" * 160, "x" * 40
+    edge["options"].append({"n": 4, "label": "Dört", "desc": "", "role": "choice", "keys": ["4", "Enter"]})
+    assert [o["n"] for o in card_options(edge)] == [1, 2, 3, 4]

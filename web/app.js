@@ -72,7 +72,7 @@ async function act(btn, fn, okText) {
 function setPaneActionsBusy(pane, busy) {
   const card = [...document.querySelectorAll('.card')].find(el => el.dataset.key === pane);
   const buttons = [
-    ...(card ? card.querySelectorAll('[data-act]') : []),
+    ...(card ? card.querySelectorAll('[data-act], [data-n]') : []),
     ...(state.current === pane ? $('#promptZone').querySelectorAll('button') : []),
     ...(state.current === pane ? $('#keybar').querySelectorAll('button') : []),
     ...(state.current === pane ? $('#sheet').querySelectorAll('[data-confirm-approval]') : []),
@@ -168,13 +168,15 @@ function cardHtml(s) {
   const shown = p ? (p.details || p.question || '') : '';
   const unseen = p && p.hidden && p.hidden.length ? p.hidden.join(', ') : '';
   const inline = p && p.kind === 'approval' && !p.destructive && !p.cut && !unseen && p.roles.includes('approve') && shown.length <= 160 && shown.split('\n').length <= 3;
+  // A short single choice is answered from the card; the server sends its options only when the whole question fits.
+  const choices = p && p.kind === 'choice' && !unseen && p.options?.length ? p.options : [];
   const stateText = s.bucket === 'idle' && s.status === 'done' ? (ago(s.since) ? t('doneAgo', {t: ago(s.since)}) : statusText('done')) : [statusText(s.status), s.status === 'unknown' ? '' : ago(s.since)].filter(Boolean).join(' · ');
-  const body = p ? `<pre class="c-cmd${inline ? ' full-command' : ''}">${esc(p.details || p.question)}</pre>${unseen ? `<div class="hidden-note">${esc(t('hiddenShort', {c: unseen}))}</div>` : ''}` : (s.preview ? `<div class="c-prev">${esc(s.preview)}</div>` : '');
+  const body = p ? `<pre class="c-cmd${inline ? ' full-command' : choices.length ? ' full-command asked' : ''}">${esc(p.details || p.question)}</pre>${unseen ? `<div class="hidden-note">${esc(t('hiddenShort', {c: unseen}))}</div>` : ''}` : (s.preview ? `<div class="c-prev">${esc(s.preview)}</div>` : '');
   const pinned = isPinned(s);
   return `<button class="card-open" type="button" aria-label="${esc(t('openSession', {project: s.project}))}"></button><div class="c-top"><span class="proj">${esc(s.project)}</span>${dup && s.workspace_label ? `<span class="ws">${esc(s.workspace_label)}</span>` : ''}<span class="chip ${esc(s.agent)}">${esc(TOOLNAME[s.agent] || s.agent)}</span><span class="model">${esc(s.model)}</span><button class="pin ${pinned ? 'on' : ''}" data-pin aria-label="${esc(t(pinned ? 'unpin' : 'pin'))}" aria-pressed="${pinned}">${icon('pin', 16)}</button></div>
     <div class="state"><span class="d"></span><span>${s.bucket === 'working' && stateText.startsWith(statusText('working')) ? `<span class="blink">${esc(statusText('working'))}</span>${esc(stateText.slice(statusText('working').length))}` : esc(stateText)}</span></div>
     ${s.title ? `<div class="c-title">${esc(s.title)}</div>` : ''}${p && p.destructive ? `<div class="seals">${icon('seal', 14)}${icon('seal', 14)}<span>${esc(t('destructive'))}</span></div>` : ''}${body}
-    ${inline ? `<div class="c-act"><button class="deny" data-act="deny">${esc(t('deny'))}</button><button class="seal" data-act="approve">${icon('seal', 17)}${esc(t('approve'))}</button></div>` : ''}${isSealed(s.pane_id, p) ? stampHtml(p) : ''}`;
+    ${inline ? `<div class="c-act"><button class="deny" data-act="deny">${esc(t('deny'))}</button><button class="seal" data-act="approve">${icon('seal', 17)}${esc(t('approve'))}</button></div>` : ''}${choices.length ? `<div class="c-act choices">${choices.map(o => `<button data-n="${+o.n}">${esc(o.label)}</button>`).join('')}</div>` : ''}${isSealed(s.pane_id, p) ? stampHtml(p) : ''}`;
 }
 function patch(container, items, keyOf, htmlOf, make) {
   const existing = new Map([...container.children].map(el => [el.dataset.key, el]));
@@ -238,6 +240,8 @@ $('#groups').addEventListener('click', e => {
   if (pb) { e.stopPropagation(); const s = state.sessions.get(card.dataset.key); if (s) { const pane = card.dataset.key, k = pinKey(s); pins.has(k) ? pins.delete(k) : pins.add(k); renderHome(); savePins(); requestAnimationFrame(() => [...document.querySelectorAll('.card')].find(el => el.dataset.key === pane)?.querySelector('[data-pin]')?.focus({preventScroll: true})); } return; }
   const pane = card.dataset.key, a = e.target.closest('[data-act]');
   if (a) { e.stopPropagation(); inlineDecide(pane, a.dataset.act, a); return; }
+  const c = e.target.closest('[data-n]');
+  if (c) { e.stopPropagation(); cardChoose(pane, +c.dataset.n, c); return; }
   go(pane);
 });
 async function inlineDecide(pane, decision, btn) {
@@ -254,6 +258,16 @@ async function inlineDecide(pane, decision, btn) {
       if (r?.confirm_required) toast(t('reviewInSession'), 'err');
       loadList();
     }
+  } finally { unlock(); }
+}
+async function cardChoose(pane, n, btn) {
+  const s = state.sessions.get(pane); if (!s || !s.pending) return;
+  const view = state.view, fingerprint = s.pending.fingerprint;
+  const unlock = beginPaneAction(pane); if (!unlock) return;
+  try {
+    const r = await act(btn, () => api(`/api/sessions/${encodeURIComponent(pane)}/choose`, {n, fingerprint}));
+    if (r?.ok) await watchApprovalReply(pane, fingerprint, view);
+    else loadList();
   } finally { unlock(); }
 }
 

@@ -217,6 +217,16 @@ def parse_prompt(text, agent="claude"):
     return p
 
 
+def card_options(p):
+    """The options a session's card can offer: only a short single choice that fits whole, else none."""
+    options = p.get("options") or []
+    question = p.get("question", "")
+    fits = (p.get("kind") == "choice" and not p.get("multi") and 2 <= len(options) <= 4 and not p.get("hidden")
+            and len(question) <= 160 and len(question.splitlines()) <= 3
+            and all(len(o["label"]) <= 40 and not o.get("desc") for o in options))
+    return [{"n": o["n"], "label": o["label"]} for o in options] if fits else []
+
+
 def read_prompt(text, agent="claude"):
     """What a blocked pane is asking, in a form the phone can render.
 

@@ -116,11 +116,14 @@ button.loading::after{content:"";position:absolute;left:calc(50% - 8px);top:calc
 .c-prev{font-size:13px;color:var(--muted);margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
 .c-cmd{margin:10px 0 0;padding:9px 11px;border-radius:9px;background:var(--bg2);font:12.5px/1.4 var(--mono);color:var(--strong);white-space:pre-wrap;word-break:break-all;max-height:84px;overflow:hidden}
 .c-cmd.full-command{max-height:none}
+.c-cmd.asked{font:inherit;font-size:14.5px;line-height:1.4;word-break:normal;overflow-wrap:anywhere}
 /* A command that does not fit fades out, so it never reads as the whole of it. Three whole lines stay untouched. */
 .c-cmd:not(.full-command){-webkit-mask-image:linear-gradient(#000 62px,#0000 84px);mask-image:linear-gradient(#000 62px,#0000 84px)}
 .c-act{display:flex;gap:8px;margin-top:12px}
 .c-act button{flex:1;padding:10px}
 .c-act button.loading{pointer-events:auto}
+.c-act.choices{flex-direction:column}
+.c-act.choices button{flex:none;min-height:44px;text-align:left;padding:10px 12px;overflow-wrap:anywhere}
 .empty{padding:40px 24px;text-align:center;color:var(--muted)}
 /* The list is fully faded by the time it reaches the buttons; the fade itself lets taps through. */
 .dock{z-index:2;display:flex;gap:10px;padding:24px 12px calc(10px + var(--safe-b));background:linear-gradient(transparent,var(--bg) 24px);position:absolute;left:0;right:0;bottom:0;pointer-events:none}
