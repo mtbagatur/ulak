@@ -73,3 +73,40 @@ def test_the_site_and_the_readme_say_the_same_day_and_the_readme_counts_the_code
     lines = sum(len((ROOT / f).read_text().splitlines()) for f in files)
     said = int(re.search(r"about ([\d,]+) lines", README)[1].replace(",", ""))
     assert abs(lines - said) <= 250, f"the README says about {said} lines, the code has {lines}"
+
+
+def test_the_security_page_gives_the_long_command_rule_with_the_numbers_the_code_uses():
+    import core
+    page = (ROOT / "SECURITY.md").read_text()
+    rule = next(p for p in page.split("\n\n") if p.startswith("**A command that is not all there"))
+    assert f"at least {core.FULL_MIN_SHOWN} characters" in rule and f"{core.FULL_MAX // 1024} KB" in rule
+    for said in ("session record", "exactly one", "built again", '"always allow" is refused', "can only be denied", "not on the card"):
+        assert said in rule, said
+    shown = "x" * core.FULL_MIN_SHOWN
+    call = lambda command: {"tool": "Bash", "command": command}
+    assert core.full_command(shown, [call(shown + " tail")]) and not core.full_command(shown[1:], [call(shown + " tail")])
+    assert not core.full_command(shown, [call(shown + " a"), call(shown + " b")]) and not core.full_command(shown, [call(shown + "y" * core.FULL_MAX)])
+
+
+def test_the_security_page_gives_the_limits_of_a_choice_on_the_card():
+    import core
+    page = (ROOT / "SECURITY.md").read_text()
+    rule = next(p for p in page.split("\n\n") if p.startswith("**A question is answered from the card"))
+    ask = lambda n=4, label=40, question=160, **more: core.card_options({"kind": "choice", "question": "q" * question, "options": [{"n": i, "label": "l" * label} for i in range(1, n + 1)], **more})
+    assert ask() and not ask(n=5) and not ask(n=1) and not ask(label=41) and not ask(question=161) and not ask(multi=True) and not ask(hidden=["U+200B"])
+    for said in ("two to four", "40 characters", "160 characters", "three lines", "one choice", "fingerprint"):
+        assert said in rule, said
+
+
+def test_the_readme_names_what_this_release_added():
+    import core
+    feature = lambda start: next(line for line in README.splitlines() if line.startswith(f"- **{start}"))
+    assert "earlier ones" in feature("Find what was said.")
+    assert "Try again" in feature("A message that did not leave is not lost.") and "never sent again by itself" in feature("A message that did not leave")
+    assert "12" in feature("Short answers of your own.") and "this phone" in feature("Short answers of your own.")
+    slash = feature("The agent's own slash commands.")
+    assert "opens a menu" in slash and "/exit" in slash and any(kind == "ends" and name == "/exit" for name, kind in core.BUILTIN_SLASH["claude"])
+    room = feature("Know how much room is left.")
+    assert "card" in room and "cold" in room and "subagents" in room
+    assert "from the card" in feature("Answer questions and menus.")
+    assert "session record" in next(line for line in README.splitlines() if line.startswith("- **Your yes is bound"))

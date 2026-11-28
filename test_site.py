@@ -215,3 +215,13 @@ def test_each_page_plays_the_recording_in_its_own_language(out):
     for page, ref in recordings.items():
         assert ((out / page).parent / ref).read_bytes()[:6] == b"GIF89a", page
     assert (out / "demo.gif").read_bytes() != (out / "demo-tr.gif").read_bytes()
+
+
+def test_the_demo_cards_say_context_and_cache_like_the_real_ones(served):
+    chrome, url, seen = served
+    chrome.resize(1280, 900)
+    chrome.cdp("Page.navigate", url=url + "/")
+    chrome.wait("document.querySelector('.phone iframe')?.contentDocument.querySelectorAll('.card').length === 6")
+    lines = "[...document.querySelector('.phone iframe').contentDocument.querySelectorAll('.card .c-meters')].map(m => m.textContent)"
+    chrome.wait(f"{lines}.length > 0")
+    assert any(line.startswith("Context 124k · Cache ~4") for line in chrome.js(lines)), chrome.js(lines)  # 19 minutes into an hour, to the minute

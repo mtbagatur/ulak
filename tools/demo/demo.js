@@ -125,7 +125,7 @@
   const streams = new Set();
   const emit = message => streams.forEach(s => s.ready && s.onmessage?.({data: JSON.stringify(localise(message))}));
   const find = pane => sessions.find(s => s.pane_id === pane);
-  const view = ({hint, ...s}) => ({...s, bucket: s.status === 'done' && now() - s.since > 300 ? 'idle' : s.status});  // done is news for five minutes
+  const view = ({hint, ...s}) => ({...s, meters: METERS[s.pane_id] || {}, bucket: s.status === 'done' && now() - s.since > 300 ? 'idle' : s.status});  // done is news for five minutes
   function set(s, patch) {
     const was = s.status;
     Object.assign(s, patch);
