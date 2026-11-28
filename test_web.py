@@ -62,6 +62,7 @@ class FakeAPI:
         self.limits = []
         self.push_tests = []
         self.uploads = []
+        self.files = []
         self.push_test_reply = {"ok": True, "code": 201}
         self.messages = [{"role": "assistant", "text": "Example answer"}]
         self.source = "transcript"
@@ -223,6 +224,7 @@ class Handler(SimpleHTTPRequestHandler):
             data = self.rfile.read(int(self.headers["Content-Length"]))
             kind = self.headers["Content-Type"]
             api.uploads.append((kind, data[:4]))
+            api.files.append(data)
             self.json({"ok": True, "path": f"/tmp/up-{len(api.uploads)}", "bytes": len(data), **({"meta": "kept"} if kind == "image/heic" else {"meta": "removed"} if kind == "image/jpeg" else {})})
             return
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
@@ -3233,3 +3235,24 @@ def test_the_one_answer_to_a_cut_command_stays_in_view_with_the_keyboard_up(api_
     chrome.wait("document.querySelector('#promptZone [data-d=deny]') !== null")
     fits = "(() => { const z = document.querySelector('#promptZone'), d = z.querySelector('[data-d=deny]').getBoundingClientRect(), p = z.querySelector('pre').getBoundingClientRect(); return [d.bottom <= document.querySelector('#composer').getBoundingClientRect().top, z.scrollHeight <= z.clientHeight + 1, p.height >= 36, document.querySelector('#messages').getBoundingClientRect().height > 0]; })()"
     wait_for(lambda: chrome.js(fits) == [True, True, True, True], f"Deny in view: {chrome.js(fits)}", timeout=3)
+
+
+def test_the_measuring_strip_sends_what_it_measured_to_the_machine_and_not_the_conversation(api_fixture):
+    chrome, api, url = api_fixture
+    api.messages = [{"role": "assistant", "text": "Nobody else reads this answer"}]
+    open_first(chrome, url + "?debug=1")
+    chrome.js("document.body.insertAdjacentHTML('beforeend', '<div id=wide class=\"probe one\" style=\"position:fixed;left:0;top:0;width:2000px;height:1px\">secret words</div>')")
+    chrome.js("window.dispatchEvent(new ErrorEvent('error', {message: 'boom at line 7'}))")
+    chrome.click("#debugSend")
+    wait_for(lambda: api.files, "the report to arrive")
+    assert api.uploads[0][0] == "text/plain"
+    report = api.files[0].decode()
+    for said in ("vv.h=", "standalone=false", "ua=", "view=", "dpr=", "scheme=", "div#wide.probe.one", "boom at line 7", "#composer "):
+        assert said in report, said
+    assert "Nobody else reads" not in report and "secret words" not in report and "Example" not in report
+    chrome.wait("document.querySelector('#debugSend').textContent === 'sent: up-1'")
+    api.files.clear()
+    chrome.cdp("Page.navigate", url=url)  # without the strip there is no button and nothing is sent
+    chrome.wait("document.querySelector('.card-open') !== null")
+    assert chrome.js("document.querySelector('#debugSend') === null") and not api.files
+

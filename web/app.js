@@ -1423,6 +1423,9 @@ if (window.visualViewport) {
     // Measured on iPhone (?debug=1, Safari tab): visualViewport already ends above the URL pill and ^ v done bar, so no reserve is needed
     document.documentElement.style.setProperty('--vvh', visualViewport.height + 'px'); window.scrollTo(0, 0); const b = $('#messages'); if (!$('#session').hidden && document.activeElement === ta) b.scrollTop = b.scrollHeight; };
   let debugOn = false;
+  const errs = [];  // the last script errors, for the report the strip can send
+  const noteErr = text => { errs.push(`${new Date().toISOString().slice(11, 19)} ${String(text).slice(0, 300)}`); if (errs.length > 20) errs.shift(); };
+  addEventListener('error', e => noteErr(e.message || 'error')); addEventListener('unhandledrejection', e => noteErr(`rejected: ${e.reason && e.reason.message || e.reason}`));
   const startDebug = () => { if (debugOn) return; debugOn = true;  // on-screen metrics for diagnosing keyboard gaps
     const d = document.createElement('pre');
     d.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;margin:0;padding:4px 6px;font:11px/1.3 monospace;background:#000c;color:#0f0;pointer-events:none;white-space:pre-wrap';
@@ -1437,6 +1440,30 @@ if (window.visualViewport) {
       `safe t/r/b/l=${cs.paddingTop}/${cs.paddingRight}/${cs.paddingBottom}/${cs.paddingLeft} standalone=${navigator.standalone === true || matchMedia('(display-mode: standalone)').matches} scrollY=${scrollY.toFixed(0)} cls=${de.className}\n` +
       `docH=${de.scrollHeight} html.h=${de.getBoundingClientRect().height.toFixed(0)} fixedBottom=${fx.getBoundingClientRect().bottom.toFixed(0)} dock.bottom=${dk ? dk.getBoundingClientRect().bottom.toFixed(0) : '-'}`; };
     visualViewport.addEventListener('resize', dbg); visualViewport.addEventListener('scroll', dbg); document.addEventListener('focusin', () => setTimeout(dbg, 300)); setInterval(dbg, 500); dbg();
+    // A home-screen app cannot be looked at from the machine, so the strip can send what it measured there: sizes, boxes and
+    // element names, never the text on the screen. It goes the way an attached file goes and lands in the upload folder.
+    const send = document.createElement('button'); send.id = 'debugSend'; send.type = 'button'; send.textContent = 'send report';
+    send.style.cssText = 'position:fixed;right:4px;top:calc(env(safe-area-inset-top) + 64px);z-index:99999;padding:6px 10px;font:12px/1.3 monospace;background:#000c;color:#0f0;border:1px solid #0f0;border-radius:6px';
+    document.body.appendChild(send);
+    const name = el => el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + [...el.classList].map(c => '.' + c).join('');
+    const box = el => { const r = el.getBoundingClientRect(); return `${r.left.toFixed(0)},${r.top.toFixed(0)} ${r.width.toFixed(0)}x${r.height.toFixed(0)}`; };
+    const report = () => { dbg(); const de = document.documentElement, out = [d.textContent,
+        `ua=${navigator.userAgent}`,
+        `view=${$('#session').hidden ? 'home' : 'session'} dpr=${devicePixelRatio} inner=${innerWidth}x${innerHeight} screen=${screen.width}x${screen.height} scheme=${matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'} theme=${de.dataset.theme || '-'} lang=${de.lang} worker=${navigator.serviceWorker && navigator.serviceWorker.controller ? 'yes' : 'no'} online=${navigator.onLine} focus=${document.activeElement ? name(document.activeElement) : '-'}`,
+        '', 'boxes (left,top widthxheight):'];
+      for (const sel of ['#home .top', '#home .dock', '#list', '#session .top', '#messages', '#receipt', '#promptZone', '#keybar', '#chips', '#composer', '#message', '#sheet', '#toasts']) { const el = $(sel); out.push(`${sel} ${el && el.getClientRects().length ? box(el) : 'not drawn'}`); }
+      const drawn = [...document.body.querySelectorAll('*')].filter(el => el !== d && el !== send && el.getClientRects().length);
+      const wide = drawn.filter(el => { const r = el.getBoundingClientRect(); return r.right > innerWidth + 1 || r.left < -1; });
+      const cut = drawn.filter(el => el.scrollWidth > el.clientWidth + 1 && getComputedStyle(el).overflowX !== 'visible');
+      out.push('', `past the side edges (${wide.length}):`, ...wide.slice(0, 30).map(el => `${name(el)} ${box(el)}`));
+      out.push('', `wider inside than outside (${cut.length}):`, ...cut.slice(0, 30).map(el => `${name(el)} ${box(el)} inner=${el.scrollWidth}`));
+      out.push('', `script errors (${errs.length}):`, ...errs);
+      return out.join('\n') + '\n'; };
+    send.onclick = async () => { const pane = state.current || [...state.sessions.keys()][0];  // the upload path wants a living session
+      if (!pane) { send.textContent = 'no session to send through'; return; }
+      const body = new Blob([report()], {type: 'text/plain'}); send.textContent = 'sending';
+      try { const res = await fetch(`/api/sessions/${encodeURIComponent(pane)}/upload`, {method: 'POST', headers: {'Content-Type': 'text/plain'}, body}); const got = await res.json().catch(() => ({}));
+        send.textContent = res.ok ? `sent: ${String(got.path).split('/').pop()}` : `refused: ${res.status}`; } catch { send.textContent = 'offline'; } };
   };
   if (/[?&]debug=1/.test(location.search)) startDebug();
   { let taps = []; document.addEventListener('pointerdown', () => { const n = Date.now(); taps = taps.filter(x => n - x < 2000); taps.push(n); if (taps.length >= 6) { taps = []; startDebug(); } }); }  // 6 quick taps enable the strip (home-screen app has no URL bar)
