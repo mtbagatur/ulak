@@ -3168,3 +3168,18 @@ def test_card_meters_minute_moves_without_asking_for_the_list_again(api_fixture)
     chrome.js("state.skew += 3600")
     chrome.wait(f"{CARD_METERS} === 'Context 124k · Cache cold'")
     assert not api.list_started.is_set()
+
+
+@pytest.mark.parametrize("lang", ["en", "tr"])
+def test_the_one_answer_to_a_cut_command_stays_in_view_with_the_keyboard_up(api_fixture, lang):
+    # a phone with a notch and the keyboard open leaves about 480 px; Deny is the only answer and must not need a scroll
+    chrome, api, url = api_fixture
+    chrome.resize(390, 480)
+    chrome.cdp("Emulation.setSafeAreaInsetsOverride", insets={"top": 47, "bottom": 0})
+    chrome.cdp("Page.navigate", url=url)
+    chrome.js(f"localStorage.setItem('lang', {json.dumps(lang)})")
+    api.publish_prompt({**FULL, "approvable": False, "full": None, "cut_reason": "no_match", "fingerprint": "cut-short"})
+    open_first(chrome, url)
+    chrome.wait("document.querySelector('#promptZone [data-d=deny]') !== null")
+    fits = "(() => { const z = document.querySelector('#promptZone'), d = z.querySelector('[data-d=deny]').getBoundingClientRect(), p = z.querySelector('pre').getBoundingClientRect(); return [d.bottom <= document.querySelector('#composer').getBoundingClientRect().top, z.scrollHeight <= z.clientHeight + 1, p.height >= 36, document.querySelector('#messages').getBoundingClientRect().height > 0]; })()"
+    wait_for(lambda: chrome.js(fits) == [True, True, True, True], f"Deny in view: {chrome.js(fits)}", timeout=3)
