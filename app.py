@@ -838,8 +838,78 @@ async def handoff_view(pane):
             "box_empty": handoff.box_empty(screen), "conversation": conversation_of(pane), **turn}
 
 
+HANDOFF_CLEAR_WAIT = 10   # seconds /clear may take to start a new conversation
+HANDOFF_RENAME_WAIT = 5   # seconds a cleared session may take to show an empty box, and /rename to show its name
+HANDOFF_POLL = 0.5
+
+
+async def handoff_until(pane, seconds, ok):
+    """Ask Herdr about the pane until `ok(agent record)` holds -> that record, or None when the time ran out."""
+    for _ in range(max(1, round(seconds / HANDOFF_POLL)) + 1):
+        try:
+            info = await client.call("agent.get", {"target": pane})
+            named = info.get("agent") if isinstance(info.get("agent"), dict) else info
+            if await ok(named):
+                return named
+        except HerdrError:
+            pass
+        await asyncio.sleep(HANDOFF_POLL)
+    return None
+
+
 async def handoff_clean(pane):
-    return False
+    """Clear the conversation, name the new one and tell it to carry on from the note. Each text is typed only into an idle session
+    with an empty box and no question up, looked at again just before; the first thing that is not as expected ends it there."""
+    st = handoffs[pane]
+    mine = lambda: handoffs.get(pane) is st  # a Cancel or the switch replaces the state: from then on nothing more is typed
+
+    async def stop(reason, kind="stopped", at=""):
+        if mine():
+            await handoff_changed(pane, {**st, "phase": "held"})
+        audit(pane, "auto-handoff", "failed", login="ulak", reason=reason)
+        await handoff_notify(pane, kind, at)
+        return False
+
+    async def ready(named):
+        if (named.get("agent_status") or named.get("status")) not in ("idle", "done"):
+            return False
+        screen = (await client.call("agent.read", {"target": pane, "source": "visible"})).get("read", {}).get("text", "")
+        return handoff.box_empty(screen) and not parse_prompt(screen, "claude")
+
+    with exclusive_prompt_reply(pane):
+        view = await handoff_view(pane)
+        if not mine():
+            return False
+        if view is None or not handoff.can_clean(st, view):
+            return await stop("changed before clearing", "failed")
+        await must_be_agent(pane)
+        await client.call("agent.prompt", {"target": pane, "text": "/clear"})
+        audit(pane, "auto-handoff", "clear", login="ulak", command="/clear", plain=True)
+
+        async def cleared(named):
+            return ((named.get("agent_session") or {}).get("value") or st["conversation"]) != st["conversation"]
+        if not await handoff_until(pane, HANDOFF_CLEAR_WAIT, cleared) or not mine():
+            return await stop("clear", at="/clear")
+        await current_agent(pane)  # the card moves to the new conversation
+        if not await handoff_until(pane, HANDOFF_RENAME_WAIT, ready) or not mine():
+            return await stop("before rename", at="/rename")
+        name = handoff.session_name(raw_agents.get(pane, {}).get("cwd"), time.time())
+        await client.call("agent.prompt", {"target": pane, "text": f"/rename {name}"})
+        audit(pane, "auto-handoff", "rename", login="ulak", command=f"/rename {name}", plain=True)
+
+        async def renamed(named):
+            return named.get("terminal_title_stripped") == name
+        if not await handoff_until(pane, HANDOFF_RENAME_WAIT, renamed) or not mine():
+            return await stop("rename", at="/rename")
+        if not await handoff_until(pane, HANDOFF_RENAME_WAIT, ready) or not mine():
+            return await stop("before continue", at="continue")
+        await client.call("agent.prompt", {"target": pane, "text": HANDOFF["continue_prompt"]})
+        audit(pane, "auto-handoff", "continue", login="ulak", command=HANDOFF["continue_prompt"], plain=True)
+        touch_active(pane, time.time())
+        if mine():
+            await handoff_changed(pane, handoff.fresh(True, st["born"], conversation_of(pane)))
+        await handoff_notify(pane, "cleaned")
+        return True
 
 
 async def handoff_look(pane, st, now):

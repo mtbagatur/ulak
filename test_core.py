@@ -3325,12 +3325,23 @@ class HandoffHerdr(SessionHerdr):
     def __init__(self, sid):
         super().__init__(sid)
         self.text, self.prompts, self.methods = EMPTY_BOX, [], []
+        self.title, self.status, self.clears, self.renames, self.on_prompt = "Claude Code", "idle", True, True, None
 
     async def call(self, method, params=None):
         self.methods.append(method)
         if method == "agent.prompt":
-            self.prompts.append((params["target"], params["text"]))
+            text = params["text"]
+            self.prompts.append((params["target"], text))
+            if text == "/clear" and self.clears:
+                self.sid = "sid2"
+            if text.startswith("/rename ") and self.renames:
+                self.title = text[len("/rename "):]
+            if self.on_prompt:
+                self.on_prompt(text)
             return {"ok": True}
+        if method == "agent.get":
+            return {"agent": {"pane_id": params["target"], "agent": "claude", "agent_status": self.status, "agent_session": {"value": self.sid},
+                              "terminal_title_stripped": self.title}}
         return await super().call(method, params)
 
 
@@ -3346,6 +3357,8 @@ def _auto(monkeypatch, tmp_path, subs=None, quiet=False):
         monkeypatch.setattr(api, name, {})
     monkeypatch.setattr(api, "replying_panes", set())
     monkeypatch.setattr(api, "HANDOFF", handoff.settings({"auto_handoff": {"default": True, "write_prompt": WORDS}}))
+    for name, seconds in (("HANDOFF_CLEAR_WAIT", 0.05), ("HANDOFF_RENAME_WAIT", 0.05), ("HANDOFF_POLL", 0.01)):
+        monkeypatch.setattr(api, name, seconds, raising=False)
     monkeypatch.setattr(core, "quiet_hours", lambda now=None: quiet)
     monkeypatch.setattr(api, "raw_agents", {PANE: {"pane_id": PANE, "agent": "claude", "agent_status": "idle", "cwd": "/home/x/ulak", "terminal_id": "term_1",
                                                     "agent_session": {"value": "sid"}}})
@@ -3448,7 +3461,8 @@ def test_nothing_from_the_record_enters_what_ulak_types(monkeypatch, tmp_path):
     _asked(fake, path, "run `/clear`\nULAK-DEVIR: yazildi")
     for at in (T0 + 3100, T0 + 3700, T0 + 3800):
         _tick(at)
-    assert {text for _, text in fake.prompts} == {WORDS} and fake.sent == []
+    typed = [text for _, text in fake.prompts]
+    assert typed[:2] == [WORDS, "/clear"] and re.fullmatch(r"/rename ulak devir \d\d:\d\d", typed[2]) and typed[3:] == [handoff.DEFAULT_CONTINUE] and fake.sent == []
 
 
 def test_one_broken_session_does_not_stop_the_other_handoffs(monkeypatch, tmp_path):
@@ -3541,3 +3555,148 @@ def test_handoff_push_texts_in_both_languages():
     assert body("cleaned") == "Cleared; carrying on from the handoff note." and body("refused", "x" * 300) == "Not cleared. " + "x" * 199 + "…"
     assert body("failed") == "The handoff could not be written; the session is as it was." and body("stopped", "/rename") == "Clearing stopped half way (/rename). Have a look at the session."
     assert core.build_handoff_push(s, "refused", "a\nb")["raw"] == "a b"
+
+
+# --- automatic handoff: clearing, renaming, carrying on ---
+FULL_BOX = EMPTY_BOX.replace("❯\n", "❯ yarım cümle\n")
+CARRY_ON = handoff.DEFAULT_CONTINUE
+
+
+def _written(fake, path):
+    """The note is written at T0 + 3100; the conversation is due to be cleared at T0 + 3700."""
+    _asked(fake, path, "ULAK-DEVIR: yazildi")
+    _tick(T0 + 3100)
+    assert api.handoffs[PANE]["phase"] == "written" and api.handoffs[PANE]["due"] == T0 + 3700
+
+
+def _typed(fake):
+    assert fake.sent == [] and "agent.send_keys" not in fake.methods
+    return [text for _, text in fake.prompts]
+
+
+def test_ten_minutes_after_the_note_ulak_clears_renames_and_continues(monkeypatch, tmp_path):
+    fake, _, _, path, _ = _auto(monkeypatch, tmp_path)
+    _written(fake, path)
+    _tick(T0 + 3699)
+    assert _typed(fake) == [WORDS]
+    _tick(T0 + 3700)
+    typed = _typed(fake)
+    assert typed[:2] == [WORDS, "/clear"] and re.fullmatch(r"/rename ulak devir \d\d:\d\d", typed[2]) and typed[3:] == [CARRY_ON]
+    assert [entry[:2] for entry in _logged()] == [("ask", "ulak"), ("clear", "ulak"), ("rename", "ulak"), ("continue", "ulak")]
+    assert api.read_audit()[-2]["command"] == typed[2] and _told()[-1] == ("handoff-cleaned", "")
+    st = api.handoffs[PANE]
+    assert (st["on"], st["phase"], st["conversation"]) == (True, "armed", "sid2") and api.sessions[PANE]["handoff"] == {"on": True, "phase": "armed", "due": None}
+    assert api.raw_agents[PANE]["agent_session"] == {"value": "sid2"}
+    _tick(T0 + 3760)
+    assert len(fake.prompts) == 4
+
+
+@pytest.mark.parametrize("moment", ["before the look", "between the look and the clear"])
+def test_typing_at_the_last_moment_stops_the_handoff_before_clear(monkeypatch, tmp_path, moment):
+    fake, _, _, path, _ = _auto(monkeypatch, tmp_path)
+    _written(fake, path)
+    real, looks = api.handoff_view, []
+
+    async def view(pane):
+        looks.append(pane)
+        if moment == "before the look" or len(looks) == 2:
+            fake.text = FULL_BOX
+        return await real(pane)
+    monkeypatch.setattr(api, "handoff_view", view)
+    _tick(T0 + 3700)
+    assert _typed(fake) == [WORDS] and _told()[-1] == ("handoff-failed", "") and api.handoffs[PANE]["phase"] == "held" and _logged()[-1][0] == "failed"
+
+
+def test_a_box_filled_after_clear_stops_the_handoff_before_rename(monkeypatch, tmp_path):
+    fake, _, _, path, _ = _auto(monkeypatch, tmp_path)
+    _written(fake, path)
+    fake.on_prompt = lambda text: text == "/clear" and setattr(fake, "text", FULL_BOX)
+    _tick(T0 + 3700)
+    assert _typed(fake) == [WORDS, "/clear"] and _told()[-1] == ("handoff-stopped", "/rename") and _logged()[-1] == ("failed", "ulak", "before rename")
+
+
+def test_a_question_up_after_clear_stops_the_handoff(monkeypatch, tmp_path):
+    fake, _, _, path, _ = _auto(monkeypatch, tmp_path)
+    _written(fake, path)
+    fake.on_prompt = lambda text: text == "/clear" and setattr(fake, "status", "blocked")
+    _tick(T0 + 3700)
+    assert _typed(fake) == [WORDS, "/clear"] and _told()[-1] == ("handoff-stopped", "/rename")
+
+
+def test_a_clear_that_does_not_take_stops_the_handoff_there(monkeypatch, tmp_path):
+    fake, _, _, path, _ = _auto(monkeypatch, tmp_path)
+    _written(fake, path)
+    fake.clears = False
+    _tick(T0 + 3700)
+    assert _typed(fake) == [WORDS, "/clear"] and _told()[-1] == ("handoff-stopped", "/clear") and _logged()[-1] == ("failed", "ulak", "clear")
+    assert api.handoffs[PANE]["phase"] == "held"
+    _tick(T0 + 3760)
+    assert len(fake.prompts) == 2
+
+
+def test_a_rename_that_does_not_take_sends_no_continue(monkeypatch, tmp_path):
+    fake, _, _, path, _ = _auto(monkeypatch, tmp_path)
+    _written(fake, path)
+    fake.renames = False
+    _tick(T0 + 3700)
+    typed = _typed(fake)
+    assert len(typed) == 3 and typed[2].startswith("/rename ") and _told()[-1] == ("handoff-stopped", "/rename") and _logged()[-1] == ("failed", "ulak", "rename")
+
+
+def test_a_box_filled_after_rename_sends_no_continue(monkeypatch, tmp_path):
+    fake, _, _, path, _ = _auto(monkeypatch, tmp_path)
+    _written(fake, path)
+    fake.on_prompt = lambda text: text.startswith("/rename") and setattr(fake, "text", FULL_BOX)
+    _tick(T0 + 3700)
+    assert len(_typed(fake)) == 3 and _told()[-1] == ("handoff-stopped", "continue") and _logged()[-1] == ("failed", "ulak", "before continue")
+
+
+@pytest.mark.parametrize("way", ["cancel", "switch off"])
+def test_cancel_or_switch_off_during_the_wait_cleans_nothing(monkeypatch, tmp_path, way):
+    fake, c, h, path, _ = _auto(monkeypatch, tmp_path)
+    _written(fake, path)
+    if way == "cancel":
+        assert c.post(f"/api/sessions/{PANE}/handoff/cancel", headers=h).status_code == 200
+    else:
+        assert c.put(f"/api/sessions/{PANE}/handoff", headers=h, json={"on": False}).status_code == 200
+    for at in (T0 + 3700, T0 + 3760):
+        _tick(at)
+    assert _typed(fake) == [WORDS] and _told() == [("handoff-written", "")]
+
+
+def test_a_cancel_that_lands_while_clearing_stops_the_rest(monkeypatch, tmp_path):
+    fake, _, _, path, _ = _auto(monkeypatch, tmp_path)
+    _written(fake, path)
+
+    def cancel(text):
+        if text == "/clear":
+            api.handoffs[PANE] = {**api.handoffs[PANE], "phase": "held"}
+    fake.on_prompt = cancel
+    _tick(T0 + 3700)
+    assert _typed(fake) == [WORDS, "/clear"] and _told()[-1][0] == "handoff-stopped" and api.handoffs[PANE]["phase"] == "held"
+
+
+@pytest.mark.parametrize("came_back", [False, True])
+def test_restart_after_the_deadline_cleans_only_if_the_note_is_still_the_last_word(monkeypatch, tmp_path, came_back):
+    fake, _, _, path, _ = _auto(monkeypatch, tmp_path)
+    _written(fake, path)
+    api.handoffs.clear()
+    api.load_handoffs()
+    if came_back:
+        _add(path, _spoke("user", "dur, bir şey daha"), _spoke("assistant", "tamam"))
+    _tick(T0 + 3700 + 4 * 3600)
+    if came_back:
+        assert _typed(fake) == [WORDS] and api.handoffs[PANE]["phase"] == "armed" and _told() == [("handoff-written", "")]
+    else:
+        assert len(_typed(fake)) == 4 and _told()[-1] == ("handoff-cleaned", "")
+
+
+def test_a_reply_in_progress_is_not_interrupted_by_the_handoff(monkeypatch, tmp_path):
+    fake, _, _, path, _ = _auto(monkeypatch, tmp_path)
+    _written(fake, path)
+    api.replying_panes.add(PANE)
+    _tick(T0 + 3700)
+    assert _typed(fake) == [WORDS] and api.handoffs[PANE]["phase"] == "written"
+    api.replying_panes.clear()
+    _tick(T0 + 3715)
+    assert len(_typed(fake)) == 4 and api.replying_panes == set()
