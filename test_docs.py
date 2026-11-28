@@ -107,6 +107,11 @@ def test_the_readme_names_what_this_release_added():
     assert "12" in feature("Short answers of your own.") and "this phone" in feature("Short answers of your own.")
     slash = feature("The agent's own slash commands.")
     assert "opens a menu" in slash and "/exit" in slash and any(kind == "ends" and name == "/exit" for name, kind in core.BUILTIN_SLASH["claude"])
+    for name in sorted({name for rows in core.BUILTIN_SLASH.values() for name, kind in rows if kind == "ends"}):
+        assert f"`{name}`" in slash, f"{name} asks first and the README does not name it"
+    assert "every command" not in slash and "list kept in Ulak" in slash  # the built-in list is a dated copy, not read from the terminal
+    seals = feature("Commands that leave a mark need two seals.")
+    assert "can only be denied" not in seals and "session record" in seals  # the bullet after next says when a cut command can be approved
     room = feature("Know how much room is left.")
     assert "card" in room and "cold" in room and "subagents" in room
     assert "from the card" in feature("Answer questions and menus.")
