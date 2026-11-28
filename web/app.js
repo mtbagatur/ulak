@@ -7,7 +7,7 @@ const put = (el, prop, value) => { if (el[prop] !== value) el[prop] = value; };
 const putHtml = (el, html) => { if (el._h !== html) { el.innerHTML = html; el._h = html; } };
 const statusText = s => t('st_' + (['blocked', 'working', 'done', 'idle'].includes(s) ? s : 'unknown'));
 const TOOLNAME = {claude: 'Claude', codex: 'Codex', agy: 'agy', terminal: 'Terminal'};
-const store = {get(k){try{return localStorage.getItem(k)}catch{return null}}, set(k,v){try{localStorage.setItem(k,v)}catch{}}};
+const store = {get(k){try{return localStorage.getItem(k)}catch{return null}}, set(k,v){try{localStorage.setItem(k,v)}catch{}}, del(k){try{localStorage.removeItem(k)}catch{}}, keys(){try{return Object.keys(localStorage)}catch{return []}}};
 
 const state = {sessions: new Map(), current: null, view: 0, chatHash: '', rendered: 0, prompt: null, idleOpen: store.get('idleOpen') === '1', busy: new Set(), live: false};
 const presenceId = crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); });
@@ -289,6 +289,7 @@ function loadList() {
         if (session) state.sessions.set(pane, session);
         else state.sessions.delete(pane);
       }
+      pruneOutbox();
       renderHome();
       if (state.current) {
         if (state.sessions.has(state.current)) updateSessionHeader();
@@ -383,7 +384,7 @@ function connect() {
     if (listRequest?.generation === snapshotGeneration) listRequest.events.set(pane, session);
     const was = state.sessions.get(pane);
     if (session) state.sessions.set(pane, session);
-    else state.sessions.delete(pane);
+    else { state.sessions.delete(pane); outbox.set(pane, []); saveOutbox(pane); }
     renderHome();
     if (session?.bucket !== 'blocked') dropCall(pane);
     else if (was?.bucket !== 'blocked' || was.pending?.fingerprint !== session.pending?.fingerprint) callOut(session);
@@ -754,44 +755,101 @@ function keepPlace(box, draw, toEnd = false) {
   else if (held) box.scrollTop += held[0].getBoundingClientRect().top - held[1];
 }
 // ---------- outbox: what you sent shows at once and stays until the conversation carries it ----------
-const outbox = new Map();  // pane -> [{text, status: 'sending' | 'sent' | 'unseen', seen, count}]
+const outbox = new Map();  // pane -> [{id, text, status: 'sending' | 'sent' | 'unseen' | 'unsent', seen: string[] | null, count, conversation, ts}]; seen === null: no baseline taken yet
+const OUTBOX = 'outbox:', kept = new Map();
 const gist = text => String(text || '').replace(/\s+/g, ' ').trim().slice(0, 60);
 const copies = (messages, text) => messages.filter(m => (m.role === 'user' || m.role === 'command') && gist(m.text) === gist(text));
 const copyKey = m => `${m.role}|${m.ts}|${m.text}`;
-const MAIL = {sending: 'mailSending', sent: 'mailSent', unseen: 'mailUnseen'};
+const MAIL = {sending: 'mailSending', sent: 'mailSent', unseen: 'mailUnseen', unsent: 'mailUnsent'};
+const stalled = item => item.status === 'unsent' || item.status === 'unseen';
+function saveOutbox(pane) {
+  const mail = outbox.get(pane) || [], text = mail.length ? JSON.stringify(mail) : '';
+  if (!mail.length) outbox.delete(pane);
+  if (kept.get(pane) === text) return;
+  kept.set(pane, text);
+  text ? store.set(OUTBOX + pane, text) : store.del(OUTBOX + pane);
+}
+// What was still on its way when the app closed may or may not have left: it comes back as "not sent" and is never sent again on its own.
+function loadOutbox() {
+  for (const key of store.keys()) {
+    if (!key.startsWith(OUTBOX)) continue;
+    let mail = []; try { mail = JSON.parse(store.get(key)); } catch {}
+    mail = (Array.isArray(mail) ? mail : []).filter(x => x && typeof x.text === 'string' && x.text)
+      .map(x => ({...x, status: x.status === 'unseen' || x.status === 'sent' ? 'unseen' : 'unsent', seen: Array.isArray(x.seen) ? x.seen : null}));
+    const pane = key.slice(OUTBOX.length);
+    outbox.set(pane, mail); saveOutbox(pane);
+  }
+}
+// A pane that is gone takes its outbox with it: its id may be given to another session.
+function pruneOutbox() {
+  for (const pane of [...outbox.keys()]) if (!state.sessions.has(pane)) { outbox.set(pane, []); saveOutbox(pane); }
+  renderOutbox();
+}
 function renderOutbox() {
   const box = $('#messages');
   const mail = outbox.get(state.current) || [];
   box.querySelectorAll('.msg.pending').forEach(el => { if (!mail.includes(el._item)) el.remove(); });
   for (const item of mail) {
     let el = [...box.querySelectorAll('.msg.pending')].find(e => e._item === item);
-    if (!el) { el = document.createElement('div'); el.className = 'msg user pending'; el._item = item; el.innerHTML = '<span class="body"></span><small></small>'; el.querySelector('.body').textContent = item.text; }
+    if (!el) { el = document.createElement('div'); el.className = 'msg user pending'; el._item = item; el.innerHTML = '<span class="body"></span><small></small><span class="mail-acts"><button type="button" data-mail="retry"></button><button type="button" data-mail="drop"></button></span>'; el.querySelector('.body').textContent = item.text; }
     if (el !== box.lastElementChild || el.parentElement !== box) box.appendChild(el);
     el.dataset.status = item.status;
     put(el.querySelector('small'), 'textContent', t(MAIL[item.status]));
+    put(el.querySelector('.mail-acts'), 'hidden', !stalled(item));
+    put(el.querySelector('[data-mail=retry]'), 'textContent', t('mailRetry'));
+    put(el.querySelector('[data-mail=drop]'), 'textContent', t('mailDrop'));
   }
   if (mail.length) box.querySelector('.empty')?.remove();
 }
 // A message has arrived once the conversation shows a copy that was not there when it was sent.
-function settleOutbox(pane, messages) {
+function settleOutbox(pane, messages, conversation) {
   state.shown = {pane, messages};
   const mail = outbox.get(pane); if (!mail) return;
   const taken = new Set();
   outbox.set(pane, mail.filter(item => {
-    if (item.status === 'sending') return true;
+    if (item.conversation && conversation && item.conversation !== conversation) return false;  // written to another conversation of this pane id
+    if (!item.conversation && conversation) item.conversation = conversation;
     const now = copies(messages, item.text);
-    const fresh = now.find(m => m.ts ? !item.seen.has(copyKey(m)) && !taken.has(copyKey(m)) : now.length > item.count);
+    if (item.seen === null) { item.seen = now.map(copyKey); item.count = now.length; return true; }  // sent before the conversation was on screen: what is here now is the baseline
+    if (item.status === 'sending') return true;
+    const fresh = now.find(m => m.ts ? !item.seen.includes(copyKey(m)) && !taken.has(copyKey(m)) : now.length > item.count);
     if (!fresh) return true;
     taken.add(copyKey(fresh));
     return false;
   }));
+  saveOutbox(pane);
+}
+let leaving = false;
+addEventListener('pagehide', () => { leaving = true; });
+addEventListener('pageshow', () => { leaving = false; });
+// The one way a message leaves: the first send and "Try again" both come through here.
+async function sendItem(pane, item) {
+  const has = () => (outbox.get(pane) || []).includes(item);
+  item.status = 'sending'; saveOutbox(pane); renderOutbox();
+  const r = await act($('#send'), () => api(`/api/sessions/${encodeURIComponent(pane)}/prompt`, {text: item.text}), '');
+  // A request cut off by the page closing is not a refusal: timers do not run on a page that is going away, so the record stays and comes back as "not sent".
+  if (!r) await new Promise(done => setTimeout(done, 80));
+  if (!has() || leaving) return;
+  if (!r) {  // it never left: the words go back where they were typed
+    outbox.set(pane, outbox.get(pane).filter(x => x !== item)); saveOutbox(pane);
+    const draft = [item.text, store.get('draft:' + pane)].filter(Boolean).join('\n');
+    store.set('draft:' + pane, draft);
+    if (state.current === pane) { ta.value = draft; autosize(); renderOutbox(); }
+    return;
+  }
+  item.status = 'sent'; saveOutbox(pane);
+  setTimeout(() => { if (item.status === 'sent' && has()) { item.status = 'unseen'; saveOutbox(pane); renderOutbox(); } }, window.UNSEEN_MS || 20000);
+  renderOutbox();
+  setTimeout(loadChat, 500);
 }
 $('#messages').addEventListener('click', e => {
-  const el = e.target.closest('.msg.pending');
-  if (el?.dataset.status !== 'unseen') return;
-  outbox.set(state.current, (outbox.get(state.current) || []).filter(item => item !== el._item));
+  const button = e.target.closest('[data-mail]'), item = button?.closest('.msg.pending')?._item, pane = state.current;
+  if (!item || !stalled(item)) return;
+  if (button.dataset.mail === 'retry') return sendItem(pane, item);
+  outbox.set(pane, (outbox.get(pane) || []).filter(x => x !== item)); saveOutbox(pane);
   renderOutbox();
 });
+loadOutbox();
 let chatRequest = null;
 async function loadChat(first = false) {
   const pane = state.current, view = state.view, generation = snapshotGeneration;
@@ -817,7 +875,7 @@ async function loadChat(first = false) {
     if (state.anchor === null) state.start = r.start ?? null;
     const items = itemsOf(r.messages, r.source);
     const key = JSON.stringify([r.hint, items.map(item => item.key + '~' + item.sig)]);
-    settleOutbox(pane, r.messages);
+    settleOutbox(pane, r.messages, r.conversation);
     if (key !== state.chatHash) { state.chatHash = key; renderMessages(r, first, items); }
     renderEarlier(r.source);
     renderOutbox();
@@ -1208,23 +1266,12 @@ ta.addEventListener('input', () => { slashIndex = 0; updateSlashOptions(); autos
 $('#composer').addEventListener('submit', async e => {
   e.preventDefault();
   const text = ta.value.trim(); if (!text) return;
-  const pane = state.current, before = state.shown?.pane === pane ? copies(state.shown.messages, text) : [];
-  const item = {text, status: 'sending', seen: new Set(before.map(copyKey)), count: before.length};
+  const pane = state.current, shown = state.shown?.pane === pane, before = shown ? copies(state.shown.messages, text) : null;
+  const item = {id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8), text, status: 'sending', seen: before && before.map(copyKey), count: before ? before.length : 0, conversation: (shown && state.conversation) || null, ts: Date.now()};
   outbox.set(pane, [...(outbox.get(pane) || []), item]);
   ta.value = ''; store.set('draft:' + pane, ''); autosize(); slashMenu.hidden = true;
-  renderOutbox(); $('#messages').scrollTop = $('#messages').scrollHeight;
-  const r = await act($('#send'), () => api(`/api/sessions/${encodeURIComponent(pane)}/prompt`, {text}), '');
-  if (!r) {  // it never left: the words go back where they were typed
-    outbox.set(pane, outbox.get(pane).filter(x => x !== item));
-    const draft = [text, store.get('draft:' + pane)].filter(Boolean).join('\n');
-    store.set('draft:' + pane, draft);
-    if (state.current === pane) { ta.value = draft; autosize(); renderOutbox(); }
-    return;
-  }
-  item.status = 'sent';
-  setTimeout(() => { if (item.status === 'sent') { item.status = 'unseen'; renderOutbox(); } }, window.UNSEEN_MS || 20000);
-  renderOutbox();
-  setTimeout(loadChat, 500);
+  $('#messages').scrollTop = $('#messages').scrollHeight;
+  await sendItem(pane, item);
 });
 // attach: upload the file to the server, then put its path in the draft (agents read files by path)
 $('#attachBtn').onclick = () => $('#fileIn').click();

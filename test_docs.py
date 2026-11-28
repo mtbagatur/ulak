@@ -37,7 +37,7 @@ def test_both_pages_name_everything_the_browser_keeps():
     for path in (ROOT / "web").glob("*.js"):
         kept |= set(re.findall(r"(?:store|localStorage)\.(?:set|setItem)\(\s*'?([A-Za-z]+)", path.read_text()))
     kept.discard("k")  # the helper that does the writing, not a stored name
-    words = {"draft": "drafts", "pins": "pins", "lang": "language", "KEY": "theme", "idleOpen": "idle group"}
+    words = {"draft": "drafts", "OUTBOX": "messages you sent", "pins": "pins", "lang": "language", "KEY": "theme", "idleOpen": "idle group"}
     assert kept == set(words), "the browser keeps something new: say so in README.md and SECURITY.md"
     for name in ("README.md", "SECURITY.md"):
         sentence = re.search(r"[^.\n]*[Tt]he browser keeps[^.\n]*\.", (ROOT / name).read_text())

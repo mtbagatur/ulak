@@ -77,6 +77,7 @@ class FakeAPI:
         self.changes = {"repo": False, "branch": "", "files": [], "more_files": 0, "diff": "", "truncated": False}
         self.presence = []
         self.fail_prompt = False
+        self.prompts = []
         self.pins = []
         self.moved = None
         self.start, self.conversation, self.conversations, self.pages, self.anchors = None, "one", [], {}, []
@@ -234,6 +235,7 @@ class Handler(SimpleHTTPRequestHandler):
             self.json(api.push_test_reply)
             return
         if self.path == "/api/sessions/fake%3Ap1/prompt":
+            api.prompts.append(body["text"])
             assert api.respond.wait(8), "test did not release the held message"
             self.json({"detail": "Herdr is down"}, 503) if api.fail_prompt else self.json({"ok": True})
             return
@@ -1446,6 +1448,104 @@ def test_unseen_message_says_so_and_a_command_settles_it(api_fixture):
     chrome.wait(f"{PENDING}?.textContent.includes('Not in the conversation yet')")
     api.messages = [{"role": "command", "text": "/clear", "ts": "t2"}]
     chrome.wait(f"!{PENDING} && document.querySelector('#messages .msg.command')?.textContent === '/clear'")
+
+
+STORED = "localStorage.getItem('outbox:fake:p1')"
+STATUS = f"{PENDING}?.dataset.status"
+MAIL_ACTS = f"[...{PENDING}.querySelectorAll('[data-mail]')].filter(b => b.offsetParent).map(b => b.textContent)"
+
+
+def caught_mid_send(chrome, api, url, text):
+    api.publish_session("idle")
+    api.respond.clear()
+    open_first(chrome, url)
+    send(chrome, text)
+    chrome.wait(f"{STATUS} === 'sending' && !!{STORED}")
+    open_first(chrome, url)  # the app is closed and opened again while the message is still on its way
+    api.respond.set()
+    chrome.wait(f"{STATUS} === 'unsent'")
+
+
+def test_a_message_caught_mid_send_comes_back_as_not_sent_and_is_never_resent(api_fixture):
+    chrome, api, url = api_fixture
+    caught_mid_send(chrome, api, url, "run the tests")
+    assert chrome.js(f"{PENDING}.querySelector('.body').textContent") == "run the tests"
+    assert "Not sent" in chrome.js(f"{PENDING}.querySelector('small').textContent")
+    assert chrome.js(MAIL_ACTS) == ["Try again", "Delete"]
+    time.sleep(3)
+    assert api.prompts == ["run the tests"] and chrome.js(STATUS) == "unsent"
+
+
+def test_retry_sends_once_and_delete_removes(api_fixture):
+    chrome, api, url = api_fixture
+    caught_mid_send(chrome, api, url, "once more")
+    chrome.js("window.UNSEEN_MS = 300")
+    api.respond.clear()
+    chrome.click(f"#messages .msg.pending [data-mail=retry]")
+    chrome.wait(f"{STATUS} === 'sending'")
+    assert chrome.js(MAIL_ACTS) == []
+    api.respond.set()
+    chrome.wait(f"{STATUS} === 'unseen'")
+    assert api.prompts == ["once more", "once more"]
+    chrome.click("#messages .msg.pending [data-mail=drop]")
+    chrome.wait(f"!{PENDING}")
+    assert chrome.js(STORED) is None and api.prompts == ["once more", "once more"]
+
+
+def test_an_unseen_message_is_not_lost_to_a_stray_tap(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    open_first(chrome, url)
+    chrome.js("window.UNSEEN_MS = 300")
+    send(chrome, "do not lose me")
+    chrome.wait(f"{STATUS} === 'unseen'")
+    assert chrome.js(MAIL_ACTS) == ["Try again", "Delete"]
+    chrome.click("#messages .msg.pending .body")
+    time.sleep(0.5)
+    assert chrome.js(STATUS) == "unseen"
+    chrome.click("#messages .msg.pending [data-mail=drop]")
+    chrome.wait(f"!{PENDING}")
+
+
+def test_a_copy_already_in_the_chat_is_not_taken_for_the_new_message(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    api.messages = [{"role": "user", "text": "ok", "ts": "t0"}]
+    api.fail_chat = True  # the conversation has not loaded when the message is sent
+    chrome.cdp("Page.navigate", url=url)
+    chrome.click(".card-open")
+    chrome.wait("!document.querySelector('#session').hidden")
+    send(chrome, "ok")
+    chrome.wait(f"{STATUS} === 'sent'")
+    api.fail_chat = False
+    chrome.wait(f"{MINE}.length === 2")
+    time.sleep(2)  # polls that bring only the old copy
+    assert chrome.js(f"!!{PENDING}") is True
+    api.messages = api.messages + [{"role": "user", "text": "ok", "ts": "t1"}]
+    chrome.wait(f"!{PENDING}")
+    assert chrome.js(STORED) is None
+
+
+def test_outbox_of_another_conversation_or_closed_pane_is_not_shown(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelector('.card') !== null")
+    record = lambda conversation: json.dumps([{"id": "a", "text": "from before", "status": "sent", "seen": [], "count": 0, "conversation": conversation, "ts": 1}])
+    chrome.js(f"localStorage.setItem('outbox:fake:p1', {json.dumps(record('another'))}); localStorage.setItem('outbox:fake:gone', {json.dumps(record('one'))})")
+    open_first(chrome, url)
+    chrome.wait(f"{STORED} === null && localStorage.getItem('outbox:fake:gone') === null")
+    assert chrome.js(f"!!{PENDING}") is False
+
+
+def test_outbox_works_without_storage(api_fixture):
+    chrome, api, url = api_fixture
+    api.publish_session("idle")
+    open_first(chrome, url)
+    chrome.js("Storage.prototype.setItem = () => { throw new Error('full'); }; Storage.prototype.removeItem = () => { throw new Error('full'); }")
+    send(chrome, "still goes")
+    chrome.wait(f"{STATUS} === 'sent'")
+    assert api.prompts == ["still goes"] and chrome.js("document.querySelector('#toasts .err')") is None
 
 
 def test_each_group_lists_the_latest_conversation_first(api_fixture):
