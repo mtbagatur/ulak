@@ -20,7 +20,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 
 from chat import claude_chat, claude_meters, claude_page, claude_path, earlier_conversations, detect_model, preview_from_screen, screen_chat, SPINNER, strip_ansi
-from core import CSP, NotificationGate, tidy_details, bucket, build_push, clean_subscription, push_topic, strip_jpeg, is_destructive, parse_approval, parse_codex_limits, parse_limits, parse_prompt, project_name, status_rank, slash_commands, changes
+from core import CSP, NotificationGate, tidy_details, bucket, build_push, clean_subscription, hidden_chars, push_topic, strip_jpeg, is_destructive, parse_approval, parse_codex_limits, parse_limits, parse_prompt, project_name, status_rank, slash_commands, changes
 from herdr_client import HerdrClient, HerdrError, HerdrUnavailable
 
 ROOT = Path(__file__).parent
@@ -259,6 +259,7 @@ def pending_from_read(text, agent=None):
     if not parsed:
         return None
     parsed["destructive"] = is_destructive(parsed["command"], RULES)
+    parsed["hidden"] = hidden_chars(parsed["command"])
     parsed["reason"] = parsed["question"]
     return parsed
 
@@ -1027,6 +1028,8 @@ async def _approve(pane, item, action, request, seen):
         raise HTTPException(409, "The full command is not visible; it can only be denied")
     if action.decision == "always" and pending["destructive"]:
         raise HTTPException(400, "Session-wide allow is disabled for destructive commands")
+    if action.decision == "always" and pending["hidden"]:
+        raise HTTPException(400, "Session-wide allow is disabled for commands with characters that cannot be seen")
     needs_confirmation = pending["destructive"] and action.decision == "approve"
     if action.confirm_token is not None:
         confirmation = pending_confirm.get(pane)

@@ -50,3 +50,16 @@ def test_the_readme_says_which_agents_get_folded_work_and_what_happens_to_a_phot
     assert "Claude Code" in folds and "Other agents" in folds
     attach = next(line for line in README.splitlines() if line.startswith("- **Attach files.**"))
     assert "JPEG" in attach and "HEIC" in attach and "strip_jpeg" in APP
+
+
+def test_the_security_page_describes_the_checks_the_code_makes():
+    import app
+    import core
+    page = (ROOT / "SECURITY.md").read_text()
+    assert f"at most {app.MAX_SUBS} subscriptions" in page
+    assert "Content Security Policy" in page and "script-src 'self'" in core.CSP and "'unsafe-inline'" not in core.CSP.split("script-src")[1].split(";")[0]
+    assert "Inline styles are allowed" in page and "style-src 'self' 'unsafe-inline'" in core.CSP
+    assert "⟨U+200B⟩" in page and core.show_hidden("\u200b") == "⟨U+200B⟩"
+    assert "characters that cannot be seen" in APP and '"always allow" is refused by the server' in page
+    for word in ("JPEG", "HEIC", "rotation"):
+        assert word in page

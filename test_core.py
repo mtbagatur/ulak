@@ -2435,3 +2435,15 @@ def test_pages_and_scripts_carry_the_content_policy_and_answers_do_not_need_one(
         assert r.status_code == 200 and r.headers["content-security-policy"] == policy, path
         assert r.headers["x-content-type-options"] == "nosniff" and r.headers["referrer-policy"] == "no-referrer", path
     assert "content-security-policy" not in c.get("/api/sessions", headers=h).headers
+
+
+def test_a_command_with_hidden_chars_cannot_be_allowed_for_the_whole_session(monkeypatch):
+    word = parse_approval(CODEX)["command"].split()[0]
+    dirty = CODEX.replace(word, word[0] + "​" + word[1:], 1)
+    fake, c, h = _setup(monkeypatch, dirty)
+    pending = parse_approval(dirty)
+    assert "always" in pending["keys"] and api.pending_from_read(dirty)["hidden"] == ["U+200B"]
+    path, fp = "/api/sessions/w9:p1/approve", pending["fingerprint"]
+    r = c.post(path, headers=h, json={"decision": "always", "fingerprint": fp})
+    assert r.status_code == 400 and "characters that cannot be seen" in r.json()["detail"] and fake.sent == []
+    assert c.post(path, headers=h, json={"decision": "approve", "fingerprint": fp}).status_code == 200  # read and answered once is still yours to give
