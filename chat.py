@@ -517,6 +517,22 @@ def claude_meters(path, tail_bytes=700_000):
     return meters
 
 
+def last_turn(path, tail_bytes=700_000):
+    """Who spoke last at the end of a transcript: the last thing a person said (a typed command counts) and where its line begins,
+    and the last text the assistant wrote after it. A side with nothing to show is at -1 with no text."""
+    with Path(path).open("rb") as f:
+        size = f.seek(0, 2)
+        lines = list(_whole_lines(f, max(0, size - tail_bytes), size))
+    msgs, offsets, _ = _parse(lines)
+    turn = {"user_at": -1, "user_text": "", "assistant_at": -1, "assistant_text": ""}
+    for m, offset in zip(msgs, offsets):
+        if m["role"] in ("user", "command"):
+            turn = {"user_at": offset, "user_text": m["text"], "assistant_at": -1, "assistant_text": ""}
+        elif m["role"] == "assistant" and turn["user_at"] != -1:
+            turn.update(assistant_at=offset, assistant_text=m["text"])
+    return turn
+
+
 def open_calls(path, tail_bytes=2_000_000):
     """The tool calls on the main chain that the end of a transcript shows no answer to, oldest first, and a subagent sent to the
     background until the notice that it stopped. Only Bash has a `command`; `last` says the call is in the last thing the assistant wrote."""
