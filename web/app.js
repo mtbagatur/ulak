@@ -387,7 +387,8 @@ function connect() {
     if (listRequest?.generation === snapshotGeneration) listRequest.events.set(pane, session);
     const was = state.sessions.get(pane);
     if (session) state.sessions.set(pane, session);
-    else { state.sessions.delete(pane); outbox.set(pane, []); saveOutbox(pane); }
+    else state.sessions.delete(pane);
+    outbox.set(pane, session ? (outbox.get(pane) || []).filter(item => ownMail(pane, item)) : []); saveOutbox(pane);
     renderHome();
     if (session?.bucket !== 'blocked') dropCall(pane);
     else if (was?.bucket !== 'blocked' || was.pending?.fingerprint !== session.pending?.fingerprint) callOut(session);
@@ -773,8 +774,15 @@ function keepPlace(box, draw, toEnd = false) {
   else if (held) box.scrollTop += held[0].getBoundingClientRect().top - held[1];
 }
 // ---------- outbox: what you sent shows at once and stays until the conversation carries it ----------
-const outbox = new Map();  // pane -> [{id, text, status: 'sending' | 'sent' | 'unseen' | 'unsent', seen: string[] | null, count, conversation, ts}]; seen === null: no baseline taken yet
+const outbox = new Map();  // pane -> [{id, text, status: 'sending' | 'sent' | 'unseen' | 'unsent', seen: string[] | null, count, conversation, born, ts}]; seen === null: no baseline taken yet
 const OUTBOX = 'outbox:', kept = new Map();
+// A pane id is given out again; the mark on its card is not. A record with another mark was written to a pane that has closed; one without a mark takes this pane's.
+function ownMail(pane, item) {
+  const born = state.sessions.get(pane)?.born || '';
+  if (item.born && born && item.born !== born) return false;
+  if (!item.born && born) item.born = born;
+  return true;
+}
 const gist = text => String(text || '').replace(/\s+/g, ' ').trim().slice(0, 60);
 const copies = (messages, text) => messages.filter(m => (m.role === 'user' || m.role === 'command') && gist(m.text) === gist(text));
 const copyKey = m => `${m.role}|${m.ts}|${m.text}`;
@@ -800,7 +808,7 @@ function loadOutbox() {
 }
 // A pane that is gone takes its outbox with it: its id may be given to another session.
 function pruneOutbox() {
-  for (const pane of [...outbox.keys()]) if (!state.sessions.has(pane)) { outbox.set(pane, []); saveOutbox(pane); }
+  for (const pane of [...outbox.keys()]) { outbox.set(pane, state.sessions.has(pane) ? outbox.get(pane).filter(item => ownMail(pane, item)) : []); saveOutbox(pane); }
   renderOutbox();
 }
 function renderOutbox() {
@@ -825,6 +833,7 @@ function settleOutbox(pane, messages, conversation) {
   const mail = outbox.get(pane); if (!mail) return;
   const taken = new Set();
   outbox.set(pane, mail.filter(item => {
+    if (!ownMail(pane, item)) return false;
     if (item.conversation && conversation && item.conversation !== conversation) return false;  // written to another conversation of this pane id
     if (!item.conversation && conversation) item.conversation = conversation;
     const now = copies(messages, item.text);
@@ -1303,7 +1312,7 @@ $('#composer').addEventListener('submit', e => {
 });
 async function sendDraft(text) {
   const pane = state.current, shown = state.shown?.pane === pane, before = shown ? copies(state.shown.messages, text) : null;
-  const item = {id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8), text, status: 'sending', seen: before && before.map(copyKey), count: before ? before.length : 0, conversation: (shown && state.conversation) || null, ts: Date.now()};
+  const item = {id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8), text, status: 'sending', seen: before && before.map(copyKey), count: before ? before.length : 0, conversation: (shown && state.conversation) || null, born: state.sessions.get(pane)?.born || null, ts: Date.now()};
   outbox.set(pane, [...(outbox.get(pane) || []), item]);
   ta.value = ''; store.set('draft:' + pane, ''); autosize(); slashMenu.hidden = true;
   $('#messages').scrollTop = $('#messages').scrollHeight;

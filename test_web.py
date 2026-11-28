@@ -1538,6 +1538,39 @@ def test_outbox_of_another_conversation_or_closed_pane_is_not_shown(api_fixture)
     assert chrome.js(f"!!{PENDING}") is False
 
 
+def _stored_mail(chrome, **fields):
+    record = json.dumps([{"id": "a", "text": "from before", "status": "sent", "seen": [], "count": 0, "conversation": None, "ts": 1, **fields}])
+    chrome.js(f"localStorage.setItem('outbox:fake:p1', {json.dumps(record)})")
+
+
+def test_outbox_of_an_earlier_pane_with_the_same_id_is_not_shown(api_fixture):
+    chrome, api, url = api_fixture
+    api.cards = [card("idle", born="second")]
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelector('.card') !== null")
+    _stored_mail(chrome, born="first")  # written before the conversation had loaded, to a pane that has since closed
+    open_first(chrome, url)
+    chrome.wait(f"{STORED} === null")
+    assert chrome.js(f"!!{PENDING}") is False
+
+
+def test_outbox_of_this_pane_is_kept_and_a_new_message_carries_its_mark(api_fixture):
+    chrome, api, url = api_fixture
+    api.cards = [card("idle", born="second")]
+    chrome.cdp("Page.navigate", url=url)
+    chrome.wait("document.querySelector('.card') !== null")
+    _stored_mail(chrome, born="second")
+    open_first(chrome, url)
+    chrome.wait(f"{STATUS} === 'unseen'")
+    chrome.click("#messages .msg.pending [data-mail=drop]")
+    chrome.wait(f"!{PENDING}")
+    api.respond.clear()
+    send(chrome, "a new one")
+    chrome.wait(f"{STATUS} === 'sending' && !!{STORED}")
+    assert chrome.js(f"JSON.parse({STORED})[0].born") == "second"
+    api.respond.set()
+
+
 def test_outbox_works_without_storage(api_fixture):
     chrome, api, url = api_fixture
     api.publish_session("idle")

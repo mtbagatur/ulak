@@ -380,6 +380,8 @@ async def make_card(agent, force=False):
         "workspace_id": agent.get("workspace_id"), "cwd": display_cwd(agent.get("cwd")), "name": agent.get("name", ""),
         "model": sessions.get(pane, {}).get("model", ""), "preview": sessions.get(pane, {}).get("preview", ""), "pending": None,
         "quick": False, "meters": {},
+        # Dies with the pane: a pane id is given out again, the terminal behind it is not.
+        "born": hashlib.sha256(str(agent["terminal_id"]).encode()).hexdigest()[:12] if agent.get("terminal_id") else "",
     }
     try:
         screen = await read_screen(pane, status, force=force)

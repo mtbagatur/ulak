@@ -3105,3 +3105,11 @@ def test_card_carries_meters_only_for_a_claude_transcript(monkeypatch, tmp_path)
     assert asyncio.run(api.make_card(agent))["meters"] == {"context": {"tokens": 102_010, "ts": T0}, "cache": {"ttl": 3600, "since": T0}}
     assert asyncio.run(api.make_card({**agent, "agent": "codex"}))["meters"] == {}
     assert asyncio.run(api.make_card({**agent, "agent_session": {}}))["meters"] == {}
+
+
+def test_card_carries_a_mark_that_dies_with_the_pane():
+    agent = {"pane_id": "born-test:p1", "agent": "codex", "agent_status": "done", "cwd": "/tmp/api-test"}
+    first = asyncio.run(api.make_card({**agent, "terminal_id": "term_1"}))["born"]
+    assert first and first != "term_1" and first == asyncio.run(api.make_card({**agent, "terminal_id": "term_1"}))["born"]
+    assert asyncio.run(api.make_card({**agent, "terminal_id": "term_2"}))["born"] not in ("", first)
+    assert asyncio.run(api.make_card(agent))["born"] == ""
