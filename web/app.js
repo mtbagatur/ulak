@@ -46,6 +46,22 @@ function toast(text, kind = '') {
   if (kind === 'ok' && navigator.vibrate) navigator.vibrate(12);
   setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 200); }, kind === 'err' ? 4200 : 2200);
 }
+// A question in a session other than the one on screen: one line on top that carries the question, and a tap goes there.
+// Not on the list (the card is already in view) and not for the open session (its question is on screen).
+function dropCall(pane) { for (const el of $('#toasts').querySelectorAll('.call')) if (!pane || el.dataset.pane === pane) el.remove(); }
+function callOut(s) {
+  if (!s || !state.current || s.pane_id === state.current || document.hidden) return;
+  dropCall(s.pane_id);
+  const p = s.pending, el = document.createElement('button');
+  // Text with characters that cannot be seen is not repeated here; the session shows it with its warning.
+  const line = p && !(p.hidden && p.hidden.length) ? (p.details || p.question || '').split('\n').map(l => l.trim()).find(Boolean) : '';
+  el.className = 'toast call'; el.dataset.pane = s.pane_id;
+  el.innerHTML = `<b>${esc(s.project || s.pane_id)} · ${esc(t('st_blocked'))}</b><span>${esc((line || '').slice(0, 200))}</span>`;
+  if (!line) el.lastChild.remove();
+  el.onclick = () => { dropCall(s.pane_id); history.pushState({pane: s.pane_id}, '', `#/s/${s.pane_id}`); route(); };
+  $('#toasts').appendChild(el);
+  setTimeout(() => { if (!el.isConnected) return; el.classList.add('out'); setTimeout(() => el.remove(), 200); }, 7000);
+}
 async function act(btn, fn, okText) {
   // Button loading state + toast, errors never become unhandled rejections.
   if (btn) btn.classList.add('loading');
@@ -351,9 +367,12 @@ function connect() {
     const session = m.type === 'session' ? m.session : null;
     const pane = session ? session.pane_id : m.pane;
     if (listRequest?.generation === snapshotGeneration) listRequest.events.set(pane, session);
+    const was = state.sessions.get(pane);
     if (session) state.sessions.set(pane, session);
     else state.sessions.delete(pane);
     renderHome();
+    if (session?.bucket !== 'blocked') dropCall(pane);
+    else if (was?.bucket !== 'blocked' || was.pending?.fingerprint !== session.pending?.fingerprint) callOut(session);
     if (pane !== state.current) return;
     if (session) { updateSessionHeader(); loadChat(); }
     else { closedBanner(); chatReadyView = state.view; updateConnection(); }
@@ -400,7 +419,7 @@ function showHome() {
   state.view++;
   const from = focusIsIn('#session') && state.current;
   state.current = null; state.prompt = null; $('#session').hidden = true; $('#home').hidden = false;
-  $('#promptZone').innerHTML = ''; $('#promptStatus').textContent = ''; hideSheet();
+  $('#promptZone').innerHTML = ''; $('#promptStatus').textContent = ''; hideSheet(); dropCall();
   updateConnection();
   if (from) ([...document.querySelectorAll('.card')].find(el => el.dataset.key === from)?.querySelector('.card-open') || $('#newSession')).focus({preventScroll: true});
 }
@@ -493,7 +512,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) load
 // ---------- session screen ----------
 function openSession(pane) {
   if (state.current === pane && !$('#session').hidden) return;
-  hideSheet();
+  hideSheet(); dropCall(pane);
   const carry = focusIsIn('#home');
   state.view++;
   state.current = pane; state.chatHash = ''; state.prompt = null; openRuns.clear(); state.meters = {}; renderMeters();
@@ -1423,7 +1442,10 @@ const testBell = btn => act(btn, async () => {
 });
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').then(r => { swReg = r; pushState(); }).catch(() => {});
-  navigator.serviceWorker.addEventListener('message', e => { if (e.data?.type === 'open' && e.data.pane) { history.pushState({pane: e.data.pane}, '', `#/s/${e.data.pane}`); route(); } });
+  navigator.serviceWorker.addEventListener('message', e => { if (e.data?.type === 'open' && e.data.pane) { history.pushState({pane: e.data.pane}, '', `#/s/${e.data.pane}`); route(); }
+    // A push that reached the phone while the app was open: the worker hands it over instead of showing it.
+    if (e.data?.type === 'pushed' && e.data.pane && !$('#toasts').querySelector(`.call[data-pane="${CSS.escape(e.data.pane)}"]`)) { const s = state.sessions.get(e.data.pane); if (s?.bucket === 'blocked') callOut(s); }
+  });
 }
 
 // ---------- boot ----------

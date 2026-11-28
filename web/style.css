@@ -352,6 +352,9 @@ input::placeholder,textarea::placeholder{color:var(--muted);opacity:1}
 .toast{background:var(--card2);color:var(--strong);padding:10px 16px;border-radius:999px;font-size:14px;box-shadow:0 6px 20px var(--shadow);animation:drop .2s var(--ease-out);max-width:90%}
 .toast{border:1px solid var(--line)}
 .toast.ok{border-color:var(--ok);color:var(--ok)}.toast.err{border-color:var(--lal);color:var(--lal-t)}
+.toast.call{pointer-events:auto;display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:min(92%,420px);max-width:none;min-height:44px;padding:9px 16px;border-radius:18px;border-color:var(--seal);text-align:left}
+.toast.call b{font-size:13px;font-weight:650;color:var(--zer)}
+.toast.call span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:12.5px/1.4 ui-monospace,"SF Mono",Menlo,monospace;color:var(--strong)}
 @keyframes drop{from{opacity:0;transform:translateY(-10px)}}
 .toast.out{opacity:0;transform:translateY(-6px);transition:opacity .18s,transform .18s var(--ease-out)}
 @media (prefers-reduced-motion:reduce){

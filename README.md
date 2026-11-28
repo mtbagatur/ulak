@@ -83,7 +83,7 @@ What Ulak does not do: no terminal, one computer, one person, Herdr only. Conver
 - **The agent's own slash commands.** Type `/` for the commands and skills that exist on that machine, with a built-in list as fallback.
 - **Look without touching.** Agent screen shows the pane as text, Changes shows `git status` and the diff since the last commit. Both are read-only.
 - **Attach files.** A photo, screenshot, PDF or text file (15 MB max, kept a week); the agent gets the path. A photo loses where and with what it was taken on the way: a JPEG is cleaned on the server without touching the picture, an iPhone HEIC is redrawn on the phone. If one could not be cleaned, Ulak says so.
-- **Push notifications.** Standard Web Push with your own VAPID keys. Nothing buzzes while Ulak is on screen, or for turns shorter than two minutes. Settings show when a notification last reached this device and say so when they stopped; a test button sends one on demand.
+- **Push notifications.** Standard Web Push with your own VAPID keys. Nothing buzzes while Ulak is on screen, or for turns shorter than two minutes: a question from another session shows as a line above the one you are reading, and if you lock the phone within a minute the notification follows. Once a minute Ulak also asks Herdr what is really waiting, so one lost event does not lose a question. Settings show when a notification last reached this device and say so when they stopped; a test button sends one on demand.
 - **Usage limits.** A strip shows the tightest window per provider, read from files your own scripts write.
 - **Start and close sessions** from the phone (closing takes two steps).
 - **English and Turkish**, light and dark; both follow the phone.

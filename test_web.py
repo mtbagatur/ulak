@@ -2274,3 +2274,158 @@ def test_nothing_the_app_does_is_refused_by_its_own_content_policy(api_fixture):
     chrome.js("const s = document.createElement('script'); s.textContent = 'window.__ran = 1'; document.head.appendChild(s); const i = new Image(); i.src = 'https://example.invalid/x.png'")
     chrome.wait("__refused.length === 2")
     assert chrome.js("window.__ran === undefined") and sorted(r.split()[0] for r in chrome.js("__refused")) == ["img-src", "script-src-elem"]
+
+
+SW_HARNESS = r"""
+const fs = require('fs'), vm = require('vm');
+const handlers = {}, shown = [], opened = [];
+let clients = [];
+const self = {
+  addEventListener: (name, fn) => { handlers[name] = fn; },
+  skipWaiting() {},
+  clients: { claim: async () => {}, matchAll: async () => clients, openWindow: async url => { opened.push(url); } },
+  registration: { showNotification: async (title, options) => { shown.push({ title, ...options }); } },
+};
+vm.runInNewContext(fs.readFileSync(process.argv[2], 'utf8'), { self });
+const client = (visibilityState, focus) => {
+  const c = { visibilityState, posted: [], focused: 0, postMessage(m) { c.posted.push(m); } };
+  c.focus = async () => { if (focus === 'fails') throw new Error('not allowed'); c.focused++; return c; };
+  return c;
+};
+const fire = async (name, event) => { let wait; handlers[name]({ ...event, waitUntil: p => { wait = p; } }); await wait; };
+const push = data => fire('push', { data: { json: () => data } });
+const tap = data => fire('notificationclick', { notification: { close() {}, data } });
+(async () => {
+  const out = {};
+  const waiting = { pane: 'w1:p2', title: 'proj · waiting', body: 'rm -rf build', tag: 'ulak-abc', url: '/?pane=w1%3Ap2', status: 'blocked' };
+
+  clients = [];
+  await push(waiting);
+  out.closed = shown.splice(0);
+
+  const hidden = client('hidden');
+  clients = [hidden];
+  await push(waiting);
+  out.hidden = { shown: shown.splice(0).length, posted: hidden.posted };
+
+  const open = client('visible');
+  clients = [client('hidden'), open];
+  await push(waiting);
+  out.visible = { shown: shown.splice(0).length, posted: open.posted };
+
+  await push({ ...waiting, test: true });
+  out.test = shown.splice(0).length;
+
+  const back = client('hidden'), front = client('visible');
+  clients = [back, front];
+  await tap({ pane: 'w1:p2', url: '/?pane=w1%3Ap2' });
+  out.tap = { back: [back.posted.length, back.focused], front: [front.posted, front.focused], opened: opened.splice(0) };
+
+  const stuck = client('hidden', 'fails');
+  clients = [stuck];
+  await tap({ pane: 'w1:p2', url: '/?pane=w1%3Ap2' });
+  out.stuck = opened.splice(0);
+
+  clients = [];
+  await tap({ pane: 'w1:p2', url: '/?pane=w1%3Ap2' });
+  await tap({ pane: 'w1:p2', url: '/?pane=w1%3Ap2' });
+  out.cold = opened.splice(0);
+  console.log(JSON.stringify(out));
+})();
+"""
+
+
+@pytest.fixture(scope="module")
+def service_worker(tmp_path_factory):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node is required to run the service worker outside a browser")
+    harness = tmp_path_factory.mktemp("sw") / "harness.js"
+    harness.write_text(SW_HARNESS)
+    run = subprocess.run([node, str(harness), str(Path(WEB) / "sw.js")], capture_output=True, text=True, timeout=20)
+    assert run.returncode == 0, run.stderr
+    return json.loads(run.stdout)
+
+
+def test_service_worker_shows_a_push_when_no_window_is_visible(service_worker):
+    assert len(service_worker["closed"]) == 1
+    note = service_worker["closed"][0]
+    assert (note["title"], note["body"], note["tag"]) == ("proj · waiting", "rm -rf build", "ulak-abc")
+    assert note["data"] == {"pane": "w1:p2", "url": "/?pane=w1%3Ap2"}
+    assert service_worker["hidden"] == {"shown": 1, "posted": []}
+
+
+def test_service_worker_hands_a_push_to_the_visible_window_instead_of_the_lock_screen(service_worker):
+    assert service_worker["visible"] == {"shown": 0, "posted": [{"type": "pushed", "pane": "w1:p2"}]}
+    assert service_worker["test"] == 1  # the owner asked to see this one arrive
+
+
+def test_tapping_a_notification_opens_the_session_in_the_window_already_in_front(service_worker):
+    tap = service_worker["tap"]
+    assert tap["front"] == [[{"type": "open", "pane": "w1:p2"}], 1]
+    assert tap["back"] == [0, 0] and tap["opened"] == []
+
+
+def test_tapping_a_notification_still_lands_on_the_session_when_the_window_cannot_be_focused(service_worker):
+    assert service_worker["stuck"] == ["/?pane=w1%3Ap2"]
+    assert service_worker["cold"] == ["/?pane=w1%3Ap2", "/?pane=w1%3Ap2"]
+
+
+OTHER = "fake:p2"
+
+
+def other_session(api, status, pending=None):
+    row = card(status, pane_id=OTHER, project="other-project", pending=pending)
+    api.cards = [api.cards[0], row]
+    api.events.append({"type": "session", "session": row})
+
+
+CALL = "document.querySelector('#toasts .call')"
+
+
+def test_a_question_in_another_session_calls_out_above_the_open_chat_and_a_tap_goes_there(api_fixture):
+    chrome, api, url = api_fixture
+    chrome.resize(390, 844)
+    open_first(chrome, url)
+    other_session(api, "working")
+    chrome.wait("document.title.length > 0")
+    time.sleep(0.3)
+    assert chrome.js(f"{CALL} === null")
+    question = {**APPROVAL, "details": "git push --force origin main " + "x" * 300, "fingerprint": "other-approval"}
+    other_session(api, "blocked", question)
+    chrome.wait(f"{CALL} !== null")
+    text = chrome.js(f"{CALL}.textContent")
+    assert "other-project" in text and "git push --force origin main" in text
+    assert chrome.js(f"{CALL}.tagName") == "BUTTON"
+    box = chrome.js(f"(() => {{ const r = {CALL}.getBoundingClientRect(); return [r.left, r.right, r.height, document.documentElement.scrollWidth]; }})()")
+    assert box[0] >= 0 and box[1] <= 390 and box[2] >= 44 and box[3] <= 390
+    other_session(api, "blocked", question)  # the same question again does not stack a second call
+    time.sleep(0.3)
+    assert chrome.js("document.querySelectorAll('#toasts .call').length") == 1
+    chrome.js(f"{CALL}.click()")
+    chrome.wait("location.hash === '#/s/fake:p2'")
+    chrome.wait(f"{CALL} === null")
+
+
+def test_the_call_leaves_when_the_question_is_answered_elsewhere(api_fixture):
+    chrome, api, url = api_fixture
+    open_first(chrome, url)
+    other_session(api, "blocked", {**APPROVAL, "fingerprint": "other-approval"})
+    chrome.wait(f"{CALL} !== null")
+    other_session(api, "working")
+    chrome.wait(f"{CALL} === null")
+
+
+def test_no_call_on_the_list_or_for_the_session_already_open(api_fixture):
+    chrome, api, url = api_fixture
+    open_first(chrome, url)
+    api.publish_session("working")
+    chrome.wait("document.title === 'Ulak'")
+    api.publish_prompt({**APPROVAL, "fingerprint": "second-approval"})
+    chrome.wait("document.title === '(1) Ulak'")
+    assert chrome.js(f"{CALL} === null")
+    chrome.click("#back")
+    chrome.wait("!document.querySelector('#home').hidden")
+    other_session(api, "blocked", {**APPROVAL, "fingerprint": "other-approval"})
+    chrome.wait("document.title === '(2) Ulak'")
+    assert chrome.js(f"{CALL} === null")

@@ -2447,3 +2447,135 @@ def test_a_command_with_hidden_chars_cannot_be_allowed_for_the_whole_session(mon
     r = c.post(path, headers=h, json={"decision": "always", "fingerprint": fp})
     assert r.status_code == 400 and "characters that cannot be seen" in r.json()["detail"] and fake.sent == []
     assert c.post(path, headers=h, json={"decision": "approve", "fingerprint": fp}).status_code == 200  # read and answered once is still yours to give
+
+
+def _grace_world(monkeypatch, status="blocked"):
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(api, "sessions", {"w9:p1": {"pane_id": "w9:p1", "status": status, "agent": "claude"}})
+    monkeypatch.setattr(api, "client_presence", {"00000000-0000-4000-8000-000000000001": clock["now"]}, raising=False)
+    monkeypatch.setattr(api, "pushed", {})
+    monkeypatch.setattr(api, "gate", type("Gate", (), {"allow": lambda self, *args: True})())
+    monkeypatch.setattr(api.time, "time", lambda: clock["now"])
+    async def no_prompt(*a): return None
+    monkeypatch.setattr(api, "fresh_prompt", no_prompt)
+    sends = []
+    async def send(*args): sends.append(args)
+    monkeypatch.setattr(api, "send_push", send)
+    return clock, sends
+
+
+def test_a_watching_phone_holds_the_push_and_it_goes_out_once_the_phone_looks_away(monkeypatch):
+    async def scenario():
+        clock, sends = _grace_world(monkeypatch)
+        async def pass_time(seconds): clock["now"] += seconds  # the phone locks: no more heartbeats
+        monkeypatch.setattr(api.asyncio, "sleep", pass_time)
+        await api.push_after_grace("w9:p1", "blocked")
+        assert len(sends) == 1
+        assert clock["now"] - 1000.0 <= 10 + api.PRESENCE_TTL + api.PRESENCE_STEP
+
+    asyncio.run(scenario())
+
+
+def test_a_phone_that_keeps_watching_gets_no_push_and_the_wait_ends(monkeypatch):
+    async def scenario():
+        clock, sends = _grace_world(monkeypatch)
+        async def pass_time(seconds):
+            clock["now"] += seconds
+            api.client_presence["00000000-0000-4000-8000-000000000001"] = clock["now"]  # still looking
+        monkeypatch.setattr(api.asyncio, "sleep", pass_time)
+        await api.push_after_grace("w9:p1", "blocked")
+        assert sends == []
+        assert clock["now"] - 1000.0 <= 10 + api.PRESENCE_HOLD + api.PRESENCE_STEP
+
+    asyncio.run(scenario())
+
+
+def test_a_held_push_is_dropped_when_the_question_is_answered_meanwhile(monkeypatch):
+    async def scenario():
+        clock, sends = _grace_world(monkeypatch)
+        async def pass_time(seconds):
+            clock["now"] += seconds
+            if clock["now"] > 1012:
+                api.sessions["w9:p1"]["status"] = "working"  # answered from the open app
+        monkeypatch.setattr(api.asyncio, "sleep", pass_time)
+        await api.push_after_grace("w9:p1", "blocked")
+        assert sends == []
+
+    asyncio.run(scenario())
+
+
+def _sweep_world(monkeypatch, after):
+    monkeypatch.setattr(api, "sessions", {"w9:p1": {"pane_id": "w9:p1", "status": "working"}})
+    monkeypatch.setattr(api, "work_started", {})
+    monkeypatch.setattr(api, "subscribers", {object()})
+    monkeypatch.setattr(api, "read_subs", lambda: [])
+    loads, sent, graces = [], [], []
+    async def load_all():
+        loads.append(1)
+        api.sessions["w9:p1"] = {"pane_id": "w9:p1", "status": after["status"]}
+        return list(api.sessions.values())
+    async def broadcast(message): sent.append(message)
+    async def grace(*a): graces.append(a)
+    monkeypatch.setattr(api, "load_all", load_all)
+    monkeypatch.setattr(api, "broadcast", broadcast)
+    monkeypatch.setattr(api, "push_after_grace", grace)
+    return loads, sent, graces
+
+
+def test_the_sweep_notices_a_question_whose_event_never_came(monkeypatch):
+    async def scenario():
+        after = {"status": "blocked"}
+        loads, sent, graces = _sweep_world(monkeypatch, after)
+        await api.sweep()
+        await asyncio.sleep(0)
+        assert [m["session"]["status"] for m in sent] == ["blocked"]
+        assert [g[:2] for g in graces] == [("w9:p1", "blocked")]
+        await api.sweep()  # nothing changed since: no second round
+        await asyncio.sleep(0)
+        assert len(sent) == 1 and len(graces) == 1
+
+    asyncio.run(scenario())
+
+
+def test_the_sweep_times_a_turn_it_saw_working_and_stays_quiet_about_one_it_did_not(monkeypatch):
+    async def scenario():
+        after = {"status": "working"}
+        loads, sent, graces = _sweep_world(monkeypatch, after)
+        await api.sweep()  # still working: the sweep notes the start
+        assert "w9:p1" in api.work_started and graces == []
+        after["status"] = "done"
+        await api.sweep()
+        await asyncio.sleep(0)
+        assert len(graces) == 1 and graces[0][:2] == ("w9:p1", "done") and graces[0][2] is not None
+        api.sessions["w9:p1"]["status"] = "working"
+        api.work_started.clear()  # as after a restart: nobody saw this turn begin
+        await api.sweep()
+        await asyncio.sleep(0)
+        assert len(graces) == 1
+
+    asyncio.run(scenario())
+
+
+def test_the_sweep_rests_when_no_phone_is_open_and_none_is_subscribed(monkeypatch):
+    async def scenario():
+        loads, sent, graces = _sweep_world(monkeypatch, {"status": "blocked"})
+        monkeypatch.setattr(api, "subscribers", set())
+        await api.sweep()
+        assert loads == [] and sent == []
+        monkeypatch.setattr(api, "read_subs", lambda: [{"endpoint": "https://push.example/x"}])
+        await api.sweep()
+        await asyncio.sleep(0)
+        assert loads == [1] and len(graces) == 1
+
+    asyncio.run(scenario())
+
+
+def test_a_sweep_that_cannot_reach_herdr_changes_nothing(monkeypatch):
+    async def scenario():
+        loads, sent, graces = _sweep_world(monkeypatch, {"status": "blocked"})
+        async def down(): raise api.HerdrError("down")
+        monkeypatch.setattr(api, "load_all", down)
+        await api.sweep()
+        assert sent == [] and graces == []
+
+    asyncio.run(scenario())

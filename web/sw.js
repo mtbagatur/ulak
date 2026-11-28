@@ -17,10 +17,14 @@ self.addEventListener('push', event => {
 self.addEventListener('notificationclick', event => {
   event.notification.close();
   const { pane, url } = event.notification.data || {};
+  // The window in front gets the tap. If no window can be brought forward, a new one opens on the session itself,
+  // so the tap never ends on whatever the app happened to show.
   event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async list => {
-    for (const c of list) {
+    for (const c of [...list].sort((a, b) => (b.visibilityState === 'visible') - (a.visibilityState === 'visible'))) {
+      if (!('focus' in c)) continue;
+      try { await c.focus(); } catch { continue; }
       c.postMessage({ type: 'open', pane });
-      if ('focus' in c) return c.focus();
+      return;
     }
     return self.clients.openWindow(url || '/');
   }));

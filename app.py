@@ -69,6 +69,9 @@ work_started = {}   # pane -> when the current working stretch began (kept while
 delivery_tasks = set()
 client_presence = {} # opaque browser UUID -> last visible heartbeat timestamp
 PRESENCE_TTL = 10
+PRESENCE_STEP = 5    # a push held back for a watching phone looks again this often
+PRESENCE_HOLD = 60   # and gives up after this long: someone who watched for a minute has seen it
+SWEEP_EVERY = 60     # seconds between two looks at what Herdr really says, behind the event stream
 MAX_SUBS = 20        # phones and browsers of one owner; the oldest goes first
 AUDIT_KEEP = 500
 DELIVERY_DELAYS = (0.4, 0.8, 1.5, 2.5, 3.0)  # when to look for the answered prompt leaving the screen
@@ -434,6 +437,7 @@ async def initialize():
     except Exception as exc:
         print(f"Herdr initialization failed: {exc}", flush=True)
     asyncio.create_task(event_loop())
+    asyncio.create_task(sweep_loop())
     if APPROVAL_TIMEOUT:
         asyncio.create_task(timeout_loop())
 
@@ -506,27 +510,78 @@ async def handle_event(msg):
         card = await refresh_pane(pane)
         if card:
             await broadcast({"type": "session", "session": card})
-            worked = None
-            if card["status"] == "done":
-                began = work_started.pop(pane, None)
-                if began is None:
-                    return  # the turn began before Ulak was watching, so nobody can say it was long enough to buzz for
-                worked = now - began
-            elif card["status"] not in ("blocked", "working"):
-                work_started.pop(pane, None)
-            if card["status"] in ("blocked", "done"):
-                asyncio.create_task(push_after_grace(pane, card["status"], worked))
+            status_seen(pane, card["status"], now)
+
+
+def status_seen(pane, status, now):
+    """A pane is now in this state: keep the turn's clock and decide whether the phone should hear of it."""
+    worked = None
+    if status == "working":
+        work_started.setdefault(pane, now)
+    elif status == "done":
+        began = work_started.pop(pane, None)
+        if began is None:
+            return  # the turn began before Ulak was watching, so nobody can say it was long enough to buzz for
+        worked = now - began
+    elif status != "blocked":
+        work_started.pop(pane, None)
+    if status in ("blocked", "done"):
+        asyncio.create_task(push_after_grace(pane, status, worked))
+
+
+async def sweep():
+    """One event lost on the way would leave a question unannounced, so now and then ask Herdr what is really there.
+
+    Only while someone could hear of it: an open phone or a push subscription.
+    """
+    if not subscribers and not read_subs():
+        return
+    before = {pane: item.get("status") for pane, item in sessions.items()}
+    try:
+        cards = await load_all()
+    except HerdrError:
+        return  # the event stream reports the outage and repairs it
+    now = time.time()
+    for pane in sorted(set(before) - set(sessions)):
+        await broadcast({"type": "removed", "pane": pane})
+    for card in cards:
+        pane, status = card["pane_id"], card.get("status")
+        if status == "working":
+            work_started.setdefault(pane, now)
+        if before.get(pane) == status:
+            continue
+        await broadcast({"type": "session", "session": card})
+        status_seen(pane, status, now)
+
+
+async def sweep_loop():
+    while True:
+        await asyncio.sleep(SWEEP_EVERY)
+        try:
+            await sweep()
+        except Exception as exc:
+            print(f"sweep failed: {exc}", flush=True)
+
+
+def phone_watching(now):
+    return any(now - seen <= PRESENCE_TTL for seen in client_presence.values())
 
 
 async def push_after_grace(pane, status, worked=None):
     if status == "done" and worked is not None and worked < MIN_WORK:
         return  # a quick turn: the phone does not need to buzz
     await asyncio.sleep(10)
+    # A phone that is looking does not need a buzz. But it may be locked a second later, so the push waits
+    # rather than being thrown away, and goes out when the phone stops looking while the state still stands.
+    held = 0
+    while phone_watching(time.time()):
+        if held >= PRESENCE_HOLD:
+            return
+        await asyncio.sleep(PRESENCE_STEP)
+        held += PRESENCE_STEP
     item = sessions.get(pane)
     now = time.time()
     if not item or item.get("status") != status:
-        return
-    if any(now - seen <= PRESENCE_TTL for seen in client_presence.values()):
         return
     if not gate.allow(pane, status, now):
         return
