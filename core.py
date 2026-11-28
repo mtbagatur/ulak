@@ -170,6 +170,27 @@ def parse_approval(text, agent=None):
     }
 
 
+# --- A command taller than the screen, pinned to the one call in the record it can be ---
+FULL_MAX = 64 * 1024   # the longest command that is handed to a phone to be read
+FULL_MIN_SHOWN = 40    # fewer characters on screen than this pin nothing
+
+
+def squash(text):
+    """`text` without the border Claude draws at the start of each line and without any white space: a terminal wraps and indents as it likes."""
+    return re.sub(r"\s+", "", re.sub(r"(?m)^\s*[│┃]", "", str(text or "")))
+
+
+def full_candidates(shown, calls):
+    part = squash(shown)
+    return [c["command"] for c in calls if c.get("tool") == "Bash" and c.get("command") and part in squash(c["command"] + c.get("description", ""))]
+
+
+def full_command(shown, calls):
+    """The whole command of the one open Bash call that holds every character shown on screen, in order; None when nothing or more than one does."""
+    found = full_candidates(shown, calls)
+    pinned = len(found) == 1 and len(squash(shown)) >= FULL_MIN_SHOWN and len(found[0]) <= FULL_MAX
+    return found[0] if pinned else None
+
 
 # --- Generic prompts: numbered choices, unnumbered trust dialog, multi-select ---
 CURSORS = "❯›>➤▶●○◉"

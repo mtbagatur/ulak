@@ -1,6 +1,7 @@
 import asyncio
 import subprocess
 import getpass
+import hashlib
 import json
 import mimetypes
 import os
@@ -22,7 +23,7 @@ from pydantic import BaseModel
 
 import chat as transcripts
 from chat import claude_chat, claude_meters, claude_page, claude_path, earlier_conversations, detect_model, search_transcript, preview_from_screen, screen_chat, SPINNER, strip_ansi
-from core import CSP, NotificationGate, tidy_details, bucket, build_push, card_options, clean_subscription, hidden_chars, push_topic, strip_jpeg, is_destructive, parse_approval, parse_codex_limits, parse_limits, parse_prompt, project_name, status_rank, slash_commands, changes
+from core import CSP, FULL_MAX, NotificationGate, full_candidates, full_command, show_hidden, tidy_details, bucket, build_push, card_options, clean_subscription, hidden_chars, push_topic, strip_jpeg, is_destructive, parse_approval, parse_codex_limits, parse_limits, parse_prompt, project_name, status_rank, slash_commands, changes
 from herdr_client import HerdrClient, HerdrError, HerdrUnavailable
 
 ROOT = Path(__file__).parent
@@ -272,7 +273,39 @@ def pending_from_read(text, agent=None):
 async def fresh_pending(pane):
     # A blocked pane only exposes its visible screen (no scrollback).
     output = await client.call("agent.read", {"target": pane, "source": "visible"})
-    return pending_from_read(output.get("read", {}).get("text", ""), (sessions.get(pane) or {}).get("agent"))
+    pending = pending_from_read(output.get("read", {}).get("text", ""), (sessions.get(pane) or {}).get("agent"))
+    return await asyncio.to_thread(with_full, pane, pending)
+
+
+def with_full(pane, p, shown=None):
+    """A Claude request whose command ran off the screen, with the whole command when the record pins it. Anything else comes back as it was.
+
+    `shown` is the command as the screen has it, when `p` no longer carries that. The fingerprint then covers the whole text;
+    the one the screen alone gives is kept in `screen`, for the places that only ever see the screen."""
+    if not p or not p.get("cut") or p.get("kind", "approval") != "approval" or (sessions.get(pane) or {}).get("agent") != "claude":
+        return p
+    try:
+        path = transcript_of(pane)[0]
+        calls = transcripts.open_calls(path) if path else None
+    except (OSError, HTTPException):
+        calls = None
+    shown = p.get("command", "") if shown is None else shown
+    full = full_command(shown, calls or [])
+    if full is None:
+        found = full_candidates(shown, calls or [])
+        p["approvable"] = False
+        p["cut_reason"] = "no_record" if calls is None else "too_long" if len(found) == 1 and len(found[0]) > FULL_MAX else "no_match"
+        return p
+    p["screen"] = p["fingerprint"]
+    p.update(full=show_hidden(full), full_source="transcript", approvable=True,
+             destructive=bool(p.get("destructive")) or is_destructive(full, RULES), hidden=sorted(set(p.get("hidden") or []) | set(hidden_chars(full))),
+             fingerprint=hashlib.sha256((p["fingerprint"] + "\0" + full).encode()).hexdigest()[:16])
+    return p
+
+
+def on_screen(p):
+    """The fingerprint the screen alone gives a prompt."""
+    return p.get("screen") or p["fingerprint"]
 
 
 async def fresh_prompt(pane, agent):
@@ -285,7 +318,7 @@ async def fresh_prompt(pane, agent):
 
 def discard_changed_confirmation(pane, fingerprint):
     confirmation = pending_confirm.get(pane)
-    if confirmation and confirmation["fingerprint"] != fingerprint:
+    if confirmation and fingerprint not in (confirmation["fingerprint"], confirmation.get("screen")):
         pending_confirm.pop(pane, None)
 
 
@@ -757,7 +790,7 @@ async def expire_approvals(now=None):
         try:
             with exclusive_prompt_reply(pane):
                 pending = await fresh_pending(pane)
-                if not pending or pending["fingerprint"] != fingerprint or "deny" not in pending["keys"]:
+                if not pending or on_screen(pending) != fingerprint or "deny" not in pending["keys"]:
                     waiting.pop(pane, None)  # the card is stale; time whatever is really there from scratch
                     continue
                 await client.call("agent.send_keys", {"target": pane, "keys": [pending["keys"]["deny"]]})
@@ -976,6 +1009,10 @@ async def chat(pane: str, limit: int = 60, anchor: int | None = Query(None, alia
         prompt = parse_prompt(screen, item.get("agent", "claude"))
         if prompt:
             prompt["destructive"] = bool(prompt["kind"] == "approval" and is_destructive(prompt["details"], RULES))
+            if prompt.get("cut"):  # matched on the screen's own characters, before anything was tidied or written out
+                raw = (parse_approval(screen, item.get("agent", "claude")) or {}).get("command", "")
+                prompt = await asyncio.to_thread(with_full, pane, prompt, raw)
+                prompt.pop("screen", None)
     discard_changed_confirmation(pane, (prompt or {}).get("fingerprint"))
     if messages is None:
         messages = screen_chat(screen, max(10, min(limit, 200)))
@@ -1111,15 +1148,21 @@ async def _approve(pane, item, action, request, seen):
     except Exception:
         pending = None
     discard_changed_confirmation(pane, (pending or {}).get("fingerprint"))
-    seen.update(command=(pending or {}).get("command", ""), destructive=bool((pending or {}).get("destructive")))
+    whole = bool((pending or {}).get("full"))  # read from the record: it goes on the audit record as it is, from its first character
+    said = (pending or {}).get("full") or (pending or {}).get("command", "")
+    seen.update(command=said, destructive=bool((pending or {}).get("destructive")), plain=whole)
     if not pending:
         raise HTTPException(409, "No recognised approval on screen; use the terminal")
-    if not action.fingerprint or not secrets.compare_digest(action.fingerprint, pending["fingerprint"]):
+    # A refusal needs no more than the screen; a yes to a command read from the record must name that whole command.
+    known = [pending["fingerprint"]] + ([on_screen(pending)] if action.decision == "deny" else [])
+    if not action.fingerprint or not any(secrets.compare_digest(action.fingerprint, one) for one in known):
         raise HTTPException(409, "The approval screen changed; refresh")
     if action.decision not in pending["keys"]:
         raise HTTPException(409, "This prompt has no such option")
-    if pending.get("cut") and item.get("agent") == "claude" and action.decision != "deny":
+    if pending.get("cut") and not pending.get("approvable") and item.get("agent") == "claude" and action.decision != "deny":
         raise HTTPException(409, "The full command is not visible; it can only be denied")
+    if action.decision == "always" and whole:
+        raise HTTPException(400, "Session-wide allow is disabled for a command read from the record")
     if action.decision == "always" and pending["destructive"]:
         raise HTTPException(400, "Session-wide allow is disabled for destructive commands")
     if action.decision == "always" and pending["hidden"]:
@@ -1139,13 +1182,13 @@ async def _approve(pane, item, action, request, seen):
             raise HTTPException(409, "The confirmation is no longer valid; try again")
     elif needs_confirmation:
         token = secrets.token_urlsafe(24)
-        pending_confirm[pane] = {"token": token, "decision": action.decision, "fingerprint": pending["fingerprint"], "expires": time.time() + 120}
-        audit(pane, action.decision, "confirm_requested", login=who(request), command=pending["command"], destructive=True)
-        return {"confirm_required": True, "confirm_token": token, "command": tidy_details(pending["command"])}
+        pending_confirm[pane] = {"token": token, "decision": action.decision, "fingerprint": pending["fingerprint"], "screen": on_screen(pending), "expires": time.time() + 120}
+        audit(pane, action.decision, "confirm_requested", login=who(request), command=said, destructive=True, plain=whole)
+        return {"confirm_required": True, "confirm_token": token, "command": said if whole else tidy_details(said)}
     pending_confirm.pop(pane, None)
     await client.call("agent.send_keys", {"target": pane, "keys": [pending["keys"][action.decision]]})
-    entry = audit(pane, action.decision, "sent", login=who(request), command=pending["command"], destructive=pending["destructive"])
-    track_delivery(pane, pending["fingerprint"], entry)
+    entry = audit(pane, action.decision, "sent", login=who(request), command=said, destructive=pending["destructive"], plain=whole)
+    track_delivery(pane, on_screen(pending), entry)
     return {"ok": True, "next": next_blocked(pane)}
 
 
@@ -1211,7 +1254,7 @@ async def send_keys(pane: str, action: Action, request: Request):
         if item.get("status") == "blocked":
             entry = audit(pane, "keys", "sent", login=who(request), command=typed, destructive=bool((pending or {}).get("destructive")), plain=True)
             if waiting and waiting.get("fingerprint"):
-                track_delivery(pane, waiting["fingerprint"], entry)
+                track_delivery(pane, on_screen(waiting), entry)
     return {"ok": True}
 
 

@@ -512,6 +512,35 @@ def claude_meters(path, tail_bytes=700_000):
     return meters
 
 
+def open_calls(path, tail_bytes=2_000_000):
+    """The tool calls on the main chain that the end of a transcript shows no answer to, oldest first. Only Bash has a `command`."""
+    calls = {}
+    with Path(path).open("rb") as f:
+        size = f.seek(0, 2)
+        lines = list(_whole_lines(f, max(0, size - tail_bytes), size))
+    for _, line in lines:
+        if "tool_use" not in line:  # a result names its call as tool_use_id
+            continue
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(d, dict) or d.get("isSidechain") or not isinstance(d.get("message"), dict):
+            continue
+        content = d["message"].get("content")
+        for block in content if isinstance(content, list) else []:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "tool_use" and d.get("type") == "assistant":
+                inp = block.get("input") if isinstance(block.get("input"), dict) else {}
+                text = lambda key: inp[key] if isinstance(inp.get(key), str) else ""
+                calls[block.get("id")] = {"tool": str(block.get("name") or ""), "command": text("command") if block.get("name") == "Bash" else "",
+                                          "description": text("description")}
+            elif block.get("type") == "tool_result":
+                calls.pop(block.get("tool_use_id"), None)
+    return list(calls.values())
+
+
 def _count(value):
     return value if type(value) is int and value > 0 else 0
 

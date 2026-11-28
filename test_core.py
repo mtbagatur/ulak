@@ -2816,3 +2816,180 @@ def test_card_offers_a_short_single_choice():
     edge["question"], edge["options"][0]["label"] = "s" * 160, "x" * 40
     edge["options"].append({"n": 4, "label": "Dört", "desc": "", "role": "choice", "keys": ["4", "Enter"]})
     assert [o["n"] for o in card_options(edge)] == [1, 2, 3, 4]
+
+
+# --- A command too long for the screen, read whole from the record ---
+LONG_LOG = Path(__file__).parent / "fixtures/claude-long-command.jsonl"
+LONG_FULL = json.loads(LONG_LOG.read_text().splitlines()[-1])["message"]["content"][0]["input"]["command"]
+BUILD = " && \\\n".join(f"echo step-{i:02d}-of-the-long-build" for i in range(1, 41))
+
+
+def _call(i, name="Bash", sidechain=False, **inp):
+    return {"type": "assistant", "isSidechain": sidechain, "message": {"role": "assistant", "content": [{"type": "tool_use", "id": f"t{i}", "name": name, "input": inp}]}}
+
+
+def _answer(i):
+    return {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": f"t{i}", "content": "ok"}]}}
+
+
+def _record(tmp_path, *lines):
+    path = tmp_path / "record.jsonl"
+    path.write_text("".join(json.dumps(line) + "\n" for line in lines))
+    return path
+
+
+def _cut_screen(command, rows=12):
+    """What Claude leaves of a command taller than the terminal: its last rows, no rule above them."""
+    shown = "\n".join(f" │ {line}" for line in command.splitlines()[-rows:])
+    return shown + "\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. Yes, and don't ask again for: echo *\n   3. No\n"
+
+
+def test_open_calls_lists_only_unanswered_main_chain_calls(tmp_path):
+    path = _record(tmp_path, _call(1, command="ls", description="List"), _answer(1), _call(2, sidechain=True, command="pwd"),
+                   _call(3, command="make all", description="Build it"), _call(4, "Read", file_path="/tmp/x"), "not a message", {"type": "user", "message": {"content": "hi"}})
+    assert chat_module.open_calls(path) == [{"tool": "Bash", "command": "make all", "description": "Build it"}, {"tool": "Read", "command": "", "description": ""}]
+
+
+def test_full_command_from_the_real_screen():
+    from core import full_command
+    shown = parse_approval(LONG, "claude")["command"]
+    assert "yoklama-01-919" not in shown
+    assert full_command(shown, chat_module.open_calls(LONG_LOG)) == LONG_FULL and LONG_FULL.startswith("touch yoklama-01-919.txt")
+
+
+@pytest.mark.parametrize("case", ["no_calls", "other_text", "two_candidates", "not_bash", "short_fragment", "over_64k"])
+def test_full_command_refuses_what_it_cannot_pin(case):
+    import core
+    shown = "\n".join(f" │ {line}" for line in BUILD.splitlines()[-12:])
+    call = {"tool": "Bash", "command": BUILD, "description": ""}
+    assert core.full_command(shown, [call]) == BUILD
+    calls, text = {
+        "no_calls": ([], shown),
+        "other_text": ([call], shown.replace("step-35", "step-99")),
+        "two_candidates": ([call, {**call, "command": "rm -rf / && \\\n" + BUILD}], shown),
+        "not_bash": ([{**call, "tool": "Write"}], shown),
+        "short_fragment": ([call], " │ echo step-40-of-the-long-build"),
+        "over_64k": ([{**call, "command": "echo " + "x" * core.FULL_MAX + " && \\\n" + BUILD}], shown),
+    }[case]
+    assert len(core.squash(" │ echo step-40-of-the-long-build")) < core.FULL_MIN_SHOWN
+    assert core.full_command(text, calls) is None
+
+
+def test_wrapped_and_indented_lines_still_match():
+    from core import full_command, squash
+    command = "python - <<'EOF'\nfor name in ['alpha', 'beta', 'gamma']:\n    print(name, 'is a rather long line that the terminal has to break somewhere in the middle of it')\nEOF"
+    screen = (" │ for name in ['alpha', 'beta', 'gamma']:\n │     print(name, 'is a rather long line that the terminal has to break\n"
+              " │ somewhere in the middle of it')\n ┃ EOF\n   Print three names")
+    assert squash(" │  a b\n┃\tc\n") == "abc"
+    assert full_command(screen, [{"tool": "Bash", "command": command, "description": "Print three names"}]) == command
+
+
+def _long(monkeypatch, tmp_path, screen, *lines):
+    fake, c, h = _setup2(monkeypatch, screen)
+    path = _record(tmp_path, *lines) if lines else None
+    monkeypatch.setattr(api, "raw_agents", {"w9:p1": {"pane_id": "w9:p1", "cwd": str(tmp_path), "agent_session": {"value": "sid"}}})
+    monkeypatch.setattr(api, "claude_path", lambda *a: path)
+    monkeypatch.setattr(api, "read_cache", {})
+    return fake, c, h, path
+
+
+APPROVE = "/api/sessions/w9:p1/approve"
+
+
+def test_long_command_read_from_the_record_can_be_approved(monkeypatch, tmp_path):
+    fake, c, h, _ = _long(monkeypatch, tmp_path, LONG, *[json.loads(line) for line in LONG_LOG.read_text().splitlines()])
+    on_screen = parse_approval(LONG, "claude")["fingerprint"]
+    p = c.get("/api/sessions/w9:p1/chat", headers=h).json()["prompt"]
+    assert p["full"] == LONG_FULL and p["full_source"] == "transcript" and p["approvable"] is True and p["cut"] is True
+    assert p["fingerprint"] != on_screen and "cut_reason" not in p
+    stale = c.post(APPROVE, headers=h, json={"decision": "approve", "fingerprint": on_screen})
+    assert stale.status_code == 409 and fake.sent == []
+    assert c.post(APPROVE, headers=h, json={"decision": "approve", "fingerprint": p["fingerprint"]}).status_code == 200
+    assert fake.sent == [["1"]]
+    sent = api.read_audit()[-1]
+    assert sent["outcome"] == "sent" and sent["command"].startswith("touch yoklama-01-919.txt")  # the record says what was approved, from its first character
+
+
+def test_long_command_cannot_be_allowed_for_the_session(monkeypatch, tmp_path):
+    fake, c, h, _ = _long(monkeypatch, tmp_path, _cut_screen(BUILD), _call(1, command=BUILD))
+    fp = c.get("/api/sessions/w9:p1/chat", headers=h).json()["prompt"]["fingerprint"]
+    r = c.post(APPROVE, headers=h, json={"decision": "always", "fingerprint": fp})
+    assert r.status_code == 400 and r.json()["detail"] == "Session-wide allow is disabled for a command read from the record"
+    assert fake.sent == []
+
+
+@pytest.mark.parametrize("reason", ["no_record", "no_match", "too_long"])
+def test_long_command_the_record_cannot_pin_is_still_deny_only(monkeypatch, tmp_path, reason):
+    import core
+    lines = {"no_record": [], "no_match": [_call(1, command="echo something else entirely")],
+             "too_long": [_call(1, command="echo " + "x" * core.FULL_MAX + " && \\\n" + BUILD)]}[reason]
+    fake, c, h, _ = _long(monkeypatch, tmp_path, _cut_screen(BUILD), *lines)
+    p = c.get("/api/sessions/w9:p1/chat", headers=h).json()["prompt"]
+    assert p["approvable"] is False and p["cut_reason"] == reason and "full" not in p
+    assert p["fingerprint"] == parse_approval(_cut_screen(BUILD), "claude")["fingerprint"]
+    r = c.post(APPROVE, headers=h, json={"decision": "approve", "fingerprint": p["fingerprint"]})
+    assert r.status_code == 409 and r.json()["detail"] == "The full command is not visible; it can only be denied" and fake.sent == []
+    assert c.post(APPROVE, headers=h, json={"decision": "deny", "fingerprint": p["fingerprint"]}).status_code == 200
+    assert fake.sent == [["3"]]
+
+
+def test_long_command_is_judged_by_its_whole_text(monkeypatch, tmp_path):
+    whole = "rm -rf build && \\\n" + BUILD
+    fake, c, h, _ = _long(monkeypatch, tmp_path, _cut_screen(whole), _call(1, command=whole))
+    assert not is_destructive(parse_approval(_cut_screen(whole), "claude")["command"], "/missing")
+    p = c.get("/api/sessions/w9:p1/chat", headers=h).json()["prompt"]
+    assert p["approvable"] and p["destructive"] is True
+    first = c.post(APPROVE, headers=h, json={"decision": "approve", "fingerprint": p["fingerprint"]}).json()
+    assert first["confirm_required"] and first["command"].startswith("rm -rf build") and fake.sent == []
+    # The home screen rebuilds its card from the screen alone; that must not cancel the second step.
+    api.discard_changed_confirmation("w9:p1", parse_approval(_cut_screen(whole), "claude")["fingerprint"])
+    ok = c.post(APPROVE, headers=h, json={"decision": "approve", "fingerprint": p["fingerprint"], "confirm_token": first["confirm_token"]})
+    assert ok.status_code == 200 and fake.sent == [["1"]]
+
+
+def test_long_command_names_the_characters_nobody_can_see(monkeypatch, tmp_path):
+    whole = "echo ‮safe && \\\n" + BUILD
+    fake, c, h, _ = _long(monkeypatch, tmp_path, _cut_screen(whole), _call(1, command=whole))
+    p = c.get("/api/sessions/w9:p1/chat", headers=h).json()["prompt"]
+    assert p["approvable"] and p["hidden"] == ["U+202E"] and "⟨U+202E⟩" in p["full"] and "‮" not in p["full"]
+
+
+def test_long_command_is_refused_once_the_record_has_moved_on(monkeypatch, tmp_path):
+    fake, c, h, path = _long(monkeypatch, tmp_path, _cut_screen(BUILD), _call(1, command=BUILD))
+    fp = c.get("/api/sessions/w9:p1/chat", headers=h).json()["prompt"]["fingerprint"]
+    with path.open("a") as f:
+        f.write(json.dumps(_answer(1)) + "\n")
+    assert c.post(APPROVE, headers=h, json={"decision": "approve", "fingerprint": fp}).status_code == 409
+    assert fake.sent == []
+
+
+def test_long_command_can_be_denied_from_the_card(monkeypatch, tmp_path):
+    fake, c, h, _ = _long(monkeypatch, tmp_path, _cut_screen(BUILD), _call(1, command=BUILD))
+
+    async def screen(*args, **kwargs):
+        return _cut_screen(BUILD)
+    monkeypatch.setattr(api, "read_screen", screen)
+    card = asyncio.run(api.make_card({"pane_id": "w9:p1", "agent": "claude", "agent_status": "blocked", "cwd": str(tmp_path)}))
+    assert card["pending"]["cut"] is True and "full" not in card["pending"] and "approvable" not in card["pending"]
+    assert c.post(APPROVE, headers=h, json={"decision": "deny", "fingerprint": card["pending"]["fingerprint"]}).status_code == 200
+    assert fake.sent == [["3"]]
+
+
+def test_long_command_nobody_answered_is_still_denied_in_time(monkeypatch, tmp_path):
+    fake, c, h, _ = _long(monkeypatch, tmp_path, _cut_screen(BUILD), _call(1, command=BUILD))
+    monkeypatch.setattr(api, "APPROVAL_TIMEOUT", 1800)
+    monkeypatch.setattr(api, "waiting", {})
+    api.sessions["w9:p1"]["pending"] = {"kind": "approval", "fingerprint": parse_approval(_cut_screen(BUILD), "claude")["fingerprint"]}
+    assert asyncio.run(api.expire_approvals(now=1000)) == []
+    assert asyncio.run(api.expire_approvals(now=1000 + 1800)) == ["w9:p1"] and fake.sent == [["3"]]
+
+
+def test_long_command_reply_is_followed_by_what_the_screen_shows(monkeypatch, tmp_path):
+    # Delivery is told by the prompt leaving the screen, and the screen knows nothing of the record.
+    fake, c, h, _ = _long(monkeypatch, tmp_path, _cut_screen(BUILD), _call(1, command=BUILD))
+    followed = []
+    monkeypatch.setattr(api, "track_delivery", lambda pane, fingerprint, entry: followed.append(fingerprint))
+    fp = c.get("/api/sessions/w9:p1/chat", headers=h).json()["prompt"]["fingerprint"]
+    assert c.post(APPROVE, headers=h, json={"decision": "approve", "fingerprint": fp}).status_code == 200
+    assert c.post("/api/sessions/w9:p1/keys", headers=h, json={"keys": ["esc"]}).status_code == 200
+    assert followed == [parse_approval(_cut_screen(BUILD), "claude")["fingerprint"]] * 2
