@@ -19,9 +19,8 @@ body{overflow:hidden;-webkit-text-size-adjust:100%}
 /* The home-screen app draws under the iPhone status bar (black-translucent), so the page's own ground reaches the clock in either theme. Measured there on 22 and 26.11.2026: the webview then ends 47px above the screen bottom (inner=797, screen=844) and growing body/#app is clipped. .under lets the document itself be that much taller (being measured); while the webview is still short app.js keeps .sa, and the 34px bottom inset, already outside the page, is dropped. */
 html.under{min-height:calc(100% + env(safe-area-inset-top))}
 .sa{--safe-b:0px}
-/* In a browser tab the bar above the page is the browser's, in plain --bg (measured 27.11: #1c1520 over a glow of #221a22). The glow eases in below it instead of starting at a hard edge; under the clock (.under) it runs to the top. */
-html:not(.under) #home{background:linear-gradient(var(--bg),transparent 64px),radial-gradient(120% 46% at 100% 0,color-mix(in srgb,var(--zer) 9%,transparent),transparent 70%) var(--bg)}
-#home{background:radial-gradient(120% 46% at 100% 0,color-mix(in srgb,var(--zer) 9%,transparent),transparent 70%) var(--bg)}
+/* Flat ground up to the top, in a browser tab and under the clock alike: a glow or a fade there shows as bands on the phone. */
+#home{background:var(--bg)}
 .screen{position:relative;flex:1;min-height:0;display:flex;flex-direction:column;padding:0 var(--safe-r) 0 var(--safe-l);background:var(--bg)}
 #session{animation:slidein .22s var(--ease-out)}
 @keyframes slidein{from{transform:translateX(24px);opacity:0}}
@@ -126,9 +125,8 @@ button.loading::after{content:"";position:absolute;left:calc(50% - 8px);top:calc
 .c-act.choices{flex-direction:column}
 .c-act.choices button{flex:none;min-height:44px;text-align:left;padding:10px 12px;overflow-wrap:anywhere}
 .empty{padding:40px 24px;text-align:center;color:var(--muted)}
-/* The list is fully faded by the time it reaches the buttons; the fade itself lets taps through. */
-.dock{z-index:2;display:flex;gap:10px;padding:24px 12px calc(10px + var(--safe-b));background:linear-gradient(transparent,var(--bg) 24px);position:absolute;left:0;right:0;bottom:0;pointer-events:none}
-.dock>*{pointer-events:auto}
+/* Flat ground and a line: a fade at the top or bottom edge shows as bands on the phone. */
+.dock{z-index:2;display:flex;gap:10px;padding:10px 12px calc(10px + var(--safe-b));background:var(--bg);border-top:1px solid var(--line);position:absolute;left:0;right:0;bottom:0}
 .pill-btn{flex:1;border-radius:999px;background:var(--card);color:var(--strong);box-shadow:0 8px 22px -12px var(--shadow)}
 .pill-btn{border:1px solid var(--line)}
 /* Gold is kept for what waits on you, so starting something new is ink on paper instead: mürdüm by day, not black. */

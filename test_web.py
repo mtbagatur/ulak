@@ -1169,13 +1169,20 @@ def test_card_title_row_is_as_tall_as_its_text_and_the_pin_stays_a_full_target(a
     assert chrome.js("(() => { const p = document.querySelector('.card .pin'), b = p.getBoundingClientRect(); return document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2) === p || p.contains(document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)); })()")
 
 
-def test_list_has_faded_out_before_it_reaches_the_dock_buttons(api_fixture):
+def test_top_and_bottom_edges_are_flat_ground_with_no_colour_fade(api_fixture):
+    # A fade at the top or bottom edge shows as bands on the phone (Taha, 28.11.2026): flat ground, and a line above the dock.
     chrome, api, url = api_fixture
     chrome.cdp("Page.navigate", url=url)
     chrome.wait("document.querySelector('.card') !== null")
-    assert chrome.js("document.querySelector('#newSession').getBoundingClientRect().top - document.querySelector('.dock').getBoundingClientRect().top") >= 20
-    # the fade above the buttons must not swallow taps meant for the list
-    assert chrome.js("(() => { const d = document.querySelector('.dock').getBoundingClientRect(); return !document.elementFromPoint(d.left + d.width / 2, d.top + 4).closest('.dock'); })()")
+    image = "['#home', '#home .top', '.dock'].map(s => getComputedStyle(document.querySelector(s)).backgroundImage)"
+    for theme in ("dark", "light"):
+        chrome.js(f"document.documentElement.dataset.theme = '{theme}'")
+        for under in ("add", "remove"):
+            chrome.js(f"document.documentElement.classList.{under}('under')")
+            assert chrome.js(image) == ["none"] * 3, (theme, under)
+    assert chrome.js("(() => { const d = getComputedStyle(document.querySelector('.dock')), h = getComputedStyle(document.querySelector('#home')); return d.backgroundColor === h.backgroundColor && d.borderTopWidth === '1px'; })()")
+    # the bar starts close above its buttons: nothing see-through is left over the list to swallow a tap
+    assert chrome.js("document.querySelector('#newSession').getBoundingClientRect().top - document.querySelector('.dock').getBoundingClientRect().top") <= 12
 
 
 def test_theme_button_is_not_a_second_logo():
@@ -1250,12 +1257,12 @@ def test_home_screen_app_on_iphone_draws_its_own_ground_under_the_clock(api_fixt
     assert 'name="apple-mobile-web-app-status-bar-style" content="black-translucent"' in (WEB / "index.html").read_text()
     open_first(chrome, url)
     layers = "getComputedStyle(document.querySelector('#home')).backgroundImage.split('gradient(').length - 1"
-    assert chrome.js(layers) == 2  # in a browser tab the glow eases in below the browser's own bar
+    assert chrome.js(layers) == 0  # flat ground in a browser tab
     # Drawing under the bar leaves the webview short at the bottom on iOS; the document asks for the missing height,
     # and the bottom inset is dropped only while app.js still measures the page as short (.sa).
     assert chrome.js("getComputedStyle(document.documentElement).minHeight") in ("0px", "auto")
     chrome.js("document.documentElement.classList.add('under')")
-    assert chrome.js(layers) == 1  # under the clock: the glow alone, up to the top
+    assert chrome.js(layers) == 0  # and under the clock: the same flat ground, up to the top
     assert chrome.js("getComputedStyle(document.documentElement).minHeight") == "100%"  # 100% + a top inset that is 0 here
     chrome.js("document.documentElement.classList.add('sa')")
     assert chrome.js("getComputedStyle(document.querySelector('.dock')).paddingBottom") == "10px"
