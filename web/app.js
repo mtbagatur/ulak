@@ -1006,7 +1006,7 @@ function searchSheet() {
     let r;
     try { r = await api(`/api/sessions/${encodeURIComponent(pane)}/search?q=${encodeURIComponent(q)}`, undefined, undefined, mine.signal); }
     catch (e) {
-      if (!mine.signal.aborted && box.isConnected) box.replaceChildren(note('empty', e.status === 404 ? t('searchClosed') : e.message));
+      if (!mine.signal.aborted && box.isConnected) box.replaceChildren(note('empty', e.status === 404 ? t('searchClosed') : e.status === 409 ? t('searchNoRecord') : e.message));
       return;
     }
     if (mine.signal.aborted || !box.isConnected) return;

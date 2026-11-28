@@ -2783,6 +2783,9 @@ def test_search_says_when_older_was_not_read_and_when_nothing_matched(api_fixtur
     api.search_status = 404
     look_for(chrome, "armut")
     chrome.wait("document.querySelector('#sheet .empty')?.textContent === 'This session has closed.'")
+    api.search_status = 409  # the session is there, it has no record to search: not "closed"
+    look_for(chrome, "ayva")
+    chrome.wait("document.querySelector('#sheet .empty')?.textContent === 'This session has no conversation to search.'")
 
 
 def card_labels(chrome):

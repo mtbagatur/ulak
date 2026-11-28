@@ -2786,10 +2786,10 @@ def test_search_endpoint_refuses_what_it_cannot_search(monkeypatch, tmp_path):
     assert c.get("/api/sessions/w9:p1/search", headers=h).status_code == 400
     assert c.get("/api/sessions/nope/search?q=m2", headers=h).status_code == 404
     api.sessions["w9:p1"]["agent"] = "codex"
-    assert c.get("/api/sessions/w9:p1/search?q=m2", headers=h).status_code == 404
+    assert c.get("/api/sessions/w9:p1/search?q=m2", headers=h).status_code == 409
     api.sessions["w9:p1"]["agent"] = "claude"
     monkeypatch.setattr(api, "claude_path", lambda cwd, sid: None)
-    assert c.get("/api/sessions/w9:p1/search?q=m2", headers=h).status_code == 404
+    assert c.get("/api/sessions/w9:p1/search?q=m2", headers=h).status_code == 409
 
 
 def test_search_endpoint_shares_one_budget_and_one_limit(monkeypatch, tmp_path):

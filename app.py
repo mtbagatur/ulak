@@ -1107,7 +1107,7 @@ async def search(pane: str, q: str = ""):
     if not SEARCH_MIN <= len(q) <= SEARCH_MAX:
         raise HTTPException(400, "Search for 2 to 80 characters")
     if not path:
-        raise HTTPException(404, "No conversation to search")
+        raise HTTPException(409, "No conversation to search")  # 404 is kept for a session that is gone
     search_stop.set()
     search_stop = stop = threading.Event()
     return await asyncio.to_thread(search_folder, path, cwd, q, stop)
