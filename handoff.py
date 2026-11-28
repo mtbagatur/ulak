@@ -91,3 +91,74 @@ def session_name(cwd, now):
     """The name a cleared conversation is given, made only of parts Ulak knows itself."""
     project = "".join(c for c in PurePath(str(cwd or "")).name if c.isalnum() or c in "-_")[:40] or "session"
     return f"{project} devir {time.strftime('%H:%M', time.localtime(now))}"
+
+
+def fresh(on, born, conversation):
+    """A session nothing has been asked of yet."""
+    return {"on": bool(on), "born": born, "phase": "armed", "conversation": conversation, "asked_at": 0.0, "ask_at": -1, "mark_at": -1, "due": 0.0}
+
+
+def quiet(view):
+    """Nobody is there and nothing is under way: an idle Claude session with no question up, no call or subagent out and an empty input box.
+    A measure that could not be read counts as someone being there."""
+    return (view["agent"] == "claude" and view["status"] in ("idle", "done") and not view["prompt"] and view["calls"] == 0
+            and view["agents"] == 0 and view["box_empty"] is True)
+
+
+def can_clean(st, view):
+    """The note Ulak asked for is still the last word of the same conversation, and nobody has come back."""
+    return bool(st["on"] and st["phase"] == "written" and quiet(view) and view["conversation"] == st["conversation"]
+                and view["user_at"] == st["ask_at"] and view["assistant_at"] == st["mark_at"])
+
+
+def _due_to_ask(view, now, cfg):
+    cache, tokens = view["cache"], view["tokens"]
+    return bool(cache and cache["ttl"] == 3600 and cache["ttl"] - LEAD <= now - cache["since"] < cache["ttl"]
+                and tokens is not None and tokens >= cfg["min_tokens"])
+
+
+def step(st, view, now, cfg):
+    """One look at one session -> (its new state, what to do, a detail).
+
+    What to do: None, "ask" (type the handoff prompt), "written" (tell: the note is there, the wait began), "refused" (tell the reason
+    in the detail), "failed" (tell: nothing was written or the session changed), "clean" (clear, rename, continue; the state stays as it is
+    until that is done). A state that is `held` is not asked again until a person says something in that conversation."""
+    if not st["on"]:
+        return fresh(False, st["born"], view["conversation"]), None, ""
+    if view["conversation"] != st["conversation"]:  # someone cleared it, or another conversation was resumed
+        return fresh(True, st["born"], view["conversation"]), None, ""
+    st = dict(st)
+    held = lambda: ({**st, "phase": "held", "ask_at": view["user_at"] if st["ask_at"] == -1 else st["ask_at"]}, "failed", "")
+    again = lambda: (fresh(True, st["born"], st["conversation"]), None, "")
+    phase = st["phase"]
+    if phase == "armed":
+        if quiet(view) and _due_to_ask(view, now, cfg):
+            return {**st, "phase": "asked", "asked_at": now}, "ask", ""
+        return st, None, ""
+    if phase == "asked":
+        late = now - st["asked_at"] > ASK_TIMEOUT
+        if st["ask_at"] == -1:
+            if view["user_text"] != cfg["write_prompt"]:
+                return held() if late else (st, None, "")
+            st["ask_at"] = view["user_at"]
+        if view["user_at"] != st["ask_at"]:
+            return again()  # the person wrote: their turn, not ours
+        if view["status"] in ("idle", "done") and not view["prompt"] and view["assistant_at"] != -1:
+            mark = read_mark(view["assistant_text"])
+            if not mark:
+                return held()
+            if mark[0] == "refused":
+                return {**st, "phase": "held"}, "refused", mark[1]
+            return {**st, "phase": "written", "mark_at": view["assistant_at"], "due": now + cfg["grace_seconds"]}, "written", ""
+        return held() if late else (st, None, "")
+    if phase == "written":
+        if view["user_at"] != st["ask_at"] or view["status"] == "working" or view["assistant_at"] != st["mark_at"]:
+            return again()
+        if now < st["due"]:
+            return st, None, ""
+        return (st, "clean", "") if can_clean(st, view) else held()
+    if st["ask_at"] == -1:  # held before the record showed what was asked: the hold lasts until the next thing a person says
+        return {**st, "ask_at": view["user_at"]}, None, ""
+    if view["user_at"] != st["ask_at"] and view["user_text"] != cfg["write_prompt"]:
+        return again()
+    return st, None, ""
