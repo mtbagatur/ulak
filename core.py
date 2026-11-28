@@ -120,23 +120,27 @@ def parse_approval(text, agent=None):
     if q is None:
         return None
     options, seen_option, between = {}, False, []
+    column, last = 0, None  # where the option numbers stand, and the answer the last option was taken as
     for line in lines[q + 1:q + 20]:
         m = OPTION.match(line)
         if not m and not seen_option:
             between.append(line)
         if not m:
             if seen_option and line.strip():
-                break
+                if len(line) - len(line.lstrip()) <= column:
+                    break
+                if last:  # a long option runs on under its own text
+                    key, label = options[last]
+                    options[last] = (key, f"{label} {line.strip()}")
             continue
         seen_option = True
         key, label = m.group(1), m.group(2)
+        column, last = m.start(1), None
         low = label.lower()
-        if low.startswith(("no", "reject")):
-            options.setdefault("deny", (key, label))
-        elif low.startswith("yes") and ALWAYS.search(label):
-            options.setdefault("always", (key, label))
-        elif (low.startswith("yes") or low.startswith("accept")) and "auto mode" not in low:
-            options.setdefault("approve", (key, label))
+        role = ("deny" if low.startswith(("no", "reject")) else "always" if low.startswith("yes") and ALWAYS.search(label)
+                else "approve" if (low.startswith("yes") or low.startswith("accept")) and "auto mode" not in low else None)
+        if role and role not in options:
+            options[role], last = (key, label), role
     if "approve" not in options or "deny" not in options:
         return None
     start, found_divider = q, False

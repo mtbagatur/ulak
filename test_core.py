@@ -196,6 +196,23 @@ CODEX = """• I need to run a command outside the sandbox.
   3. No, and tell Codex what to do differently (esc)
 """
 
+LONG = (Path(__file__).parent / "fixtures/claude-long-command.txt").read_text()
+
+
+def test_an_option_that_wraps_onto_a_second_line_is_still_read():
+    p = parse_approval(LONG, "claude")
+    assert p and p["keys"] == {"approve": "1", "always": "2", "deny": "4"}
+    assert p["labels"]["always"].endswith("commands in /tmp/probe") and "yoklama-05-595.txt" in p["labels"]["always"]
+    assert p["cut"] is True
+    assert "more lines" not in p["command"] and "╌" not in p["command"] and "yoklama-80-520.txt" in p["command"]
+
+
+def test_a_line_left_of_the_options_still_ends_them():
+    screen = "─" * 40 + "\n Bash command\n\n   ls\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n Esc to cancel\n   3. Yes, and don't ask again\n"
+    p = parse_approval(screen, "claude")
+    assert p["keys"] == {"approve": "1", "deny": "2"}
+
+
 def test_claude_keys_from_options():
     p = parse_approval(CLAUDE)
     assert p["keys"] == {"approve": "1", "always": "2", "deny": "4"}
