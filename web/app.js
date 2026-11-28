@@ -1088,11 +1088,12 @@ function renderPrompt(p, status) {
   const tag = p.destructive ? `<span class="tag">${esc(t('destructive'))}</span>` : '';
   if (p.kind === 'approval') {
     const roles = Object.fromEntries(p.options.map(o => [o.role, o]));
-    const denyOnly = p.cut;
+    const denyOnly = p.cut && !p.approvable;  // the record pinned every character: it can be answered like any other
+    const why = {no_record: 'cutNoRecord', no_match: 'cutNoMatch', too_long: 'cutTooLong'}[p.cut_reason] || 'cutNote';
     const unseen = (p.hidden || []).join(', ');  // a command that is not what it looks like is answered once, here, never for the whole session
-    zone.innerHTML = `<div class="prompt${two}${isSealed(state.current, p) ? ' stamped' : ''}"><h3>${p.destructive ? `${icon('seal', 15)}${icon('seal', 15)}<span>${esc(t('destructive'))}</span>` : esc(t('waitingApproval'))}</h3><pre>${esc(p.details)}</pre>${unseen ? `<p class="hidden-note">${esc(t('hiddenNote', {c: unseen}))}</p>` : ''}${p.hook_note ? `<p class="hook-note">${esc(p.hook_note)}</p>` : ''}${denyOnly ? `<p class="q">${esc(t('cutNote'))}</p>` : ''}${p.destructive && !denyOnly ? `<p class="hook-note two-note">${esc(t('twoSealsNote'))}</p>` : ''}
+    zone.innerHTML = `<div class="prompt${two}${p.full || denyOnly ? ' fit' : ''}${isSealed(state.current, p) ? ' stamped' : ''}"><h3>${p.destructive ? `${icon('seal', 15)}${icon('seal', 15)}<span>${esc(t('destructive'))}</span>` : esc(t('waitingApproval'))}</h3>${p.full ? `<p class="full-note">${esc(t('fullFromRecord'))}</p><pre class="full" tabindex="0">${esc(p.full)}</pre>` : `<pre>${esc(p.details)}</pre>`}${unseen ? `<p class="hidden-note">${esc(t('hiddenNote', {c: unseen}))}</p>` : ''}${p.hook_note ? `<p class="hook-note">${esc(p.hook_note)}</p>` : ''}${denyOnly ? `<p class="q cut-note">${esc(t(why))}</p>` : ''}${p.destructive && !denyOnly ? `<p class="hook-note two-note">${esc(t('twoSealsNote'))}</p>` : ''}
       <div class="acts"><button class="deny" data-d="deny">${esc(t('deny'))}</button>${denyOnly ? '' : p.destructive ? `<button class="seal red" data-d="approve">${esc(t('review'))}</button>` : `<button class="seal" data-d="approve">${icon('seal', 18)}${esc(t('approve'))}</button>`}</div>
-      ${!denyOnly && roles.always && !p.destructive && !unseen ? `<details class="more"><summary>${esc(t('otherAnswers'))}</summary><p>${esc(t('alwaysNote'))}</p><button class="also" data-d="always">${esc(t('alwaysAllow'))}</button></details>` : ''}${isSealed(state.current, p) ? stampHtml(p) : ''}</div>`;
+      ${!denyOnly && !p.full && roles.always && !p.destructive && !unseen ? `<details class="more"><summary>${esc(t('otherAnswers'))}</summary><p>${esc(t('alwaysNote'))}</p><button class="also" data-d="always">${esc(t('alwaysAllow'))}</button></details>` : ''}${isSealed(state.current, p) ? stampHtml(p) : ''}</div>`;
     zone.querySelectorAll('[data-d]').forEach(b => b.onclick = () => decide(b.dataset.d, b));
     return;
   }

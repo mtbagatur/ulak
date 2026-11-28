@@ -2954,3 +2954,58 @@ def test_a_long_chip_row_scrolls_without_widening_the_page(api_fixture, theme):
         const sheet = document.querySelector('#sheet').getBoundingClientRect();
         return document.documentElement.scrollWidth === 320 && [...document.querySelectorAll('#sheet .chip-list li, #sheet .chip-list button, #sheet .chip-new *')].every(e => { const r = e.getBoundingClientRect(); return r.left >= sheet.left && r.right <= sheet.right; });
     })()""")
+
+
+# --- an over-long command: all of it when the record pins it, the reason when it does not ---
+
+LONG = "\n".join(f"echo line-{i:04d} " + "x" * 60 for i in range(280))  # about 20 KB
+FULL = {**APPROVAL, "fingerprint": "full-approval", "details": LONG[:300], "cut": True, "approvable": True, "full": LONG, "full_source": "transcript",
+        "roles": ["approve", "always", "deny"], "options": [{"role": "approve"}, {"role": "always"}, {"role": "deny"}]}
+
+
+def test_full_command_ui_shows_the_whole_command_in_a_box_that_scrolls(api_fixture):
+    chrome, api, url = api_fixture
+    assert 19000 < len(LONG) < 22000
+    chrome.resize(320, 568)
+    api.publish_prompt({**FULL, "cut": False, "approvable": None, "full": None, "fingerprint": "short"})
+    open_first(chrome, url)
+    chrome.wait("document.querySelector('#promptZone [data-d=always]') !== null")  # the same answers on a command that fits: session-wide allow is offered
+    api.publish_prompt(FULL)
+    chrome.wait("document.querySelector('#promptZone pre.full') !== null")
+    assert chrome.js("document.querySelector('#promptZone pre.full').textContent") == LONG
+    assert chrome.js("document.querySelectorAll('#promptZone pre').length") == 1
+    assert chrome.js("document.querySelector('#promptZone .full-note').textContent") == "The whole command, read from the session record."
+    box = chrome.js("(() => { const e = document.querySelector('#promptZone pre.full'), r = e.getBoundingClientRect(); return {h: r.height, max: innerHeight * .45, scrolls: e.scrollHeight > e.clientHeight + 100, flow: getComputedStyle(e).overflowY, top: r.top}; })()")
+    assert box["h"] <= box["max"] and box["scrolls"] and box["flow"] == "auto" and box["top"] >= 0
+    assert chrome.js("document.querySelector('#promptZone [data-d=approve]') !== null && document.querySelector('#promptZone [data-d=deny]') !== null")
+    assert chrome.js("document.querySelector('#promptZone [data-d=always]') === null")
+    seen = chrome.js("""(() => ['#message', '#send', '#promptZone [data-d=approve]', '#promptZone [data-d=deny]', '#promptZone .full-note'].map(q => {
+        const r = document.querySelector(q).getBoundingClientRect(); return r.height > 0 && r.top >= 0 && r.bottom <= innerHeight && r.right <= innerWidth; }))()""")
+    assert seen == [True] * 5
+    assert chrome.js("document.querySelector('#promptZone [data-d=approve]').getBoundingClientRect().bottom <= document.querySelector('#composer').getBoundingClientRect().top")
+    assert chrome.js("document.documentElement.scrollWidth") == 320
+    chrome.click(APPROVE)
+    wait_for(lambda: api.requests, "the approval")
+    assert api.requests[-1]["fingerprint"] == "full-approval" and api.requests[-1]["decision"] == "approve"
+
+
+@pytest.mark.parametrize("reason, words", [
+    ("no_record", "this session has no record to read it from"),
+    ("no_match", "two commands at once"),
+    ("too_long", "longer than 64 KB"),
+    (None, "does not fit on screen, so it can only be denied"),
+])
+def test_full_command_ui_only_denies_and_says_why_when_the_record_does_not_pin_it(api_fixture, reason, words):
+    chrome, api, url = api_fixture
+    chrome.resize(320, 568)
+    api.publish_prompt({**FULL, "approvable": False, "full": None, "cut_reason": reason, "fingerprint": f"cut-{reason}"})
+    open_first(chrome, url)
+    chrome.wait("document.querySelector('#promptZone [data-d=deny]') !== null")
+    assert chrome.js("document.querySelector('#promptZone [data-d=approve]') === null && document.querySelector('#promptZone [data-d=always]') === null")
+    assert chrome.js("document.querySelector('#promptZone pre.full') === null && document.querySelector('#promptZone .full-note') === null")
+    note = chrome.js("document.querySelector('#promptZone .cut-note').textContent")
+    assert words in note and "denied" in note
+    floor = chrome.js("document.querySelector('#composer').getBoundingClientRect().top")
+    for q in ["#promptZone .cut-note", "#promptZone [data-d=deny]", "#promptZone pre"]:  # the reason and the one answer are in view, the command gives way
+        r = chrome.js(f"(() => {{ const r = document.querySelector({json.dumps(q)}).getBoundingClientRect(); return [r.width > 0, r.right <= innerWidth, r.top >= 0, r.bottom]; }})()")
+        assert r[:3] == [True, True, True] and r[3] <= floor, (q, r, floor)

@@ -288,6 +288,14 @@ details.tool pre{margin:6px 0 0;padding:8px 10px;background:var(--bg2);border-ra
 .prompt .q{color:var(--strong);margin:0 0 8px;font-size:15px;overflow-wrap:anywhere}
 .hidden-note{margin:6px 0 0;color:var(--strong);font-size:12.5px;font-weight:600;line-height:1.35;overflow-wrap:anywhere}
 .prompt .hidden-note{margin:-2px 0 10px}
+.prompt .full-note{margin:-2px 0 8px;font-size:13px;color:var(--muted)}
+/* A long command gives way, not the answers: the box shrinks until the notes and the buttons fit in the zone. */
+#promptZone:has(.prompt.fit){display:flex;flex-direction:column}
+.prompt.fit{display:flex;flex-direction:column;min-height:0}
+.prompt.fit>*{flex:none}
+.prompt.fit pre{flex:0 1 auto;min-height:64px}
+.prompt pre.full{max-height:40vh}
+.prompt .cut-note{font-size:13.5px}
 .prompt .hook-note{color:var(--muted);margin:-4px 0 10px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .prompt pre{margin:0 0 10px;padding:9px 11px;background:var(--bg2);border-radius:10px;font:12.5px/1.4 ui-monospace,Menlo,monospace;color:var(--strong);white-space:pre-wrap;word-break:break-all;max-height:30vh;overflow:auto;user-select:text;-webkit-user-select:text}
 .tag{font-size:11px;border-radius:6px;padding:1px 7px;border:1px solid var(--lal);color:var(--lal-t)}
