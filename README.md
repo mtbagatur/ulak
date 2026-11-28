@@ -33,6 +33,7 @@ Ulak carries one thing between you and your agents: the answer. It is a small we
 - **Commands that leave a mark need two seals.** `rm`, `git push`, `ssh`, `terraform apply`, `kubectl delete`, cloud CLIs and your own patterns show the full command and need a second confirmation that expires in two minutes. A Claude command whose beginning has left the screen can only be denied; for Codex and agy Ulak cannot tell, as [SECURITY.md](SECURITY.md) explains.
 - **The record is on your phone.** Each decision, each refused answer and each timeout is logged on your machine with who, what and when, and you read it where you answered: the ledger icon.
 - **Your yes is bound to what you read.** Every approval carries a fingerprint of the prompt on your screen. If the agent is asking something else by the time your tap arrives, the server answers 409, shows you the new question, and approves nothing.
+- **What you cannot see is written out.** Zero-width and direction-reversing characters in a command are named where they stand (`⟨U+200B⟩`). Such a command has no approve button in the list and cannot be allowed for the whole session.
 - **You see the answer arrive.** A line above the composer follows it: sent, on its way, agent received it. If the prompt never leaves the agent's screen, Ulak says so instead of assuming.
 
 None of this is a claim to be the only one. Other tools guard approvals in their own ways; the table below repeats only what their READMEs say.
@@ -57,7 +58,7 @@ Read from each project's README on 27 November 2026, not from their code: "not d
 - **Pick HerdrChat** when you want a native app, a real terminal, subagent and workflow transcripts, an iPad layout, or several computers in one list.
 - **Pick ColliePWA** when you use tmux or zellij instead of Herdr, or want built-in voice input, themes and its durable-agent tools.
 - **Pick Ovis** when your phone cannot join a tailnet, or you want one app across desktop, phone and browser.
-- **Pick Ulak** when you want the phone to be able to answer and little else, every yes tied to the question you read, and code short enough to read before you trust it: about 4,800 lines of Python, JavaScript and CSS and four runtime dependencies.
+- **Pick Ulak** when you want the phone to be able to answer and little else, every yes tied to the question you read, and code short enough to read before you trust it: about 5,000 lines of Python, JavaScript and CSS and four runtime dependencies.
 
 What Ulak does not do: no terminal, one computer, one person, Herdr only. Conversations are fullest for Claude Code, where the transcript is read directly; other agents are read from the screen.
 

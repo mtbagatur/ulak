@@ -63,3 +63,13 @@ def test_the_security_page_describes_the_checks_the_code_makes():
     assert "characters that cannot be seen" in APP and '"always allow" is refused by the server' in page
     for word in ("JPEG", "HEIC", "rotation"):
         assert word in page
+
+
+def test_the_site_and_the_readme_say_the_same_day_and_the_readme_counts_the_code():
+    day = re.search(r"README on (\d+) November 2026", README)[1]
+    assert f"on {day} November 2026" in (ROOT / "site/index.html").read_text()
+    assert f"{day} Kasım 2026" in (ROOT / "site/tr/index.html").read_text()
+    files = ["app.py", "core.py", "chat.py", "herdr_client.py", *(f"web/{p.name}" for p in (ROOT / "web").iterdir() if p.suffix in (".js", ".css", ".html"))]
+    lines = sum(len((ROOT / f).read_text().splitlines()) for f in files)
+    said = int(re.search(r"about ([\d,]+) lines", README)[1].replace(",", ""))
+    assert abs(lines - said) <= 250, f"the README says about {said} lines, the code has {lines}"
