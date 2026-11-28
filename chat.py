@@ -513,32 +513,43 @@ def claude_meters(path, tail_bytes=700_000):
 
 
 def open_calls(path, tail_bytes=2_000_000):
-    """The tool calls on the main chain that the end of a transcript shows no answer to, oldest first. Only Bash has a `command`."""
-    calls = {}
+    """The tool calls on the main chain that the end of a transcript shows no answer to, oldest first, and a subagent sent to the
+    background until the notice that it stopped. Only Bash has a `command`; `last` says the call is in the last thing the assistant wrote."""
+    calls, message, turn, newest = {}, None, 0, None
     with Path(path).open("rb") as f:
         size = f.seek(0, 2)
         lines = list(_whole_lines(f, max(0, size - tail_bytes), size))
     for _, line in lines:
-        if "tool_use" not in line:  # a result names its call as tool_use_id
-            continue
+        if "<task-notification" in line:
+            for use_id, _status in NOTICE_RE.findall(line):
+                calls.pop(use_id, None)
         try:
             d = json.loads(line)
         except ValueError:
             continue
-        if not isinstance(d, dict) or d.get("isSidechain") or not isinstance(d.get("message"), dict):
+        if not isinstance(d, dict) or d.get("isSidechain") or not isinstance(d.get("message"), dict) or d.get("type") not in ("user", "assistant"):
             continue
         content = d["message"].get("content")
+        if d["type"] == "assistant":
+            # One message is written as several lines that share an id. A record without ids: the lines up to the next thing said to it.
+            named = d["message"].get("id")
+            message = newest = named if isinstance(named, str) and named else ("", turn)
+        else:
+            turn += 1
         for block in content if isinstance(content, list) else []:
             if not isinstance(block, dict):
                 continue
-            if block.get("type") == "tool_use" and d.get("type") == "assistant":
+            if block.get("type") == "tool_use" and d["type"] == "assistant":
                 inp = block.get("input") if isinstance(block.get("input"), dict) else {}
                 text = lambda key: inp[key] if isinstance(inp.get(key), str) else ""
                 calls[block.get("id")] = {"tool": str(block.get("name") or ""), "command": text("command") if block.get("name") == "Bash" else "",
-                                          "description": text("description")}
+                                          "description": text("description"), "message": message}
             elif block.get("type") == "tool_result":
-                calls.pop(block.get("tool_use_id"), None)
-    return list(calls.values())
+                launch = d.get("toolUseResult")
+                out = isinstance(launch, dict) and launch.get("status") == "async_launched"
+                if not (out and calls.get(block.get("tool_use_id"), {}).get("tool") in SUBAGENT_TOOLS):
+                    calls.pop(block.get("tool_use_id"), None)
+    return [{"tool": c["tool"], "command": c["command"], "description": c["description"], "last": c["message"] == newest} for c in calls.values()]
 
 
 def _count(value):

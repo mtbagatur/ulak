@@ -186,9 +186,12 @@ def full_candidates(shown, calls):
 
 
 def full_command(shown, calls):
-    """The whole command of the one open Bash call that holds every character shown on screen, in order; None when nothing or more than one does."""
+    """The whole command of an open Bash call that holds every character shown on screen, in order, when it is the only call of any kind
+    still open and sits in the last thing the assistant wrote; None otherwise. With a second call open, or a subagent out, the screen may
+    be asking about a command the record does not show here."""
     found = full_candidates(shown, calls)
-    pinned = len(found) == 1 and len(squash(shown)) >= FULL_MIN_SHOWN and len(found[0]) <= FULL_MAX
+    alone = len(calls) == 1 and len(found) == 1 and calls[0].get("last") is True
+    pinned = alone and len(squash(shown)) >= FULL_MIN_SHOWN and len(found[0]) <= FULL_MAX
     return found[0] if pinned else None
 
 

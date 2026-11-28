@@ -80,12 +80,13 @@ def test_the_security_page_gives_the_long_command_rule_with_the_numbers_the_code
     page = (ROOT / "SECURITY.md").read_text()
     rule = next(p for p in page.split("\n\n") if p.startswith("**A command that is not all there"))
     assert f"at least {core.FULL_MIN_SHOWN} characters" in rule and f"{core.FULL_MAX // 1024} KB" in rule
-    for said in ("session record", "exactly one", "built again", '"always allow" is refused', "can only be denied", "not on the card"):
+    for said in ("session record", "only call still open", "last thing Claude wrote", "no subagent is out", "built again", '"always allow" is refused', "can only be denied", "not on the card"):
         assert said in rule, said
     shown = "x" * core.FULL_MIN_SHOWN
-    call = lambda command: {"tool": "Bash", "command": command}
+    call = lambda command, last=True: {"tool": "Bash", "command": command, "last": last}
     assert core.full_command(shown, [call(shown + " tail")]) and not core.full_command(shown[1:], [call(shown + " tail")])
-    assert not core.full_command(shown, [call(shown + " a"), call(shown + " b")]) and not core.full_command(shown, [call(shown + "y" * core.FULL_MAX)])
+    assert not core.full_command(shown, [call(shown + " a"), call("another")]) and not core.full_command(shown, [call(shown + "y" * core.FULL_MAX)])
+    assert not core.full_command(shown, [call(shown + " tail", last=False)]) and not core.full_command(shown, [call(shown + " tail"), {"tool": "Agent", "command": "", "last": True}])
 
 
 def test_the_security_page_gives_the_limits_of_a_choice_on_the_card():
